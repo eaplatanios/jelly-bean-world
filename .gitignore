@@ -1,0 +1,9 @@
+**/.DS_Store
+
+temp/
+
+# IntelliJ Specific
+**/.idea/**/*
+
+# VS Code Specific
+**/.vscode/**/*
