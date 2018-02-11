@@ -2,21 +2,42 @@
 #define NEL_MAP_H_
 
 #include <core/map.h>
-#include <core/random.h>
-#include <math/log.h>
 #include "gibbs_field.h"
 
 using namespace core;
 
 namespace nel {
 
+struct item_position {
+	unsigned int item_type;
+	position location;
+};
+
 template<unsigned int n, unsigned int ItemTypeCount>
-class patch {
+struct patch
+{
+	/**
+	 * For each type of item, we keep an array of the position of each item
+	 * instance in this patch, in world coordinates.
+	 */
 	array<position> item_positions[ItemTypeCount];
 
-	/* indicates if this patch is fixed, or if it can
-	   be resampled (for example, if it's on the edge) */
+	/**
+	 * Indicates if this patch is fixed, or if it can be resampled (for
+	 * example, if it's on the edge)
+	 */
 	bool fixed;
+
+	static inline void move(const patch<n, ItemTypeCount>& src, patch<n, ItemTypeCount>& dst) {
+		for (unsigned int i = 0; i < ItemTypeCount; i++)
+			core::move(src.item_positions[i], dst.item_positions[i]);
+		dst.fixed = src.fixed;
+	}
+
+	static inline void free(patch<n, ItemTypeCount>& p) {
+		for (unsigned int i = 0; i < ItemTypeCount; i++)
+			core::free(p.item_positions[i]);
+	}
 };
 
 template<unsigned int n, unsigned int ItemTypeCount>
@@ -31,62 +52,56 @@ inline bool init(patch<n, ItemTypeCount>& new_patch) {
 	return true;
 }
 
-template<unsigned int n, unsigned int ItemTypeCount>
-inline void free(patch<n, ItemTypeCount>& p) {
-	for (unsigned int i = 0; i < ItemTypeCount; i++)
-		free(p.item_positions[i]);
+void* alloc_position_keys(size_t n, size_t element_size) {
+	position* keys = (position*) malloc(sizeof(position) * n);
+	if (keys == NULL) return NULL;
+	for (unsigned int i = 0; i < n; i++)
+		position::set_empty(keys[i]);
+	return (void*) keys;
 }
 
-template<unsigned int n, unsigned int ItemTypeCount,
-	typename IntensityFunction, typename InteractionFunction>
+template<unsigned int n, unsigned int ItemTypeCount>
 struct map {
-	hash_map<unsigned int, hash_map<unsigned int, patch<n, ItemTypeCount>>> patches;
+	hash_map<position, patch<n, ItemTypeCount>> patches;
+
+	unsigned int sample_count;
+	intensity_function intensity;
+	interaction_function interaction;
 
 	static constexpr unsigned int patch_size = n;
 	static constexpr unsigned int item_type_count = ItemTypeCount;
 
 	typedef patch<n, ItemTypeCount> patch_type;
-	typedef map<n, ItemTypeCount, IntensityFunction, InteractionFunction> map_type;
+	typedef map<n, ItemTypeCount> map_type;
 
 public:
-	map() : patches(1024) { }
+	map(unsigned int sample_count, intensity_function intensity, interaction_function interaction) :
+			patches(1024, alloc_position_keys), sample_count(sample_count), intensity(intensity), interaction(interaction) { }
 
-	inline position world_to_patch_position(const position& world_position) const {
-		return {world_position.x / n, world_position.y / n};
+	~map() {
+		for (auto entry : patches)
+			core::free(entry.value);
 	}
 
 	inline patch<n, ItemTypeCount>* get_patch_if_exists(const position& patch_position)
 	{
 		bool contains; unsigned int bucket;
-		patches.check_size();
-		const auto& column = patches.get(patch_position.x, contains, bucket);
-		if (!contains) return false;
-
-		column.check_size();
-		patch<n, ItemTypeCount>& p = column.get(patch_position.y, contains, bucket);
-		if (!contains) return false;
-		return &p;
+		patches.check_size(alloc_position_keys);
+		patch<n, ItemTypeCount>& p = patches.get(patch_position, contains, bucket);
+		if (!contains) return NULL;
+		else return &p;
 	}
 
 	inline patch<n, ItemTypeCount>& get_or_make_patch(const position& patch_position)
 	{
 		bool contains; unsigned int bucket;
-		patches.check_size();
-		const auto& column = patches.get(patch_position.x, contains, bucket);
-		if (!contains) {
-			/* add a new column */
-			hash_map_init(column, 16);
-			patches.table.keys[bucket] = patch_position.x;
-			patches.table.size++;
-		}
-
-		column.check_size();
-		patch<n, ItemTypeCount>& p = column.get(patch_position.y, contains, bucket);
+		patches.check_size(alloc_position_keys);
+		patch<n, ItemTypeCount>& p = patches.get(patch_position, contains, bucket);
 		if (!contains) {
 			/* add a new patch */
 			init(p);
-			column.table.keys[bucket] = patch_position.y;
-			column.table.size++;
+			patches.table.keys[bucket] = patch_position;
+			patches.table.size++;
 		}
 		return p;
 	}
@@ -102,12 +117,12 @@ public:
 			patch<n, ItemTypeCount>* neighborhood[4],
 			position patch_positions[4])
 	{
-		get_neighborhood_positions(world_position, neighborhood, patch_positions);
+		get_neighborhood_positions(world_position, patch_positions);
 
 		for (unsigned int i = 0; i < 4; i++)
-			patches[i] = get_or_make_patch(patch_positions[i]);
+			neighborhood[i] = &get_or_make_patch(patch_positions[i]);
 
-		fix_patches(patch_positions);
+		fix_patches(neighborhood, patch_positions, 4);
 	}
 
 	/**
@@ -122,49 +137,118 @@ public:
 			position patch_positions[4],
 			unsigned int& patch_index)
 	{
-		patch_index = get_neighborhood_positions(world_position, neighborhood, patch_positions);
+		patch_index = get_neighborhood_positions(world_position, patch_positions);
 
 		unsigned int index = 0;
 		for (unsigned int i = 0; i < 4; i++) {
-			patches[index] = get_patch_if_exists(patch_positions[i]);
-			if (patches[index] != NULL) index++;
+			neighborhood[index] = get_patch_if_exists(patch_positions[i]);
+			if (neighborhood[index] != NULL) {
+				if (patch_index == i) patch_index = index;
+				index++;
+			}
 		}
 
 		return index;
 	}
 
+	void get_items(
+			position bottom_left_corner,
+			position top_right_corner,
+			array<item_position>& items)
+	{
+		position bottom_left_patch_position, top_right_patch_position;
+		world_to_patch_coordinates(bottom_left_corner, bottom_left_patch_position);
+		world_to_patch_coordinates(top_right_corner, top_right_patch_position);
+
+		array<patch<n, ItemTypeCount>*> patches(32);
+		array<position> patch_positions(32);
+		for (int64_t x = bottom_left_patch_position.x; x <= top_right_patch_position.x; x++) {
+			for (int64_t y = bottom_left_patch_position.y; y <= top_right_patch_position.y; y++) {
+				patch<n, ItemTypeCount>* p = get_patch_if_exists({x, y});
+				if (p == NULL) continue;
+
+				for (unsigned int i = 0; i < ItemTypeCount; i++)
+					for (position item_position : p->item_positions[i])
+						if (item_position.x >= bottom_left_corner.x && item_position.x <= top_right_corner.x
+						 && item_position.y >= bottom_left_corner.y && item_position.y <= top_right_corner.y)
+							items.add({i, item_position});
+			}
+		}
+	}
+
+	inline void world_to_patch_coordinates(
+			position world_position,
+			position& patch_position)
+	{
+		int64_t x_quotient = floored_div(world_position.x, n);
+		int64_t y_quotient = floored_div(world_position.y, n);
+		patch_position = {x_quotient, y_quotient};
+	}
+
+	inline void world_to_patch_coordinates(
+			position world_position,
+			position& patch_position,
+			position& position_within_patch)
+	{
+		lldiv_t x_quotient = floored_div_with_remainder(world_position.x, n);
+		lldiv_t y_quotient = floored_div_with_remainder(world_position.y, n);
+		patch_position = {x_quotient.quot, y_quotient.quot};
+		position_within_patch = {x_quotient.rem, y_quotient.rem};
+	}
+
 private:
+	inline int64_t floored_div(int64_t a, unsigned int b) {
+		lldiv_t result = lldiv(a, b);
+		if (a < 0 && result.rem != 0)
+			result.quot--;
+		return result.quot;
+	}
+
+	inline lldiv_t floored_div_with_remainder(int64_t a, unsigned int b) {
+		lldiv_t result = lldiv(a, b);
+		if (a < 0 && result.rem != 0) {
+			result.quot--;
+			result.rem += b;
+		}
+		return result;
+	}
+
+	/**
+	 * Retrieves the positions of four patches that contain the bounding box of
+	 * size n centered at `world_position`. The positions are stored in
+	 * `patch_positions` in row-major order, and the function returns the index
+	 * of the patch containing `world_position`.
+	 */
 	unsigned int get_neighborhood_positions(
 			position world_position,
-			patch<n, ItemTypeCount>* neighborhood[4],
 			position patch_positions[4])
 	{
-		position patch_position = {world_position.x / n, world_position.y / n};
-		position relative_position = {world_position.x % n, world_position.y % n};
+		position patch_position, position_within_patch;
+		world_to_patch_coordinates(world_position, patch_position, position_within_patch);
 
 		/* determine the quadrant of our current location in current_patch */
 		unsigned int patch_index;
-		if (relative_position.x < (n / 2)) {
+		if (position_within_patch.x < (n / 2)) {
 			/* we are in the left half of this patch */
-			if (relative_position.y < (n / 2)) {
+			if (position_within_patch.y < (n / 2)) {
 				/* we are in the bottom-left quadrant */
 				patch_positions[0] = patch_position.left();
 				patch_index = 1;
 			} else {
 				/* we are in the top-left quadrant */
 				patch_positions[0] = patch_position.left().up();
-				patch_index = 2;
+				patch_index = 3;
 			}
 		} else {
 			/* we are in the right half of this patch */
-			if (relative_position.y < (n / 2)) {
+			if (position_within_patch.y < (n / 2)) {
 				/* we are in the bottom-right quadrant */
 				patch_positions[0] = patch_position;
 				patch_index = 0;
 			} else {
 				/* we are in the top-right quadrant */
 				patch_positions[0] = patch_position.up();
-				patch_index = 3;
+				patch_index = 2;
 			}
 		}
 
@@ -179,14 +263,14 @@ private:
 	 * modified in the future by further sampling. New neighboring patches are
 	 * created as needed, and sampling is done accordingly.
 	 */
-	template<size_t N>
 	void fix_patches(
-			patch<n, ItemTypeCount> (&patches)[N],
-			const position (&patch_positions)[N])
+			patch<n, ItemTypeCount>** patches,
+			const position* patch_positions,
+			unsigned int patch_count)
 	{
-		array<position> positions_to_sample(N * 9);
-		for (unsigned int i = 0; i < N; i++) {
-			if (patches[i].fixed) continue;
+		array<position> positions_to_sample(36);
+		for (unsigned int i = 0; i < patch_count; i++) {
+			if (patches[i]->fixed) continue;
 			positions_to_sample.add(patch_positions[i].up().left());
 			positions_to_sample.add(patch_positions[i].up());
 			positions_to_sample.add(patch_positions[i].up().right());
@@ -208,15 +292,16 @@ private:
 		}
 
 		/* construct the Gibbs field and sample the patches at positions_to_sample */
-		gibbs_field<map_type, IntensityFunction, InteractionFunction> field(
-			*this, positions_to_sample.data, positions_to_sample.length);
-		/* TODO: do the actual sampling */
+		gibbs_field<map_type> field(*this,
+				positions_to_sample.data, positions_to_sample.length, intensity, interaction);
+		for (unsigned int i = 0; i < sample_count; i++)
+			field.sample();
 
-		for (unsigned int i = 0; i < N; i++)
-			patches[i].fixed = true;
+		for (unsigned int i = 0; i < patch_count; i++)
+			patches[i]->fixed = true;
 	}
 };
 
-}; /* namespace nel */
+} /* namespace nel */
 
 #endif /* NEL_MAP_H_ */
