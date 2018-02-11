@@ -1,3 +1,9 @@
+#ifndef NEL_GIBBS_FIELD_H_
+#define NEL_GIBBS_FIELD_H_
+
+#include "position.h"
+
+namespace nel {
 
 template<typename Map, typename IntensityFunction, typename InteractionFunction>
 class gibbs_field
@@ -28,3 +34,7 @@ private:
 				sample_cell<IntensityFunction, InteractionFunction>(map, patch_position, {x, y});
 	}
 };
+
+} /* namespace nel */
+
+#endif /* NEL_GIBBS_FIELD_H_ */

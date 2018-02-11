@@ -1,53 +1,14 @@
-#include "core/map.h"
-#include "core/random.h"
-#include "math/log.h"
-#include "ml/gibbs_field.h"
+#ifndef NEL_MAP_H_
+#define NEL_MAP_H_
+
+#include <core/map.h>
+#include <core/random.h>
+#include <math/log.h>
+#include "gibbs_field.h"
 
 using namespace core;
 
-namespace map {
-
-struct position {
-	int64_t x;
-	int64_t y;
-
-	position(int64_t x, int64_t y) : x(x), y(y) { }
-
-	inline position up() const {
-		return {x, y + 1};
-	}
-
-	inline position down() const {
-		return {x, y - 1};
-	}
-
-	inline position left() const {
-		return {x - 1, y};
-	}
-
-	inline position right() const {
-		return {x + 1, y};
-	}
-
-	inline position operator * (unsigned int k) const {
-		return {x * k, y * k};
-	}
-
-	inline position operator + (const position& p) const {
-		return {x + p.x, y + p.y};
-	}
-
-	inline position operator - (const position& p) const {
-		return {x - p.x, y - p.y};
-	}
-
-	inline bool operator < (const position& p) const {
-		if (x < p.x) return true;
-		else if (x > p.x) return false;
-		else if (y < p.y) return true;
-		else return false;
-	}
-};
+namespace nel {
 
 template<unsigned int n, unsigned int ItemTypeCount>
 class patch {
@@ -56,8 +17,6 @@ class patch {
 	/* indicates if this patch is fixed, or if it can
 	   be resampled (for example, if it's on the edge) */
 	bool fixed;
-
-public:
 };
 
 template<unsigned int n, unsigned int ItemTypeCount>
@@ -310,4 +269,6 @@ inline void sample_cell(
 	}
 }
 
-}; /* namespace map */
+}; /* namespace nel */
+
+#endif /* NEL_MAP_H_ */
