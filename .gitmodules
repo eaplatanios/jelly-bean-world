@@ -1,3 +1,6 @@
 [submodule "core"]
 	path = core
 	url = git@github.com:asaparov/core.git
+[submodule "math"]
+	path = math
+	url = git@github.com:asaparov/math.git
