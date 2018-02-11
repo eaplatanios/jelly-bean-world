@@ -2,8 +2,12 @@
 
 temp/
 
-# IntelliJ Specific
+# IntelliJ
 **/.idea/**/*
 
-# VS Code Specific
+# VS Code
 **/.vscode/**/*
+
+# Python API
+**/build/**/*
+**/__pycache__/**/*

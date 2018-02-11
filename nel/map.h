@@ -43,6 +43,7 @@ struct map {
 	hash_map<unsigned int, hash_map<unsigned int, patch<n, ItemTypeCount>>> patches;
 
 	static constexpr unsigned int patch_size = n;
+	static constexpr unsigned int item_type_count = ItemTypeCount;
 
 	typedef patch<n, ItemTypeCount> patch_type;
 	typedef map<n, ItemTypeCount, IntensityFunction, InteractionFunction> map_type;
@@ -59,7 +60,7 @@ public:
 		bool contains; unsigned int bucket;
 		patches.check_size();
 		const auto& column = patches.get(patch_position.x, contains, bucket);
-		if (!exists) return false;
+		if (!contains) return false;
 
 		column.check_size();
 		patch<n, ItemTypeCount>& p = column.get(patch_position.y, contains, bucket);
@@ -69,7 +70,7 @@ public:
 
 	inline patch<n, ItemTypeCount>& get_or_make_patch(const position& patch_position)
 	{
-		bool contains, unsigned int bucket;
+		bool contains; unsigned int bucket;
 		patches.check_size();
 		const auto& column = patches.get(patch_position.x, contains, bucket);
 		if (!contains) {
@@ -195,8 +196,8 @@ private:
 			positions_to_sample.add(patch_positions[i].down().left());
 			positions_to_sample.add(patch_positions[i].down());
 			positions_to_sample.add(patch_positions[i].down().right());
-			insertion_sort(to_sample);
-			unique(to_sample);
+			insertion_sort(positions_to_sample);
+			unique(positions_to_sample);
 		}
 
 		for (unsigned int i = 0; i < positions_to_sample.length; i++) {
@@ -215,59 +216,6 @@ private:
 			patches[i].fixed = true;
 	}
 };
-
-template<unsigned int n, unsigned int ItemTypeCount,
-	typename IntensityFunction, typename InteractionFunction>
-inline void sample_cell(
-		map<n, ItemTypeCount>& m,
-		const position& patch_position,
-		const position& position_within_patch)
-{
-	patch<n, ItemTypeCount>* neighborhood[4];
-	position neighbor_positions[4];
-	position world_position = patch_position * n + position_within_patch;
-
-	unsigned int patch_index;
-	unsigned int neighbor_count = m.get_neighborhood(world_position, neigborhood, neighbor_positions, patch_index);
-
-	double log_probabilities[ItemTypeCount + 1];
-	unsigned int old_item_type = ItemTypeCount;
-	for (unsigned int i = 0; i < ItemTypeCount; i++) {
-		/* compute the energy contribution of this cell when the item type is `i` */
-		log_probabilities[i] = IntensityFunction(world_position, i);
-		for (unsigned int j = 0; j < neighbor_count; j++) {
-			for (unsigned int k = 0; k < ItemTypeCount; k++) {
-				for (position item_position : neighborhood[j]->item_positions[k]) {
-					if (item_position == world_position) {
-						old_item_type = k; continue; /* ignore the current position */
-					}
-
-					log_probabilities[i] += InteractionFunction(world_position, item_position, i, k);
-				}
-			}
-		}
-	}
-
-	log_probabilities[ItemTypeCount] = 0.0;
-	normalize_exp(log_probabilities, ItemTypeCount);
-	unsigned int sampled_item_type = sample_categorical(log_probabilities, ItemTypeCount);
-
-	patch<n, ItemTypeCount>& current_patch = *neighborhood[patch_index];
-	if (old_item_type == sampled_item_type) {
-		/* the Gibbs step didn't change anything */
-		return;
-	} if (old_item_type < ItemTypeCount) {
-		/* find and remove the old item position */
-		for (unsigned int i = 0; i < current_patch.item_positions[old_item_type].length; i++) {
-			if (current_patch.item_positions[old_item_type][i] == world_position) {
-				current_patch.item_positions[old_item_type].remove(i);
-				break;
-			}
-		}
-	} if (sampled_item_type < ItemTypeCount) {
-		current_patch.item_positions[sampled_item_type].add(world_position);
-	}
-}
 
 }; /* namespace nel */
 

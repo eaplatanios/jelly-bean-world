@@ -9,6 +9,8 @@ struct position {
 	int64_t x;
 	int64_t y;
 
+	position() { }
+
 	position(int64_t x, int64_t y) : x(x), y(y) { }
 
 	inline position up() const {
@@ -37,6 +39,10 @@ struct position {
 
 	inline position operator - (const position& p) const {
 		return {x - p.x, y - p.y};
+	}
+
+	inline bool operator == (const position& p) const {
+		return x == p.x && y == p.y;
 	}
 
 	inline bool operator < (const position& p) const {

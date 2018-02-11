@@ -1,19 +1,19 @@
-#include "../core/array.h"
-#include "../map.h"
+#include <core/array.h>
+#include "map.h"
 
 using namespace core;
-using namespace map;
+using namespace nel;
 
 struct agent_state {
     position current_position;
 };
 
-struct cell_state {
-    float scent[SCENT_DIMENSION];
-    float color[3];
-};
+// struct cell_state {
+//     float scent[SCENT_DIMENSION];
+//     float color[3];
+// };
 
-enum class direction { up = 0, down = 1, left = 2, right = 3 };
+enum class direction { UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3 };
 
 class simulator {
     array<agent_state> agents;
@@ -25,7 +25,7 @@ public:
     unsigned int time;
     
     inline unsigned int add_agent() {
-        unsigned int id = array.length;
+        unsigned int id = agents.length;
         agents.add({{0, 0}});
         return id;
     }
@@ -33,16 +33,16 @@ public:
     inline void step(unsigned int agent_id, direction direction, int num_steps) {
         position current_position = agents[agent_id].current_position;
         switch (direction) {
-            case up   : current_position.y += num_steps; break;
-            case down : current_position.y -= num_steps; break;
-            case left : current_position.x -= num_steps; break;
-            case right: current_position.x += num_steps; break;
+            case direction::UP   : current_position.y += num_steps; break;
+            case direction::DOWN : current_position.y -= num_steps; break;
+            case direction::LEFT : current_position.x -= num_steps; break;
+            case direction::RIGHT: current_position.x += num_steps; break;
         }
         // TODO: Update the agent's state (i.e., position, items, etc.).
         // TODO: Block until all agents have invoked "step".
     }
 
-    inline position position(unsigned int agent_id) {
+    inline position get_position(unsigned int agent_id) {
         return agents[agent_id].current_position;
     }
 };
