@@ -47,16 +47,13 @@ static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
     if (!PyArg_ParseTuple(args, "o", &py_sim_handle))
         return NULL;
     simulator* sim_handle = (simulator*) PyLong_AsVoidPtr(py_sim_handle);
-    int id = sim_handle->add_agent();
-    return Py_BuildValue("i", id);
+    unsigned int id = sim_handle->add_agent();
+    return Py_BuildValue("I", id);
 }
 
 /** 
- * Moves the agent in the simulation environment and advances the simulator 
- * by one step.
- * 
- * Note that this function call blocks until all the agents in the current 
- * simulation environment invoke "step".
+ * Attempt to move the agent in the simulation environment. If the agent
+ * already has an action queued for this turn, this attempt will fail.
  * 
  * \param   self    Pointer to the Python object calling this method.
  * \param   args    Arguments:
@@ -68,9 +65,9 @@ static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
  *                      LEFT = 2,
  *                      RIGHT = 3.
  *                  - Number of steps.
- * \returns None.
+ * \returns `true` if the move command is successfully queued; `false` otherwise.
  */
-static PyObject* simulator_step(PyObject *self, PyObject *args) {
+static PyObject* simulator_move(PyObject *self, PyObject *args) {
     PyObject* py_sim_handle;
     int* agent_id;
     int* dir;
@@ -78,9 +75,8 @@ static PyObject* simulator_step(PyObject *self, PyObject *args) {
     if (!PyArg_ParseTuple(args, "oIii", &py_sim_handle, &agent_id, &dir, &num_steps))
         return NULL;
     simulator* sim_handle = (simulator*) PyLong_AsVoidPtr(py_sim_handle);
-    sim_handle->step(*agent_id, static_cast<direction>(*dir), *num_steps);
-    Py_INCREF(Py_None);
-    return Py_None;
+    bool success = sim_handle->move(*agent_id, static_cast<direction>(*dir), *num_steps);
+    return Py_BuildValue("O", success ? Py_True : Py_False);
 }
 
 /** 
@@ -107,7 +103,7 @@ static PyMethodDef SimulatorMethods[] = {
     {"new",  simulator_new, METH_VARARGS, "Creates a new simulator and returns its pointer."},
     {"delete",  simulator_delete, METH_VARARGS, "Deletes an existing simulator."},
     {"add_agent",  simulator_add_agent, METH_VARARGS, "Adds an agent to the simulator and returns its ID."},
-    {"step",  simulator_step, METH_VARARGS, "Moves the agent in the simulation environment and advances the simulator by one step."},
+    {"move",  simulator_move, METH_VARARGS, "Attempts to move the agent in the simulation environment."},
     {"position",  simulator_position, METH_VARARGS, "Gets the current position of an agent in the simulation environment."},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };

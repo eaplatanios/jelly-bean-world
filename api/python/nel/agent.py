@@ -10,4 +10,4 @@ class Agent(object):
     self._id = simulator._add_agent()
   
   def move(self, direction, num_steps=1):
-    self._simulator._step(self._id, direction, num_steps)
+    self._simulator._move(self._id, direction, num_steps)

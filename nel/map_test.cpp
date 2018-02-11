@@ -21,13 +21,13 @@ float interaction(
 	if (squared_length < 40)
 		return 0.0;
 	else if (squared_length < 200)
-		return -20.0;
+		return -40.0;
 	else return 0.0;
 }
 
 int main(int argc, const char** argv) {
 	static constexpr int n = 32;
-	auto m = map<n, 1>(10, intensity, interaction);
+	auto m = map<n, 1, 10>(intensity, interaction);
 
 	patch<n, 1>* neighborhood[4];
 	position neighbor_positions[4];

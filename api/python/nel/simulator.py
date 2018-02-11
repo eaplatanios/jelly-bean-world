@@ -41,6 +41,6 @@ class Simulator(object):
     """
     return simulator_c.add_agent(self._handle)
 
-  def _step(self, agent_id, direction, num_steps):
+  def _move(self, agent_id, direction, num_steps):
     """"""
-    simulator_c.step(self._handle, agent_id, direction, num_steps)
+    simulator_c.move(self._handle, agent_id, direction, num_steps)

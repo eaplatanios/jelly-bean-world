@@ -16,6 +16,7 @@ that you are located in the root directory of this
 repository, run the following commands:
 
 ```bash
+git submodule update --init --recursive
 cd api/python
 python setup.py install
 ```

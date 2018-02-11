@@ -39,7 +39,8 @@ struct position {
 		return {x + 1, y};
 	}
 
-	inline position operator * (unsigned int k) const {
+	template<typename V, typename std::enable_if<std::is_arithmetic<V>::value>::type* = nullptr>
+	inline position operator * (V k) const {
 		return {x * k, y * k};
 	}
 

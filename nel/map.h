@@ -60,11 +60,10 @@ void* alloc_position_keys(size_t n, size_t element_size) {
 	return (void*) keys;
 }
 
-template<unsigned int n, unsigned int ItemTypeCount>
+template<unsigned int n, unsigned int ItemTypeCount, unsigned int GibbsIterations>
 struct map {
 	hash_map<position, patch<n, ItemTypeCount>> patches;
 
-	unsigned int sample_count;
 	intensity_function intensity;
 	interaction_function interaction;
 
@@ -72,11 +71,11 @@ struct map {
 	static constexpr unsigned int item_type_count = ItemTypeCount;
 
 	typedef patch<n, ItemTypeCount> patch_type;
-	typedef map<n, ItemTypeCount> map_type;
+	typedef map<n, ItemTypeCount, GibbsIterations> map_type;
 
 public:
-	map(unsigned int sample_count, intensity_function intensity, interaction_function interaction) :
-			patches(1024, alloc_position_keys), sample_count(sample_count), intensity(intensity), interaction(interaction) { }
+	map(intensity_function intensity, interaction_function interaction) :
+			patches(1024, alloc_position_keys), intensity(intensity), interaction(interaction) { }
 
 	~map() {
 		for (auto entry : patches)
@@ -294,7 +293,7 @@ private:
 		/* construct the Gibbs field and sample the patches at positions_to_sample */
 		gibbs_field<map_type> field(*this,
 				positions_to_sample.data, positions_to_sample.length, intensity, interaction);
-		for (unsigned int i = 0; i < sample_count; i++)
+		for (unsigned int i = 0; i < GibbsIterations; i++)
 			field.sample();
 
 		for (unsigned int i = 0; i < patch_count; i++)
