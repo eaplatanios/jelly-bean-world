@@ -52,7 +52,7 @@ struct agent_state {
     inline static void free(agent_state& agent) {
         core::free(agent.current_scent);
         core::free(agent.current_vision);
-        lock.~mutex();
+        agent.lock.~mutex();
     }
 };
 
@@ -114,7 +114,8 @@ class simulator {
 
 public:
     simulator(const simulator_config& config) :
-        map(config.patch_size, config.item_types.length, config.gibbs_iterations),
+        world(config.patch_size, config.item_types.length, config.gibbs_iterations, 
+            config.intensity, config.interaction),
         agents(16), acted_agent_count(0), config(config), time(0) { }
 
     /* Current simulation time step. */
@@ -132,7 +133,8 @@ public:
         agents.add(new_agent);
         agent_array_lock.unlock();
 
-        init(*new_agent, map);
+        init(*new_agent, world, config.color_dimension, 
+            config.vision_range, config.scent_dimension);
         return new_agent;
     }
 
@@ -163,7 +165,7 @@ public:
         if (++acted_agent_count == agents.length)
             step(); /* advance the simulation by one time step */
 
-        agent->lock.unlock(); return true;
+        agent.lock.unlock(); return true;
     }
 
     inline position get_position(agent_state& agent) {
@@ -176,20 +178,20 @@ public:
 private:
     /* Precondition: The mutex is locked. This function does not release the mutex. */
     inline void step() {
-        for (agent_state& agent : agents) {
-            if (!agent.agent_acted) continue;
+        for (agent_state* agent : agents) {
+            if (!agent->agent_acted) continue;
 
             /* compute agent motion */
-            position& current_position = agent.current_position;
-            switch (agent.next_move) {
-                case direction::UP   : current_position.y += agent.num_steps; break;
-                case direction::DOWN : current_position.y -= agent.num_steps; break;
-                case direction::LEFT : current_position.x -= agent.num_steps; break;
-                case direction::RIGHT: current_position.x += agent.num_steps; break;
+            position& current_position = agent->current_position;
+            switch (agent->next_move) {
+                case direction::UP   : current_position.y += agent->num_steps; break;
+                case direction::DOWN : current_position.y -= agent->num_steps; break;
+                case direction::LEFT : current_position.x -= agent->num_steps; break;
+                case direction::RIGHT: current_position.x += agent->num_steps; break;
             }
 
             /* TODO: compute new scent and vision for agent */
-            agent.agent_acted = false;
+            agent->agent_acted = false;
         }
         acted_agent_count = 0;
         time++;
