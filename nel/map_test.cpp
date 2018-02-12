@@ -27,9 +27,9 @@ float interaction(
 
 int main(int argc, const char** argv) {
 	static constexpr int n = 32;
-	auto m = map<n, 1, 10>(intensity, interaction);
+	auto m = map(n, 1, 10, intensity, interaction);
 
-	patch<n, 1>* neighborhood[4];
+	patch* neighborhood[4];
 	position neighbor_positions[4];
 	m.get_fixed_neighborhood({0, 0}, neighborhood, neighbor_positions);
 

@@ -1,4 +1,8 @@
+#ifndef NEL_SIMULATOR_H_
+#define NEL_SIMULATOR_H_
+
 #include <core/array.h>
+#include "config.h"
 #include "map.h"
 
 using namespace core;
@@ -6,70 +10,101 @@ using namespace nel;
 
 enum class direction { UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3 };
 
-constexpr unsigned int SCENT_DIMENSION = 3;
-constexpr unsigned int VISION_RANGE = 1;
-
 struct agent_state {
     /* sensor properties */
     position current_position;
-    float current_scent[SCENT_DIMENSION];
-    float current_vision[3 * (2*VISION_RANGE + 1) * (2*VISION_RANGE + 1)]; /* in row-major order */
+    float* current_scent;
+
+    /* 'pixels' are in row-major order, each pixel is a
+       contiguous chunk of D floats where D is the color dimension */
+    float* current_vision;
 
     /* effector properties */
     bool agent_acted; /* has the agent acted this turn? */
     direction next_move;
     unsigned int num_steps;
+
+    std::mutex lock;
+
+    inline static void free(agent_state& agent) {
+        core::free(agent.current_scent);
+        core::free(agent.current_vision);
+        lock.~mutex();
+    }
 };
 
-inline bool init(agent_state& new_agent) {
+inline bool init(agent_state& new_agent, map& world,
+        unsigned int color_dimension, unsigned int vision_range,
+        unsigned int scent_dimension)
+{
     new_agent.current_position = {0, 0};
-    /* TODO: compute scent and vision */
+    new_agent.current_scent = (float*) malloc(sizeof(float) * scent_dimension);
+    if (new_agent.current_scent == NULL) {
+        fprintf(stderr, "init ERROR: Insufficient memory for agent_state.current_scent.\n");
+        return false;
+    }
+    new_agent.current_vision = (float*) malloc(sizeof(float)
+        * (2*vision_range + 1) * (2*vision_range + 1) * color_dimension);
+    if (new_agent.current_vision == NULL) {
+        fprintf(stderr, "init ERROR: Insufficient memory for agent_state.current_vision.\n");
+        free(new_agent.current_scent); return false;
+    }
+
     new_agent.agent_acted = false;
+    new (&new_agent.lock) std::mutex();
+
+
     return true;
 }
 
 class simulator {
-    array<agent_state> agents;
-    unsigned int acted_agent_count;
-    std::mutex lock;
+    map world;
+    array<agent_state*> agents;
+    std::atomic<unsigned int> acted_agent_count;
+    std::mutex agent_array_lock;
+
+    simulator_config config;
 
 public:
-    simulator() : agents(2), acted_agent_count(0), time(0) { }
+    simulator(const simulator_config& config) :
+        map(config.patch_size, config.item_types.length, config.gibbs_iterations),
+        agents(16), acted_agent_count(0), config(config), time(0) { }
 
     unsigned int time;
 
-    inline unsigned int add_agent() {
-        lock.lock();
+    inline agent_state* add_agent() {
+        agent_array_lock.lock();
         agents.ensure_capacity(agents.length + 1);
+        agent_state* new_agent = (agent_state*) malloc(sizeof(agent_state));
+        agents.add(new_agent);
+        agent_array_lock.unlock();
 
-        unsigned int id = agents.length;
-        init(agents[agents.length]);
-        agents.length++;
-        lock.unlock();
-        return id;
+        init(*new_agent, map);
+        return new_agent;
     }
 
-    inline bool move(unsigned int agent_id, direction direction, unsigned int num_steps) {
-        lock.lock();
-        agent_state& agent = agents[agent_id];
+    inline bool move(agent_state& agent, direction direction, unsigned int num_steps) {
+        if (num_steps > config.max_steps_per_movement)
+            return false;
+
+        agent.lock.lock();
         if (agent.agent_acted) {
-            lock.unlock(); return false;
+            agent.lock.unlock(); return false;
         }
         agent.next_move = direction;
         agent.num_steps = num_steps;
         agent.agent_acted = true;
-        acted_agent_count++;
 
-        if (acted_agent_count == agents.length)
+        if (++acted_agent_count == agents.length)
             step(); /* advance the simulation by one time step */
 
-        lock.unlock(); return true;
+        agent->lock.unlock(); return true;
     }
 
-    inline position get_position(unsigned int agent_id) {
-        lock.lock();
-        position location = agents[agent_id].current_position;
-        lock.unlock();
+    inline position get_position(agent_state& agent) {
+        agent.lock.lock();
+        position location = agent.current_position;
+        agent.lock.unlock();
         return location;
     }
 
@@ -94,4 +129,10 @@ private:
         acted_agent_count = 0;
         time++;
     }
+
+    inline void get_scent(position world_position) {
+        /* TODO: continue here (what is the closed form steady state of the diffusion difference equation?) */
+    }
 };
+
+#endif /* NEL_SIMULATOR_H_ */

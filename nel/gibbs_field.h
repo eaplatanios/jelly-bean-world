@@ -22,16 +22,18 @@ class gibbs_field
 	intensity_function intensity;
 	interaction_function interaction;
 
-	static constexpr unsigned int n = Map::patch_size;
-	static constexpr unsigned int item_type_count = Map::item_type_count;
+	unsigned int n;
+	unsigned int item_type_count;
+
 	typedef typename Map::patch_type patch_type;
 
 public:
 	/* NOTE: `patches` and `patch_positions` are used directly, and not copied */
 	gibbs_field(Map& map, position* patch_positions, unsigned int patch_count,
+			unsigned int n, unsigned int item_type_count,
 			intensity_function intensity, interaction_function interaction) :
 		map(map), patch_positions(patch_positions), patch_count(patch_count),
-		intensity(intensity), interaction(interaction) { }
+		intensity(intensity), interaction(interaction), n(n), item_type_count(item_type_count) { }
 
 	~gibbs_field() { }
 
@@ -52,8 +54,8 @@ private:
 		unsigned int patch_index;
 		unsigned int neighbor_count = map.get_neighborhood(world_position, neighborhood, neighbor_positions, patch_index);
 
-		float log_probabilities[item_type_count + 1];
-		unsigned int old_item_index, old_item_type = item_type_count;
+		float* log_probabilities = (float*) malloc(sizeof(float) * (item_type_count + 1));
+		unsigned int old_item_index = 0, old_item_type = item_type_count;
 		for (unsigned int i = 0; i < item_type_count; i++) {
 			/* compute the energy contribution of this cell when the item type is `i` */
 			log_probabilities[i] = intensity(world_position, i);
@@ -76,6 +78,7 @@ private:
 		log_probabilities[item_type_count] = 0.0;
 		normalize_exp(log_probabilities, item_type_count + 1);
 		unsigned int sampled_item_type = sample_categorical(log_probabilities, item_type_count + 1);
+		free(log_probabilities);
 
 		patch_type& current_patch = *neighborhood[patch_index];
 		if (old_item_type == sampled_item_type) {

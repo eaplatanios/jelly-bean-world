@@ -13,14 +13,13 @@ struct item_position {
 	position location;
 };
 
-template<unsigned int n, unsigned int ItemTypeCount>
 struct patch
 {
 	/**
 	 * For each type of item, we keep an array of the position of each item
 	 * instance in this patch, in world coordinates.
 	 */
-	array<position> item_positions[ItemTypeCount];
+	array<position>* item_positions;
 
 	/**
 	 * Indicates if this patch is fixed, or if it can be resampled (for
@@ -28,25 +27,29 @@ struct patch
 	 */
 	bool fixed;
 
-	static inline void move(const patch<n, ItemTypeCount>& src, patch<n, ItemTypeCount>& dst) {
-		for (unsigned int i = 0; i < ItemTypeCount; i++)
-			core::move(src.item_positions[i], dst.item_positions[i]);
+	static inline void move(const patch& src, patch& dst) {
+		dst.item_positions = src.item_positions;
 		dst.fixed = src.fixed;
 	}
 
-	static inline void free(patch<n, ItemTypeCount>& p) {
-		for (unsigned int i = 0; i < ItemTypeCount; i++)
+	static inline void free(patch& p, unsigned int item_type_count) {
+		for (unsigned int i = 0; i < item_type_count; i++)
 			core::free(p.item_positions[i]);
+		core::free(p.item_positions);
 	}
 };
 
-template<unsigned int n, unsigned int ItemTypeCount>
-inline bool init(patch<n, ItemTypeCount>& new_patch) {
+inline bool init(patch& new_patch, unsigned int item_type_count) {
 	new_patch.fixed = false;
-	for (unsigned int i = 0; i < ItemTypeCount; i++) {
+	new_patch.item_positions = (array<position>*) malloc(sizeof(array<position>) * item_type_count);
+	if (new_patch.item_positions == NULL) {
+		fprintf(stderr, "init ERROR: Insufficient memory for patch.item_positions.\n");
+		return false;
+	}
+	for (unsigned int i = 0; i < item_type_count; i++) {
 		if (!array_init(new_patch.item_positions[i], 8)) {
 			for (unsigned int j = 0; j < i; j++) free(new_patch.item_positions[j]);
-			return false;
+			free(new_patch.item_positions); return false;
 		}
 	}
 	return true;
@@ -60,45 +63,46 @@ void* alloc_position_keys(size_t n, size_t element_size) {
 	return (void*) keys;
 }
 
-template<unsigned int n, unsigned int ItemTypeCount, unsigned int GibbsIterations>
 struct map {
-	hash_map<position, patch<n, ItemTypeCount>> patches;
+	hash_map<position, patch> patches;
 
 	intensity_function intensity;
 	interaction_function interaction;
 
-	static constexpr unsigned int patch_size = n;
-	static constexpr unsigned int item_type_count = ItemTypeCount;
+	unsigned int n;
+	unsigned int item_type_count;
+	unsigned int gibbs_iterations;
 
-	typedef patch<n, ItemTypeCount> patch_type;
-	typedef map<n, ItemTypeCount, GibbsIterations> map_type;
+	typedef patch patch_type;
 
 public:
-	map(intensity_function intensity, interaction_function interaction) :
-			patches(1024, alloc_position_keys), intensity(intensity), interaction(interaction) { }
+	map(unsigned int n, unsigned int item_type_count, unsigned int gibbs_iterations,
+			intensity_function intensity, interaction_function interaction) :
+		patches(1024, alloc_position_keys), intensity(intensity), interaction(interaction),
+		n(n), item_type_count(item_type_count), gibbs_iterations(gibbs_iterations) { }
 
 	~map() {
 		for (auto entry : patches)
-			core::free(entry.value);
+			core::free(entry.value, item_type_count);
 	}
 
-	inline patch<n, ItemTypeCount>* get_patch_if_exists(const position& patch_position)
+	inline patch* get_patch_if_exists(const position& patch_position)
 	{
 		bool contains; unsigned int bucket;
 		patches.check_size(alloc_position_keys);
-		patch<n, ItemTypeCount>& p = patches.get(patch_position, contains, bucket);
+		patch& p = patches.get(patch_position, contains, bucket);
 		if (!contains) return NULL;
 		else return &p;
 	}
 
-	inline patch<n, ItemTypeCount>& get_or_make_patch(const position& patch_position)
+	inline patch& get_or_make_patch(const position& patch_position)
 	{
 		bool contains; unsigned int bucket;
 		patches.check_size(alloc_position_keys);
-		patch<n, ItemTypeCount>& p = patches.get(patch_position, contains, bucket);
+		patch& p = patches.get(patch_position, contains, bucket);
 		if (!contains) {
 			/* add a new patch */
-			init(p);
+			init(p, item_type_count);
 			patches.table.keys[bucket] = patch_position;
 			patches.table.size++;
 		}
@@ -113,7 +117,7 @@ public:
 	 */
 	void get_fixed_neighborhood(
 			position world_position,
-			patch<n, ItemTypeCount>* neighborhood[4],
+			patch* neighborhood[4],
 			position patch_positions[4])
 	{
 		get_neighborhood_positions(world_position, patch_positions);
@@ -132,7 +136,7 @@ public:
 	 */
 	unsigned int get_neighborhood(
 			position world_position,
-			patch<n, ItemTypeCount>* neighborhood[4],
+			patch* neighborhood[4],
 			position patch_positions[4],
 			unsigned int& patch_index)
 	{
@@ -159,14 +163,14 @@ public:
 		world_to_patch_coordinates(bottom_left_corner, bottom_left_patch_position);
 		world_to_patch_coordinates(top_right_corner, top_right_patch_position);
 
-		array<patch<n, ItemTypeCount>*> patches(32);
+		array<patch*> patches(32);
 		array<position> patch_positions(32);
 		for (int64_t x = bottom_left_patch_position.x; x <= top_right_patch_position.x; x++) {
 			for (int64_t y = bottom_left_patch_position.y; y <= top_right_patch_position.y; y++) {
-				patch<n, ItemTypeCount>* p = get_patch_if_exists({x, y});
+				patch* p = get_patch_if_exists({x, y});
 				if (p == NULL) continue;
 
-				for (unsigned int i = 0; i < ItemTypeCount; i++)
+				for (unsigned int i = 0; i < item_type_count; i++)
 					for (position item_position : p->item_positions[i])
 						if (item_position.x >= bottom_left_corner.x && item_position.x <= top_right_corner.x
 						 && item_position.y >= bottom_left_corner.y && item_position.y <= top_right_corner.y)
@@ -263,7 +267,7 @@ private:
 	 * created as needed, and sampling is done accordingly.
 	 */
 	void fix_patches(
-			patch<n, ItemTypeCount>** patches,
+			patch** patches,
 			const position* patch_positions,
 			unsigned int patch_count)
 	{
@@ -291,9 +295,10 @@ private:
 		}
 
 		/* construct the Gibbs field and sample the patches at positions_to_sample */
-		gibbs_field<map_type> field(*this,
-				positions_to_sample.data, positions_to_sample.length, intensity, interaction);
-		for (unsigned int i = 0; i < GibbsIterations; i++)
+		gibbs_field<map> field(*this,
+				positions_to_sample.data, positions_to_sample.length,
+				n, item_type_count, intensity, interaction);
+		for (unsigned int i = 0; i < gibbs_iterations; i++)
 			field.sample();
 
 		for (unsigned int i = 0; i < patch_count; i++)
