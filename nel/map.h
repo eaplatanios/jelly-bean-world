@@ -4,9 +4,9 @@
 #include <core/map.h>
 #include "gibbs_field.h"
 
-using namespace core;
-
 namespace nel {
+
+using namespace core;
 
 struct item_position {
 	unsigned int item_type;

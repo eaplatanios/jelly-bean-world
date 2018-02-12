@@ -5,8 +5,9 @@
 #include "config.h"
 #include "map.h"
 
+namespace nel {
+
 using namespace core;
-using namespace nel;
 
 /** Represents all possible directions of motion in the environment. */
 enum class direction { UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3 };
@@ -121,6 +122,10 @@ public:
     /* Current simulation time step. */
     unsigned int time;
 
+    inline void start() {
+        /* TODO: Start the simulator service. */
+    }
+
     /** 
      * Adds a new agent to this simulator and returns its initial state.
      * 
@@ -203,5 +208,7 @@ private:
         /* TODO: continue here (what is the closed form steady state of the diffusion difference equation?) */
     }
 };
+
+} /* namespace nel */
 
 #endif /* NEL_SIMULATOR_H_ */

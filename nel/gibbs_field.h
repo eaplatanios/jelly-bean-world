@@ -5,9 +5,9 @@
 #include <math/log.h>
 #include "position.h"
 
-using namespace core;
-
 namespace nel {
+
+using namespace core;
 
 typedef float (*intensity_function)(const position&, unsigned int);
 typedef float (*interaction_function)(const position&, const position&, unsigned int, unsigned int);

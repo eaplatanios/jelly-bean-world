@@ -3,9 +3,9 @@
 
 #include <core/map.h>
 
-using namespace core;
-
 namespace nel {
+
+using namespace core;
 
 struct position {
 	int64_t x;

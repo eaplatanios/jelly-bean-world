@@ -4,6 +4,8 @@
 #include <core/array.h>
 #include "gibbs_field.h"
 
+namespace nel {
+
 using namespace core;
 
 struct item_properties {
@@ -81,5 +83,7 @@ struct simulator_config {
 			core::free(properties);
 	}
 };
+
+} /* namespace nel */
 
 #endif /* NEL_CONFIG_H_ */
