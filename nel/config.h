@@ -48,16 +48,16 @@ struct simulator_config {
 	/* Service configuration. */
 	unsigned int service_port;
 
-    /* agent capabilities */
-    unsigned int max_steps_per_movement;
-    unsigned int scent_dimension;
-    unsigned int color_dimension;
-    unsigned int vision_range;
+	/* agent capabilities */
+	unsigned int max_steps_per_movement;
+	unsigned int scent_dimension;
+	unsigned int color_dimension;
+	unsigned int vision_range;
 
-    /* world properties */
-    unsigned int patch_size;
+	/* world properties */
+	unsigned int patch_size;
 	unsigned int gibbs_iterations;
-    array<item_properties> item_types;
+	array<item_properties> item_types;
 
 	/* TODO: Need to make these serializable somehow (maybe by contraining them). */
 	nel::intensity_function intensity;
@@ -65,14 +65,14 @@ struct simulator_config {
 
 	simulator_config() : item_types(8) { }
 
-    simulator_config(const simulator_config& src) :
+	simulator_config(const simulator_config& src) :
 		service_port(src.service_port),
-        max_steps_per_movement(src.max_steps_per_movement),
-        scent_dimension(src.scent_dimension), color_dimension(src.color_dimension),
-        vision_range(src.vision_range), patch_size(src.patch_size),
+		max_steps_per_movement(src.max_steps_per_movement),
+		scent_dimension(src.scent_dimension), color_dimension(src.color_dimension),
+		vision_range(src.vision_range), patch_size(src.patch_size),
 		gibbs_iterations(src.gibbs_iterations), item_types(src.item_types.length), 
 		intensity(src.intensity), interaction(src.interaction)
-    {
+	{
 		for (unsigned int i = 0; i < src.item_types.length; i++)
 			init(item_types[i], src.item_types[i], scent_dimension, color_dimension);
 		item_types.length = src.item_types.length;
