@@ -9,6 +9,8 @@ namespace nel {
 
 using namespace core;
 
+typedef void (*agent_step_callback_fn)(const agent_state&);
+
 /** Represents all possible directions of motion in the environment. */
 enum class direction { UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3 };
 
@@ -92,7 +94,13 @@ inline bool init(agent_state& agent_state, map& world,
     return true;
 }
 
-/** Simulator that forms the core of our experimentation framework. */
+/**
+ * Simulator that forms the core of our experimentation framework.
+ * 
+ * \tparam  StepCallback    Callback function type for when the simulator 
+ *                          advances a time step.
+ */
+template<typename StepCallback>
 class simulator {
     /* Map of the world managed by this simulator. */
     map world;
@@ -113,16 +121,20 @@ class simulator {
     /* Configuration for this simulator. */
     simulator_config config;
 
+    /* Callback function for when the simulator advances a time step. */
+    StepCallback step_callback_fn;
+
 public:
-    simulator(const simulator_config& config) :
+    simulator(const simulator_config& config, const StepCallback step_callback) :
         world(config.patch_size, config.item_types.length, config.gibbs_iterations, 
             config.intensity, config.interaction),
-        agents(16), acted_agent_count(0), config(config), time(0) { }
+        agents(16), acted_agent_count(0), config(config), time(0), 
+        step_callback_fn(step_callback) { }
 
     /* Current simulation time step. */
     unsigned int time;
 
-    inline void start() {
+    inline void start_service() {
         /* TODO: Start the simulator service. */
     }
 
@@ -201,7 +213,10 @@ private:
         acted_agent_count = 0;
         time++;
 
-        /* TODO: Issue notification to all agents. */
+        // Invoke the step callback function for each agent.
+        for (agent_state* agent : agents) {
+            step_callback_fn(agent)
+        }
     }
 
     inline void get_scent(position world_position) {
