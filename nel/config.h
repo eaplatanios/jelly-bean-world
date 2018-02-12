@@ -45,9 +45,6 @@ inline bool init(
 }
 
 struct simulator_config {
-	/* Service configuration. */
-	unsigned int service_port;
-
 	/* agent capabilities */
 	unsigned int max_steps_per_movement;
 	unsigned int scent_dimension;
@@ -66,7 +63,6 @@ struct simulator_config {
 	simulator_config() : item_types(8) { }
 
 	simulator_config(const simulator_config& src) :
-		service_port(src.service_port),
 		max_steps_per_movement(src.max_steps_per_movement),
 		scent_dimension(src.scent_dimension), color_dimension(src.color_dimension),
 		vision_range(src.vision_range), patch_size(src.patch_size),

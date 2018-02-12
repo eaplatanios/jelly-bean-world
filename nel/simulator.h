@@ -134,7 +134,7 @@ public:
     /* Current simulation time step. */
     unsigned int time;
 
-    inline void start_service() {
+    inline void start_service(unsigned int port) {
         /* TODO: Start the simulator service. */
     }
 
