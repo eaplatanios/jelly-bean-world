@@ -7,22 +7,38 @@
 #include <stdio.h>
 #include <thread>
 #include <condition_variable>
+#include <sys/epoll.h>
+
+#include "simulator.h"
 
 #if defined(_WIN32)
 #include <winsock2.h>
+#include <wepoll.h>
 typedef SOCKET socket_type;
 typedef int socklen_t;
+typedef HANDLE epoll_type;
 #else
 #include <sys/socket.h>
 #include <netdb.h>
 typedef int socket_type;
+typedef int epoll_type;
 #endif
+
+#define EVENT_QUEUE_CAPACITY 1024
 
 inline bool valid_socket(const socket_type& sock) {
 #if defined(_WIN32)
 	return sock != INVALID_SOCKET;
 #else
 	return sock >= 0;
+#endif
+}
+
+inline bool valid_epoll(const epoll_type& instance) {
+#if defined(_WIN32)
+	return instance != NULL;
+#else
+	return instance != -1;
 #endif
 }
 
@@ -33,11 +49,11 @@ inline void mpi_error(const char* message) {
 	perror(message);
 }
 
-template<typename ProcessConnectionCallback>
+template<typename ProcessMessageCallback>
 void run_worker(array<socket_type>& connection_queue,
 		std::condition_variable& cv, std::mutex& lock,
-		ProcessConnectionCallback process_connection,
-		bool& server_running)
+		ProcessMessageCallback process_message,
+		simulator& sim, bool& server_running)
 {
 	while (server_running) {
 		std::unique_lock<std::mutex> lck(lock);
@@ -45,16 +61,16 @@ void run_worker(array<socket_type>& connection_queue,
 		socket_type connection = connection_queue.pop();
 		lck.unlock();
 
-		process_connection(connection);
-		close(connection);
+		process_message(connection, sim);
 	}
 }
 
-template<typename ProcessConnectionCallback>
+template<typename ProcessMessageCallback>
 bool run_server(
 		const char* server_address, const char* server_port,
 		unsigned int connection_queue_capacity, unsigned int worker_count,
-		ProcessConnectionCallback process_connection, bool& server_running)
+		ProcessMessageCallback process_message, simulator& sim,
+		bool& server_running, std::condition_variable& init_cv)
 {
 	addrinfo hints;
 	hints.ai_family = AF_UNSPEC;
@@ -65,7 +81,7 @@ bool run_server(
 	int result = get_addr_info(server_address, server_port, &hints, &addresses);
 	if (result != 0 || addresses == NULL) {
 		fprintf(stderr, "run_client ERROR: Unable to resolve address. %s\n", gai_strerror(result));
-		return false;
+		server_running = false; init_cv.notify_one(); return false;
 	}
 
 	socket_type sock;
@@ -79,7 +95,7 @@ bool run_server(
 		int yes = 1;
 		if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) != 0) {
 			mpi_error("run_server ERROR: Unable to set socket option. ");
-			return false;
+			server_running = false; init_cv.notify_one(); return false;
 		}
 
 		if (!bind_socket(sock, entry->ai_addr, entry->ai_addrlen)) {
@@ -92,37 +108,90 @@ bool run_server(
 
 	if (listen(sock, connection_queue_capacity) != 0) {
 		mpi_error("run_server ERROR: Unable to listen to socket. ");
-		close(sock); return false;
+		close(sock); server_running = false; init_cv.notify_one();
+		return false;
+	}
+
+	epoll_type epoll_instance = epoll_create(0);
+	if (valid_epoll(epoll_instance)) {
+		mpi_error("run_server ERROR: Failed to initialize network event polling. ");
+		close(sock); server_running = false; init_cv.notify_one();
+		return false;
+	}
+
+	epoll_event events[EVENT_QUEUE_CAPACITY];
+	epoll_event new_event;
+	new_event.events = EPOLLIN;
+	new_event.data.fd = sock;
+	if (epoll_ctl(epoll_instance, EPOLL_CTL_ADD, sock, &new_event) == -1) {
+		mpi_error("run_server ERROR: Failed to add network polling event. ");
+		close(sock); epoll_close(epoll_instance);
+		server_running = false; init_cv.notify_one();
+		return false;
 	}
 
 	/* make the thread pool */
 	std::condition_variable cv; std::mutex lock;
 	array<socket_type> connection_queue(64);
 	std::thread* workers = new std::thread[worker_count];
-	auto dispatch = [&]() {
-		run_worker(connection_queue, cv, lock, process_connection, server_running);
-	};
+	auto start_worker = [&]() {
+		run_worker(connection_queue, cv, lock, process_connection, sim, server_running); };
 	for (unsigned int i = 0; i < worker_count; i++)
-		threads[i] = std::thread(dispatch);
+		threads[i] = std::thread(start_worker);
+
+	/* notify that the server has successfully started */
+	init_cv.notify_one();
 
 	/* the main loop */
 	sockaddr_storage client_address;
 	socklen_t address_size = sizeof(client_address);
 	while (server_running) {
-		socket_type connection = accept(sock, (sockaddr*) &client_address, &address_size);
-		if (!valid_socket(connection)) {
-			mpi_error("run_server ERROR: Error establishing connection with client. ");
+		int event_count = epoll_wait(epoll_instance, events, EVENT_QUEUE_CAPACITY, -1);
+		if (event_count == -1) {
+			mpi_error("run_server ERROR: Error waiting for incoming network activity. ");
 			continue;
 		}
 
-		connection_queue.add(connection);
-		cv.notify_one();
+		for (unsigned int i = 0; i < event_count; i++) {
+			if (events[i].data.fd == sock) {
+				/* there's a new connection */
+				socket_type connection = accept(sock, (sockaddr*) &client_address, &address_size);
+				if (!valid_socket(connection)) {
+					mpi_error("run_server ERROR: Error establishing connection with client. ");
+					continue;
+				}
+
+				epoll_event new_event;
+				new_event.events = EPOLLIN;
+				new_event.data.fd = connection;
+				if (epoll_ctl(epoll_instance, EPOLL_CTL_ADD, connection, &new_event) == -1) {
+					mpi_error("run_server ERROR: Failed to add network polling event. ");
+					close(connection); continue;
+				}
+			} else {
+				if (events[i].events & POLL_IN) {
+					/* there is incoming data from a client */
+					connection_queue.add(events[i].data.fd);
+					cv.notify_one();
+				} if (events[i].events & (POLL_HUP | POLL_ERR)) {
+					/* the client has closed this connection, so remove it */
+					if (epoll_ctl(epoll_instance, EPOLL_CTL_DEL, events[i].data.fd, NULL) == -1) {
+						mpi_error("run_server ERROR: Failed to remove network polling event. ");
+						close(events[i].data.fd); continue;
+					}
+					close(events[i].data.fd);
+				}
+			}
+		}
 	}
 
+	for (pollfd event : poll_events)
+		close(event.fd);
+	close(sock);
+	epoll_close(epoll_instance);
 	for (unsigned int i = 0; i < worker_count; i++)
 		threads[i].join();
 	delete[] threads;
-	close(sock);
 	return true;
 }
 
@@ -164,32 +233,60 @@ bool run_client(client& new_client,
 
 enum class message_type : uint64_t {
 	MOVE = 0,
-	MOVE_RESPONSE = 1
+	MOVE_RESPONSE = 1,
+	STEP_RESPONSE = 2
 };
-
-typedef void (*response_callback)();
 
 struct async_server {
 	std::thread server_thread;
 	bool server_running;
 };
 
-bool init_server(async_server& new_server,
+inline bool receive_move(socket_type& connection, simulator& sim) {
+	uintptr_t agent_handle;
+	direction dir;
+	unsigned int num_steps;
+	if (!read(agent_handle, connection) && !read(dir, connection) && !read(num_steps, connection))
+		return false;
+	bool result = sim.move(*((agent_state*) agent_handle), dir, num_steps);
+	return write(MOVE_RESPONSE, connection) && write(result, connection);
+}
+
+void server_process_message(socket_type& connection, simulator& sim) {
+	message_type type;
+	read(connection, type);
+	switch (type) {
+		case message_type::MOVE:
+			receive_move(connection, sim); break;
+	}
+}
+
+bool init_server(async_server& new_server, simulator& sim,
 		const char* server_address, const char* server_port,
 		unsigned int connection_queue_capacity, unsigned int worker_count)
 {
+	std::condition_variable cv; std::mutex lock;
 	auto dispatch = [&]() {
-		run_server(server_address, server_port, connection_queue_capacity, worker_count, process_server_connection);
+		run_server(server_address, server_port, connection_queue_capacity, worker_count, server_process_message, sim, new_server.server_running, cv);
 	};
 	new_server.server_running = true;
 	new_server.server_thread = std::thread(dispatch);
+
+	std::unique_lock<std::mutex> lck(lock);
+	cv.wait(lck);
+	if (!new_server.server_running) {
+		new_server.server_thread.join();
+		return false;
+	}
+	return true;
 }
 
-inline bool init_server(
+inline bool init_server(simulator& sim,
 		const char* server_address, const char* server_port,
 		unsigned int connection_queue_capacity, unsigned int worker_count)
 {
-	run_server(server_address, server_port, connection_queue_capacity, worker_count, process_server_connection);
+	bool dummy = true; std::condition_variable cv;
+	return run_server(server_address, server_port, connection_queue_capacity, worker_count, server_process_message, sim, dummy, cv);
 }
 
 void stop_server(async_server& server) {
@@ -198,15 +295,21 @@ void stop_server(async_server& server) {
 }
 
 
+typedef void (*move_callback)(bool);
+typedef void (*step_callback)();
+
 struct client {
 	socket_type connection;
 	std::thread response_listener;
-	response_callback on_move_response;
+	move_callback on_move_response;
+	step_callback on_step_response;
+	bool client_running;
 };
 
-bool send_move(client& c, direction dir, unsigned int num_steps) {
+bool send_move(uintptr_t agent_handle, client& c, direction dir, unsigned int num_steps) {
 	memory_stream out = memory_stream(sizeof(message_type) + sizeof(direction) + sizeof(num_steps));
 	if (!write(message_type::MOVE, out)
+	 || !write(agent_handle, out)
 	 || !write(dir, out)
 	 || !write(num_steps, out)
 	 || send(c.connection, out.buffer, out.length, 0) != 0)
@@ -214,13 +317,27 @@ bool send_move(client& c, direction dir, unsigned int num_steps) {
 	return true;
 }
 
+inline bool receive_move_response(client& c) {
+	bool move_success;
+	if (!read(move_success, c.connection))
+		return false;
+	c.on_move_response(move_success);
+	return true;
+}
+
+inline bool receive_step_response(client& c) {
+	c.on_step_response();
+}
+
 void run_response_listener(client& c) {
-	while (c.alive) {
+	while (c.client_running) {
 		message_type type;
 		read(c.connection, type);
 		switch (type) {
-			case MOVE_RESPONSE:
-				c.on_response();
+			case message_type::MOVE_RESPONSE:
+				receive_move_response(c); break;
+			case message_type::STEP_RESPONSE:
+				receive_step_response(c); break;
 			default:
 				fprintf(stderr, "run_response_listener ERROR: Received invalid message type from server.\n");
 				continue;
@@ -228,8 +345,10 @@ void run_response_listener(client& c) {
 	}
 }
 
-bool init_client(client& new_client, response_callback 
-		const char* server_address, const char* server_port)
+bool init_client(client& new_client,
+		const char* server_address, const char* server_port,
+		response_callback on_move_response,
+		response_callback on_step_response)
 {
 	auto process_connection = [&](socket_type& connection) {
 		auto dispatch = [&]() {
@@ -239,7 +358,15 @@ bool init_client(client& new_client, response_callback
 		new_client.response_listener = std::thread(dispatch);
 	};
 
+	new_client.client_running = true;
+	new_client.on_move_response = on_move_response;
+	new_client.on_step_response = on_step_response;
 	return run_client(server_address, server_port, process_connection);
+}
+
+void stop_client(client& c) {
+	c.client_running = false;
+	c.response_listener.join();
 }
 
 #endif /* NEL_MPI_H_ */
