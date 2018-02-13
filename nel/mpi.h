@@ -179,10 +179,17 @@ bool init_server(async_server& new_server,
 		unsigned int connection_queue_capacity, unsigned int worker_count)
 {
 	auto dispatch = [&]() {
-		run_server(server_address, server_port, connection_queue_capacity, worker_count, process_connection);
+		run_server(server_address, server_port, connection_queue_capacity, worker_count, process_server_connection);
 	};
 	new_server.server_running = true;
 	new_server.server_thread = std::thread(dispatch);
+}
+
+inline bool init_server(
+		const char* server_address, const char* server_port,
+		unsigned int connection_queue_capacity, unsigned int worker_count)
+{
+	run_server(server_address, server_port, connection_queue_capacity, worker_count, process_server_connection);
 }
 
 void stop_server(async_server& server) {
