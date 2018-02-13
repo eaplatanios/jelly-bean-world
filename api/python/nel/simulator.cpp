@@ -1,5 +1,6 @@
 #include <Python.h>
 
+#include <thread>
 #include <nel/gibbs_field.h>
 #include <nel/simulator.h>
 
@@ -88,7 +89,7 @@ static PyObject* simulator_new(PyObject *self, PyObject *args) {
     return PyLong_FromVoidPtr(new simulator(config, step_callback_fn));
 }
 
-/**
+/** 
  * Deletes a simulator and frees all memory allocated for that 
  * simulator.
  * 
@@ -103,6 +104,52 @@ static PyObject* simulator_delete(PyObject *self, PyObject *args) {
         return NULL;
     simulator* sim_handle = (simulator*) PyLong_AsVoidPtr(py_sim_handle);
     delete sim_handle;
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
+/**  
+ * Starts the simulator server.
+ * 
+ * \param   self    Pointer to the Python object calling this method.
+ * \param   args    Arguments:
+ *                  - Handle to the native simulator object as a PyLong.
+ *                  - Server address (string).
+ *                  - Server port (string).
+ *                  - Connection queue capacity (integer).
+ *                  - Worker count (integer).
+ * \returns Handle to the simulator server thread.
+ */ 
+static PyObject* simulator_start_server(PyObject *self, PyObject *args) {
+    PyObject* py_sim_handle;
+    const char* address;
+    const char* port;
+    unsigned int* conn_queue_capacity;
+    unsigned int* worker_count;
+    if (!PyArg_ParseTuple(
+            args, "OssII", &py_sim_handle, &address, &port, &conn_queue_capacity, &worker_count))
+        return NULL;
+    simulator* sim_handle = (simulator*) PyLong_AsVoidPtr(py_sim_handle);
+    std::thread* sim_thread = new std::thread([]() {
+        // TODO !!!
+    });
+    return PyLong_FromVoidPtr(sim_thread);
+}
+
+/** 
+ * Stops the simulator server.
+ * 
+ * \param   self    Pointer to the Python object calling this method.
+ * \param   args    Arguments:
+ *                  - Handle to the native simulator server thread as a PyLong.
+ * \returns None.
+ */ 
+static PyObject* simulator_stop_server(PyObject *self, PyObject *args) {
+    PyObject* py_sim_server;
+    if (!PyArg_ParseTuple(args, "O", &py_sim_server))
+        return NULL;
+    std::thread* sim_thread = (std::thread*) PyLong_AsVoidPtr(py_sim_server);
+    // TODO !!!
     Py_INCREF(Py_None);
     return Py_None;
 }
@@ -179,6 +226,8 @@ static PyObject* simulator_position(PyObject *self, PyObject *args) {
 static PyMethodDef SimulatorMethods[] = {
     {"new",  nel::simulator_new, METH_VARARGS, "Creates a new simulator and returns its pointer."},
     {"delete",  nel::simulator_delete, METH_VARARGS, "Deletes an existing simulator."},
+    {"start_server",  nel::simulator_start_server, METH_VARARGS, "Starts the simulator server."},
+    {"stop_server",  nel::simulator_stop_server, METH_VARARGS, "Stops the simulator server."},
     {"add_agent",  nel::simulator_add_agent, METH_VARARGS, "Adds an agent to the simulator and returns its ID."},
     {"move",  nel::simulator_move, METH_VARARGS, "Attempts to move the agent in the simulation environment."},
     {"position",  nel::simulator_position, METH_VARARGS, "Gets the current position of an agent in the simulation environment."},

@@ -87,6 +87,8 @@ class Simulator(object):
                      simulator as a server, the `MPI_CALLBACK` function should 
                      be used. The default is to use the `C_CALLBACK` function.
     """
+    self.config = config
+    self.step_callback = step_callback
     self._handle = simulator_c.new(
       config.max_steps_per_movement, config.scent_num_dims, 
       config.color_num_dims, config.vision_range, config.patch_size, 
@@ -95,6 +97,47 @@ class Simulator(object):
       config.intensity_fn, config.intensity_fn_args, 
       config.interaction_fn, config.interaction_fn_args, 
       step_callback)
+    self._server_handle = None
+  
+  def start_server(
+      self, address='localhost', port=54353, conn_queue_capacity=256, 
+      num_workers=8):
+    """Starts the simulator server.
+    
+    Note that the simulator can only be started as a server if the MPI 
+    step callback is used. A call to this function will be ignored if the 
+    C step callback is being used.
+
+    Arguments:
+      address:             Server address.
+      port:                Server port.
+      conn_queue_capacity: Connection queue capacity for the server.
+      num_workers:         Number of worker threads for the server.
+    """
+    if self.step_callback is not SimulatorStepCallback.MPI_CALLBACK:
+      raise ValueError(
+        "Using the simulator as a server is only supported when the " 
+        "MPI step callback function is used.")
+    if self._server_handle is not None:
+      print(
+        "Ignoring request to start the simulation server, because one "
+        "is already running.")
+    self._server_handle = simulator_c.start_server(
+      self._handle, address, str(port), conn_queue_capacity, num_workers)
+
+  def stop_server(self):
+    """Stops the simulator server.
+    
+    A call to this function is ignored if no simulator server is currently 
+    running.
+    """
+    if self._server_handle is not None:
+      simulator_c.stop_server(self._server_handle)
+      self._server_handle = None
+    else:
+      print(
+        "Ignoring request to stop the simulation server, because it "
+        "is not currently running.")
 
   def __del__(self):
     """Deletes this simulator and deallocates all 

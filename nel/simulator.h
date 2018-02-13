@@ -236,11 +236,7 @@ public:
 
     /* Current simulation time step. */
     unsigned int time;
-
-    inline void start_service(unsigned int port) {
-        /* TODO: Start the simulator service. */
-    }
-
+    
     /** 
      * Adds a new agent to this simulator and returns its initial state.
      * 
