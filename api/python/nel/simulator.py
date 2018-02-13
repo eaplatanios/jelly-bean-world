@@ -1,10 +1,29 @@
 from __future__ import absolute_import, division, print_function
 
+from enum import Enum
 from nel_c import simulator_c
 
 from .item import IntensityFunction, InteractionFunction
 
-__all__ = ['SimulatorConfig', 'Simulator']
+__all__ = ['SimulatorStepCallback', 'SimulatorConfig', 'Simulator']
+
+
+class SimulatorStepCallback(Enum):
+  """Step callback function used by the simulator."""
+
+  C_CALLBACK = 0   # This callback uses the C-Python API bdindings to 
+                   # interface with the simulator and should be faster 
+                   # than the MPI callback. However, this does not allow 
+                   # the simulator to run as a separate server process, 
+                   # that multiple agent processed can attach to. In 
+                   # this case, all agents must be defined and used as 
+                   # part of the same Python process that created the 
+                   # simulator.
+  MPI_CALLBACK = 1 # This callback uses message passing over a socket 
+                   # (using TCP) and allows the simulator to run as a 
+                   # separate server process that multiple agent processes 
+                   # can attach to. However, it may result in slower 
+                   # performance than the C callback.
 
 
 class SimulatorConfig(object):
@@ -59,13 +78,14 @@ class Simulator(object):
   agent's constructor.
   """
   
-  def __init__(self, config, port=None):
+  def __init__(self, config, step_callback=SimulatorStepCallback.C_CALLBACK):
     """Creates a new simulator.
     
     Arguments:
-      config: Configuration for the new simulator.
-      port:   Optional port number to use if this simulator is created as 
-              a service.
+      config:        Configuration for the new simulator.
+      step_callback: Step callback function to use. If intending to use this 
+                     simulator as a server, the `MPI_CALLBACK` function should 
+                     be used. The default is to use the `C_CALLBACK` function.
     """
     self._handle = simulator_c.new(
       config.max_steps_per_movement, config.scent_num_dims, 
@@ -73,7 +93,8 @@ class Simulator(object):
       config.gibbs_num_iter, 
       [(i.name, i.scent, i.color, i.intensity) for i in config.items], 
       config.intensity_fn, config.intensity_fn_args, 
-      config.interaction_fn, config.interaction_fn_args)
+      config.interaction_fn, config.interaction_fn_args, 
+      step_callback)
 
   def __del__(self):
     """Deletes this simulator and deallocates all 

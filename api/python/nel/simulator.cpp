@@ -38,11 +38,13 @@ static PyObject* simulator_new(PyObject *self, PyObject *args) {
     PyObject* py_intensity_fn_args;
     unsigned int* py_interaction_fn;
     PyObject* py_interaction_fn_args;
+    unsigned int* py_step_callback_fn;
     if (!PyArg_ParseTuple(
-      args, "IIIIIIOIOIO", &max_steps_per_movement, &scent_num_dims, &color_num_dims, 
+      args, "IIIIIIOIOIOI", &max_steps_per_movement, &scent_num_dims, &color_num_dims, 
       &vision_range, &patch_size, &gibbs_iterations, &py_items, 
       &py_intensity_fn, &py_intensity_fn_args, 
-      &py_interaction_fn, &py_interaction_fn_args)) {
+      &py_interaction_fn, &py_interaction_fn_args, 
+      &py_step_callback_fn)) {
         fprintf(stderr, "Invalid argument types in the call to 'simulator_c.new'.");
         exit(EXIT_FAILURE);
     }
@@ -82,8 +84,8 @@ static PyObject* simulator_new(PyObject *self, PyObject *args) {
     config.intensity_fn = get_intensity_fn((intensity_fns) *py_intensity_fn, intensity_fn_args.key, (unsigned int) intensity_fn_args.value);
     pair<float*, Py_ssize_t> interaction_fn_args = PyArg_ParseFloatList(py_interaction_fn_args);
     config.interaction_fn = get_interaction_fn((interaction_fns) *py_interaction_fn, interaction_fn_args.key, (unsigned int) interaction_fn_args.value);
-    // TODO: step callback function.
-    return PyLong_FromVoidPtr(new simulator(config, (void(*)(const agent_state&)) NULL));
+    step_callback step_callback_fn = get_step_callback_fn((step_callback_fns) *py_step_callback_fn);
+    return PyLong_FromVoidPtr(new simulator(config, step_callback_fn));
 }
 
 /**
