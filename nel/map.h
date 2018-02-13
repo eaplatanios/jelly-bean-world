@@ -66,8 +66,12 @@ void* alloc_position_keys(size_t n, size_t element_size) {
 struct map {
 	hash_map<position, patch> patches;
 
-	intensity_function intensity;
-	interaction_function interaction;
+	intensity_function intensity_fn;
+	interaction_function interaction_fn;
+
+	// We assume that the length of the args arrays is known at this point and has been checked.
+	float* intensity_args;
+	float* interaction_args;
 
 	unsigned int n;
 	unsigned int item_type_count;
@@ -77,13 +81,25 @@ struct map {
 
 public:
 	map(unsigned int n, unsigned int item_type_count, unsigned int gibbs_iterations,
-			intensity_function intensity, interaction_function interaction) :
-		patches(1024, alloc_position_keys), intensity(intensity), interaction(interaction),
+			intensity_function intensity, float* intensity_args, 
+			interaction_function interaction, float* interaction_args) :
+		patches(1024, alloc_position_keys), 
+		intensity(intensity), intensity_args(intensity_args), 
+		interaction(interaction), interaction_args(interaction_args), 
 		n(n), item_type_count(item_type_count), gibbs_iterations(gibbs_iterations) { }
 
 	~map() {
 		for (auto entry : patches)
 			core::free(entry.value, item_type_count);
+	}
+
+	inline float intensity(const position& pos, unsigned int item_type) {
+		return intensity_fn(pos, item_type, intensity_args);
+	}
+
+	inline float interaction(
+			const position& pos1, const position& pos2, unsigned int item_type1, unsigned int item_type2) {
+		return interaction_fn(pos1, pos2, item_type1, item_type2, interaction_args);
 	}
 
 	inline patch* get_patch_if_exists(const position& patch_position)

@@ -2,14 +2,14 @@
 #define NEL_SIMULATOR_H_
 
 #include <core/array.h>
-#include "config.h"
+#include <core/utility.h>
 #include "map.h"
 
 namespace nel {
 
 using namespace core;
 
-typedef void (*agent_step_callback_fn)(const agent_state&);
+typedef void (*step_callback)(const agent_state&);
 
 /** Represents all possible directions of motion in the environment. */
 enum class direction { UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3 };
@@ -146,9 +146,12 @@ struct simulator_config {
 	unsigned int gibbs_iterations;
 	array<item_properties> item_types;
 
-	/* TODO: Need to make these serializable somehow (maybe by contraining them). */
-	nel::intensity_function intensity;
-	nel::interaction_function interaction;
+	intensity_function intensity_fn;
+	interaction_function interaction_fn;
+
+	// We assume that the length of the args arrays is known at this point and has been checked.
+    float* intensity_fn_args;
+    float* interaction_fn_args;
 
 	simulator_config() : item_types(8) { }
 
@@ -157,12 +160,13 @@ struct simulator_config {
 		scent_dimension(src.scent_dimension), color_dimension(src.color_dimension),
 		vision_range(src.vision_range), patch_size(src.patch_size),
 		gibbs_iterations(src.gibbs_iterations), item_types(src.item_types.length), 
-		intensity(src.intensity), interaction(src.interaction)
+		intensity_fn(src.intensity_fn), intensity_fn_args(intensity_fn_args), 
+        interaction_fn(src.interaction_fn), interaction_fn_args(interaction_fn_args)
 	{
 		for (unsigned int i = 0; i < src.item_types.length; i++)
 			init(item_types[i], src.item_types[i], scent_dimension, color_dimension);
 		item_types.length = src.item_types.length;
-	}
+    }
 
 	~simulator_config() {
 		for (item_properties& properties : item_types)
@@ -197,12 +201,13 @@ class simulator {
     simulator_config config;
 
     /* Callback function for when the simulator advances a time step. */
-    agent_step_callback_fn step_callback_fn;
+    step_callback step_callback_fn;
 
 public:
-    simulator(const simulator_config& config, const agent_step_callback_fn step_callback) :
+    simulator(const simulator_config& config, const step_callback step_callback) :
         world(config.patch_size, config.item_types.length, config.gibbs_iterations, 
-            config.intensity, config.interaction),
+            config.intensity_fn, config.intensity_fn_args, 
+            config.interaction_fn, config.interaction_fn_args),
         agents(16), acted_agent_count(0), config(config), time(0), 
         step_callback_fn(step_callback) { }
 

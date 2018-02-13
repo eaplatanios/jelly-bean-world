@@ -1,6 +1,8 @@
 from __future__ import absolute_import, division, print_function
 
-__all__ = ['Item']
+from enum import Enum
+
+__all__ = ['Item', 'IntensityFunction', 'InteractionFunction']
 
 class Item(object):
   """Represents an item in the world (e.g., jelly beans)."""
@@ -20,3 +22,17 @@ class Item(object):
     self.scent = scent
     self.color = color
     self.intensity = intensity
+
+
+class IntensityFunction(Enum):
+  """Item intensity function used in the Gibbs sampler for map generation."""
+
+  ZERO = 0
+  CONSTANT = 1
+
+
+class InteractionFunction(Enum):
+  """Item interaction function used in the Gibbs sampler for map generation."""
+
+  ZERO = 0
+  PIECEWISE_BOX = 1

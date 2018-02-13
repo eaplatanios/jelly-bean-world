@@ -9,8 +9,70 @@ namespace nel {
 
 using namespace core;
 
-typedef float (*intensity_function)(const position&, unsigned int);
-typedef float (*interaction_function)(const position&, const position&, unsigned int, unsigned int);
+typedef float (*intensity_function)(const position&, unsigned int, float*);
+
+enum class intensity_fns {
+	ZERO = 0, CONSTANT = 1
+};
+
+intensity_function get_intensity_fn(intensity_fns type, float* args, unsigned int num_args) {
+	switch (type) {
+		case ZERO: return zero_intensity_fn;
+		case CONSTANT:
+			if (num_args < 1) {
+				fprintf(stderr, "A constant intensity function requires an argument.");
+        exit(EXIT_FAILURE);
+			}
+			return constant_intensity_fn;
+		default: 
+			fprintf(stderr, "Unknown intensity function type.");
+      exit(EXIT_FAILURE);
+	}
+}
+
+float zero_intensity_fn(const position& pos, unsigned int item_type, float* args) {
+	return 0.0;
+}
+
+float constant_intensity_fn(const position& pos, unsigned int item_type, float* args) {
+	return args[0];
+}
+
+typedef float (*interaction_function)(const position&, const position&, unsigned int, unsigned int, float*);
+
+enum class interaction_fns {
+	ZERO = 0, PIECEWISE_BOX = 1
+};
+
+interaction_function get_interaction_fn(interaction_fns type, float* args, unsigned int num_args) {
+	switch (type) {
+		case ZERO: return zero_interaction_fn;
+		case PIECEWISE_BOX:
+			if (num_args < 4) {
+				fprintf(stderr, "A piecewise-box integration function requires 4 arguments.");
+        exit(EXIT_FAILURE);
+			}
+			return piecewise_box_interaction_fn;
+		default: 
+			fprintf(stderr, "Unknown intensity function type.");
+      exit(EXIT_FAILURE);
+	}
+}
+
+float zero_interaction_fn(
+		const position& pos1, const position& pos2, unsigned int item_type1, unsigned int item_type2, float* args) {
+	return 0.0;
+}
+
+float piecewise_box_interaction_fn(
+		const position& pos1, const position& pos2, unsigned int item_type1, unsigned int item_type2, float* args) {
+	uint64_t squared_length = (pos1 - pos2).squared_length();
+	if (squared_length < args[0])
+		return args[1];
+	else if (squared_length < args[2])
+		return args[3];
+	else return args[1];
+}
 
 template<typename Map>
 class gibbs_field
@@ -18,9 +80,6 @@ class gibbs_field
 	Map& map;
 	position* patch_positions;
 	unsigned int patch_count;
-
-	intensity_function intensity;
-	interaction_function interaction;
 
 	unsigned int n;
 	unsigned int item_type_count;
@@ -33,7 +92,7 @@ public:
 			unsigned int n, unsigned int item_type_count,
 			intensity_function intensity, interaction_function interaction) :
 		map(map), patch_positions(patch_positions), patch_count(patch_count),
-		intensity(intensity), interaction(interaction), n(n), item_type_count(item_type_count) { }
+		n(n), item_type_count(item_type_count) { }
 
 	~gibbs_field() { }
 
@@ -58,10 +117,10 @@ private:
 		unsigned int old_item_index = 0, old_item_type = item_type_count;
 		for (unsigned int i = 0; i < item_type_count; i++) {
 			/* compute the energy contribution of this cell when the item type is `i` */
-			log_probabilities[i] = intensity(world_position, i);
+			log_probabilities[i] = map.intensity(world_position, i);
 			for (unsigned int j = 0; j < neighbor_count; j++) {
 				for (unsigned int k = 0; k < item_type_count; k++) {
-					const array<position>& item_positions =neighborhood[j]->item_positions[k];
+					const array<position>& item_positions = neighborhood[j]->item_positions[k];
 					for (unsigned int m = 0; m < item_positions.length; m++) {
 						if (item_positions[m] == world_position) {
 							old_item_index = m;
@@ -69,7 +128,7 @@ private:
 							continue; /* ignore the current position */
 						}
 
-						log_probabilities[i] += interaction(world_position, item_positions[m], i, k);
+						log_probabilities[i] += map.interaction(world_position, item_positions[m], i, k);
 					}
 				}
 			}

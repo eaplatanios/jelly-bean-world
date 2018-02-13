@@ -1,12 +1,13 @@
 #include <Python.h>
 
+#include <nel/gibbs_field.h>
 #include <nel/simulator.h>
 
 namespace nel {
 
 using namespace core;
 
-static float* PyArg_ParseFloatList(PyObject* arg) {
+static pair<float*, unsigned int> PyArg_ParseFloatList(PyObject* arg) {
     if (!PyList_Check(arg)) {
         fprintf(stderr, "Expected float list, but got invalid argument.");
         exit(EXIT_FAILURE);
@@ -15,15 +16,14 @@ static float* PyArg_ParseFloatList(PyObject* arg) {
     float* items = new float[len];
     for (unsigned int i = 0; i < len; i++)
         items[i] = PyFloat_AsDouble(PyList_GetItem(arg, (Py_ssize_t) i))
-    return items;
+    return make_pair(items, len);
 }
 
 /** 
  * Creates a new simulator and returns a handle to it.
  * 
  * \param   self    Pointer to the Python object calling this method.
- * \param   args    No arguments need to be provided for this call. 
- *                  If any are provided, they will be ignored.
+ * \param   args    
  * \returns Pointer to the new simulator.
  */
 static PyObject* simulator_new(PyObject *self, PyObject *args) {
@@ -34,25 +34,35 @@ static PyObject* simulator_new(PyObject *self, PyObject *args) {
     unsigned int* patch_size;
     unsigned int* gibbs_iterations;
     PyObject* py_items;
+    unsigned int* py_intensity_fn;
+    PyObject* py_intensity_fn_args;
+    unsigned int* py_interaction_fn;
+    PyObject* py_interaction_fn_args;
     if (!PyArg_ParseTuple(
-      args, "IIIIIIO", &max_steps_per_movement, &scent_num_dims, &color_num_dims, 
-      &vision_range, &patch_size, &gibbs_iterations, &py_items))
-        return NULL;
+      args, "IIIIIIOIOIO", &max_steps_per_movement, &scent_num_dims, &color_num_dims, 
+      &vision_range, &patch_size, &gibbs_iterations, &py_items, 
+      &py_intensity_fn, &py_intensity_fn_args, 
+      &py_interaction_fn, &py_interaction_fn_args)) {
+        fprintf(stderr, "Invalid argument types in the call to 'simulator_c.new'.");
+        exit(EXIT_FAILURE);
+    }
     PyObject *py_items_iter = PyObject_GetIter(py_items);
-    if (!py_items_iter)
-        return NULL;
+    if (!py_items_iter) {
+        fprintf(stderr, "Invalid argument types in the call to 'simulator_c.new'.");
+        exit(EXIT_FAILURE);
+    }
     array<item_properties> item_types(8);
     while (true) {
         PyObject *next_py_item = PyIter_Next(py_items_iter);
         if (!next_py_item) break;
-        const char* name;
+        char* name;
         PyObject* py_scent;
         PyObject* py_color;
         float* intensity;
         if (!PyArg_ParseTuple(args, "sOOf", &name, &py_scent, &py_color, &intensity))
             return NULL;
-        float* scent = PyArg_ParseFloatList(py_scent);
-        float* color = PyArg_ParseFloatList(py_color);
+        float* scent = PyArg_ParseFloatList(py_scent).key;
+        float* color = PyArg_ParseFloatList(py_color).key;
         item_properties& new_item = item_types[item_types.length];
         init(new_item.name, name);
         new_item.scent = scent;
@@ -68,9 +78,12 @@ static PyObject* simulator_new(PyObject *self, PyObject *args) {
     config.patch_size = *patch_size;
     config.gibbs_iterations = *gibbs_iterations;
     config.item_types = item_types;
-    // TODO: intensity and interaction functions.
+    pair<float*, unsigned int> intensity_fn_args = PyArg_ParseFloatList(py_intensity_fn_args);
+    config.intensity_fn = get_intensity_fn(*py_intensity_fn, intensity_fn_args.key, intensity_fn_args.value);
+    pair<float*, unsigned int> interaction_fn_args = PyArg_ParseFloatList(py_interaction_fn_args);
+    config.interaction_fn = get_intensity_fn(*py_interaction_fn_args, interaction_fn_args.key, interaction_fn_args.value);
     // TODO: step callback function.
-    return PyLong_FromVoidPtr(new simulator(config, nullptr));
+    return PyLong_FromVoidPtr(new simulator<void(*)()>(config, nullptr));
 }
 
 /**
