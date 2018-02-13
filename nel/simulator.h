@@ -9,8 +9,6 @@ namespace nel {
 
 using namespace core;
 
-typedef void (*step_callback)(const agent_state&);
-
 /** Represents all possible directions of motion in the environment. */
 enum class direction { UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3 };
 
@@ -94,6 +92,8 @@ inline bool init(agent_state& agent_state, map& world,
     return true;
 }
 
+typedef void (*step_callback)(const agent_state&);
+
 struct item_properties {
 	string name;
 
@@ -160,8 +160,8 @@ struct simulator_config {
 		scent_dimension(src.scent_dimension), color_dimension(src.color_dimension),
 		vision_range(src.vision_range), patch_size(src.patch_size),
 		gibbs_iterations(src.gibbs_iterations), item_types(src.item_types.length), 
-		intensity_fn(src.intensity_fn), intensity_fn_args(intensity_fn_args), 
-        interaction_fn(src.interaction_fn), interaction_fn_args(interaction_fn_args)
+		intensity_fn(src.intensity_fn), interaction_fn(src.interaction_fn), 
+        intensity_fn_args(src.intensity_fn_args), interaction_fn_args(src.interaction_fn_args)
 	{
 		for (unsigned int i = 0; i < src.item_types.length; i++)
 			init(item_types[i], src.item_types[i], scent_dimension, color_dimension);
@@ -208,8 +208,8 @@ public:
         world(config.patch_size, config.item_types.length, config.gibbs_iterations, 
             config.intensity_fn, config.intensity_fn_args, 
             config.interaction_fn, config.interaction_fn_args),
-        agents(16), acted_agent_count(0), config(config), time(0), 
-        step_callback_fn(step_callback) { }
+        agents(16), acted_agent_count(0), config(config), 
+        step_callback_fn(step_callback), time(0) { }
 
     /* Current simulation time step. */
     unsigned int time;
@@ -295,7 +295,7 @@ private:
 
         // Invoke the step callback function for each agent.
         for (agent_state* agent : agents)
-            step_callback_fn(agent);
+            step_callback_fn(*agent);
     }
 
     inline void get_scent(position world_position) {

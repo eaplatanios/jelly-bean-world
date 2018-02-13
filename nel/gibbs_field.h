@@ -15,10 +15,18 @@ enum class intensity_fns {
 	ZERO = 0, CONSTANT = 1
 };
 
+float zero_intensity_fn(const position& pos, unsigned int item_type, float* args) {
+	return 0.0;
+}
+
+float constant_intensity_fn(const position& pos, unsigned int item_type, float* args) {
+	return args[0];
+}
+
 intensity_function get_intensity_fn(intensity_fns type, float* args, unsigned int num_args) {
 	switch (type) {
-		case ZERO: return zero_intensity_fn;
-		case CONSTANT:
+		case intensity_fns::ZERO: return zero_intensity_fn;
+		case intensity_fns::CONSTANT:
 			if (num_args < 1) {
 				fprintf(stderr, "A constant intensity function requires an argument.");
         exit(EXIT_FAILURE);
@@ -30,34 +38,11 @@ intensity_function get_intensity_fn(intensity_fns type, float* args, unsigned in
 	}
 }
 
-float zero_intensity_fn(const position& pos, unsigned int item_type, float* args) {
-	return 0.0;
-}
-
-float constant_intensity_fn(const position& pos, unsigned int item_type, float* args) {
-	return args[0];
-}
-
 typedef float (*interaction_function)(const position&, const position&, unsigned int, unsigned int, float*);
 
 enum class interaction_fns {
 	ZERO = 0, PIECEWISE_BOX = 1
 };
-
-interaction_function get_interaction_fn(interaction_fns type, float* args, unsigned int num_args) {
-	switch (type) {
-		case ZERO: return zero_interaction_fn;
-		case PIECEWISE_BOX:
-			if (num_args < 4) {
-				fprintf(stderr, "A piecewise-box integration function requires 4 arguments.");
-        exit(EXIT_FAILURE);
-			}
-			return piecewise_box_interaction_fn;
-		default: 
-			fprintf(stderr, "Unknown intensity function type.");
-      exit(EXIT_FAILURE);
-	}
-}
 
 float zero_interaction_fn(
 		const position& pos1, const position& pos2, unsigned int item_type1, unsigned int item_type2, float* args) {
@@ -72,6 +57,21 @@ float piecewise_box_interaction_fn(
 	else if (squared_length < args[2])
 		return args[3];
 	else return args[1];
+}
+
+interaction_function get_interaction_fn(interaction_fns type, float* args, unsigned int num_args) {
+	switch (type) {
+		case interaction_fns::ZERO: return zero_interaction_fn;
+		case interaction_fns::PIECEWISE_BOX:
+			if (num_args < 4) {
+				fprintf(stderr, "A piecewise-box integration function requires 4 arguments.");
+        exit(EXIT_FAILURE);
+			}
+			return piecewise_box_interaction_fn;
+		default: 
+			fprintf(stderr, "Unknown intensity function type.");
+      exit(EXIT_FAILURE);
+	}
 }
 
 template<typename Map>
@@ -89,8 +89,7 @@ class gibbs_field
 public:
 	/* NOTE: `patches` and `patch_positions` are used directly, and not copied */
 	gibbs_field(Map& map, position* patch_positions, unsigned int patch_count,
-			unsigned int n, unsigned int item_type_count,
-			intensity_function intensity, interaction_function interaction) :
+			unsigned int n, unsigned int item_type_count) :
 		map(map), patch_positions(patch_positions), patch_count(patch_count),
 		n(n), item_type_count(item_type_count) { }
 

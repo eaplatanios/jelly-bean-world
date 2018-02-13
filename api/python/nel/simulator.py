@@ -14,9 +14,9 @@ class SimulatorConfig(object):
       self, max_steps_per_movement, vision_range, 
       patch_size, gibbs_num_iter, items, 
       intensity_fn=IntensityFunction.CONSTANT, 
-      intensity_fn_args=[-2.0f], 
+      intensity_fn_args=[-2.0], 
       interaction_fn=InteractionFunction.PIECEWISE_BOX, 
-      interaction_fn_args=[40.0f, 0.0f, 200.0f, -40.0f]):
+      interaction_fn_args=[40.0, 0.0, 200.0, -40.0]):
     """Creates a new simulator configuration.
 
     Arguments:

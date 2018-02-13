@@ -70,8 +70,8 @@ struct map {
 	interaction_function interaction_fn;
 
 	// We assume that the length of the args arrays is known at this point and has been checked.
-	float* intensity_args;
-	float* interaction_args;
+	float* intensity_fn_args;
+	float* interaction_fn_args;
 
 	unsigned int n;
 	unsigned int item_type_count;
@@ -81,11 +81,11 @@ struct map {
 
 public:
 	map(unsigned int n, unsigned int item_type_count, unsigned int gibbs_iterations,
-			intensity_function intensity, float* intensity_args, 
-			interaction_function interaction, float* interaction_args) :
+			intensity_function intensity_fn, float* intensity_fn_args, 
+			interaction_function interaction_fn, float* interaction_fn_args) :
 		patches(1024, alloc_position_keys), 
-		intensity(intensity), intensity_args(intensity_args), 
-		interaction(interaction), interaction_args(interaction_args), 
+		intensity_fn(intensity_fn), interaction_fn(interaction_fn), 
+		intensity_fn_args(intensity_fn_args), interaction_fn_args(interaction_fn_args), 
 		n(n), item_type_count(item_type_count), gibbs_iterations(gibbs_iterations) { }
 
 	~map() {
@@ -94,12 +94,12 @@ public:
 	}
 
 	inline float intensity(const position& pos, unsigned int item_type) {
-		return intensity_fn(pos, item_type, intensity_args);
+		return intensity_fn(pos, item_type, intensity_fn_args);
 	}
 
 	inline float interaction(
 			const position& pos1, const position& pos2, unsigned int item_type1, unsigned int item_type2) {
-		return interaction_fn(pos1, pos2, item_type1, item_type2, interaction_args);
+		return interaction_fn(pos1, pos2, item_type1, item_type2, interaction_fn_args);
 	}
 
 	inline patch* get_patch_if_exists(const position& patch_position)
@@ -313,7 +313,7 @@ private:
 		/* construct the Gibbs field and sample the patches at positions_to_sample */
 		gibbs_field<map> field(*this,
 				positions_to_sample.data, positions_to_sample.length,
-				n, item_type_count, intensity, interaction);
+				n, item_type_count);
 		for (unsigned int i = 0; i < gibbs_iterations; i++)
 			field.sample();
 
