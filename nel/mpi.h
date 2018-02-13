@@ -232,9 +232,13 @@ bool run_client(client& new_client,
 }
 
 enum class message_type : uint64_t {
-	MOVE = 0,
-	MOVE_RESPONSE = 1,
-	STEP_RESPONSE = 2
+	ADD_AGENT = 0,
+	ADD_AGENT_RESPONSE = 1,
+	MOVE = 2,
+	MOVE_RESPONSE = 3,
+	GET_POSITION = 4,
+	GET_POSITION_RESPONSE = 5,
+	STEP_RESPONSE = 6
 };
 
 struct async_server {
@@ -242,22 +246,42 @@ struct async_server {
 	bool server_running;
 };
 
+inline bool receive_add_agent(socket_type& connection, simulator& sim) {
+	agent_state* new_agent = sim.add_agent();
+	return write(message_type::ADD_AGENT_RESPONSE, connection)
+		&& write((uint64_t) new_agent, connection);
+}
+
 inline bool receive_move(socket_type& connection, simulator& sim) {
-	uintptr_t agent_handle;
+	uint64_t agent_handle;
 	direction dir;
 	unsigned int num_steps;
 	if (!read(agent_handle, connection) && !read(dir, connection) && !read(num_steps, connection))
 		return false;
 	bool result = sim.move(*((agent_state*) agent_handle), dir, num_steps);
-	return write(MOVE_RESPONSE, connection) && write(result, connection);
+	return write(message_type::MOVE_RESPONSE, connection)
+		&& write(result, connection);
+}
+
+inline bool receive_get_position(socket_type& connection, simulator& sim) {
+	uint64_t agent_handle;
+	if (!read(agent_handle, connection))
+		return false;
+	position location = sim.get_position(*((agent_state*) agent_handle));
+	return write(message_type::GET_POSITION_RESPONSE, connection)
+		&& write(location, connection);
 }
 
 void server_process_message(socket_type& connection, simulator& sim) {
 	message_type type;
 	read(connection, type);
 	switch (type) {
+		case message_type::ADD_AGENT:
+			receive_add_agent(connection, sim); break;
 		case message_type::MOVE:
 			receive_move(connection, sim); break;
+		case message_type::GET_POSITION:
+			receive_get_position(connection, sim); break;
 	}
 }
 
@@ -295,25 +319,51 @@ void stop_server(async_server& server) {
 }
 
 
+typedef void (*add_agent_callback)(uint64_t);
 typedef void (*move_callback)(bool);
+typedef void (*get_position_callback)(const position&);
 typedef void (*step_callback)();
+
+struct client_callbacks {
+	add_agent_callback on_add_agent;
+	move_callback on_move;
+	get_position_callback on_get_position;
+	step_callback on_step;
+};
 
 struct client {
 	socket_type connection;
 	std::thread response_listener;
-	move_callback on_move_response;
-	step_callback on_step_response;
+	client_callbacks callbacks;
 	bool client_running;
 };
 
-bool send_move(uintptr_t agent_handle, client& c, direction dir, unsigned int num_steps) {
-	memory_stream out = memory_stream(sizeof(message_type) + sizeof(direction) + sizeof(num_steps));
-	if (!write(message_type::MOVE, out)
-	 || !write(agent_handle, out)
-	 || !write(dir, out)
-	 || !write(num_steps, out)
-	 || send(c.connection, out.buffer, out.length, 0) != 0)
+bool send_add_agent(client& c) {
+	message_type message = message_type::ADD_AGENT;
+	return send(c.connection, &message, sizeof(message), 0) != 0;
+}
+
+bool send_move(client& c, uint64_t agent_handle, direction dir, unsigned int num_steps) {
+	memory_stream out = memory_stream(sizeof(message_type) + sizeof(agent_handle) + sizeof(dir) + sizeof(num_steps));
+	return write(message_type::MOVE, out)
+		&& write(agent_handle, out)
+		&& write(dir, out)
+		&& write(num_steps, out)
+		&& send(c.connection, out.buffer, out.length, 0) != 0;
+}
+
+bool send_get_position(client& c, uint64_t agent_handle) {
+	memory_stream out = memory_stream(sizeof(message_type) + sizeof(uint64_t));
+	return write(message_type::GET_POSITION, out)
+		&& write(agent_handle, out)
+		&& send(c.connection, out.buffer, out.length, 0) != 0;
+}
+
+inline bool receive_add_agent_response(client& c) {
+	uint64_t agent_handle;
+	if (!read(agent_handle, c.connection))
 		return false;
+	c.callbacks.on_add_agent(agent_handle);
 	return true;
 }
 
@@ -321,12 +371,20 @@ inline bool receive_move_response(client& c) {
 	bool move_success;
 	if (!read(move_success, c.connection))
 		return false;
-	c.on_move_response(move_success);
+	c.callbacks.on_move(move_success);
+	return true;
+}
+
+inline bool receive_get_position_response(client& c) {
+	position location;
+	if (!read(location, c.connection))
+		return false;
+	c.callbacks.on_get_position(location);
 	return true;
 }
 
 inline bool receive_step_response(client& c) {
-	c.on_step_response();
+	c.callbacks.on_step();
 }
 
 void run_response_listener(client& c) {
@@ -334,8 +392,12 @@ void run_response_listener(client& c) {
 		message_type type;
 		read(c.connection, type);
 		switch (type) {
+			case message_type::ADD_AGENT_RESPONSE:
+				receive_add_agent_response(c); break;
 			case message_type::MOVE_RESPONSE:
 				receive_move_response(c); break;
+			case message_type::GET_POSITION_RESPONSE:
+				receive_get_position_response(c); break;
 			case message_type::STEP_RESPONSE:
 				receive_step_response(c); break;
 			default:
@@ -345,10 +407,8 @@ void run_response_listener(client& c) {
 	}
 }
 
-bool init_client(client& new_client,
-		const char* server_address, const char* server_port,
-		response_callback on_move_response,
-		response_callback on_step_response)
+bool init_client(client& new_client, client_callbacks callbacks,
+		const char* server_address, const char* server_port)
 {
 	auto process_connection = [&](socket_type& connection) {
 		auto dispatch = [&]() {
@@ -359,8 +419,7 @@ bool init_client(client& new_client,
 	};
 
 	new_client.client_running = true;
-	new_client.on_move_response = on_move_response;
-	new_client.on_step_response = on_step_response;
+	new_client.callbacks = callbacks;
 	return run_client(server_address, server_port, process_connection);
 }
 
