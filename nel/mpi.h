@@ -7,7 +7,6 @@
 #include <stdio.h>
 #include <thread>
 #include <condition_variable>
-#include <sys/epoll.h>
 
 #include "simulator.h"
 
@@ -18,6 +17,7 @@ typedef SOCKET socket_type;
 typedef int socklen_t;
 typedef HANDLE epoll_type;
 #else
+#include <sys/epoll.h>
 #include <sys/socket.h>
 #include <netdb.h>
 typedef int socket_type;
