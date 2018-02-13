@@ -6,6 +6,18 @@ namespace nel {
 
 using namespace core;
 
+static float* PyArg_ParseFloatList(PyObject* arg) {
+    if (!PyList_Check(arg)) {
+        fprintf(stderr, "Expected float list, but got invalid argument.");
+        exit(EXIT_FAILURE);
+    }
+    Py_ssize_t len = PyList_Size(arg);
+    float* items = new float[len];
+    for (unsigned int i = 0; i < len; i++)
+        items[i] = PyFloat_AsDouble(PyList_GetItem(arg, (Py_ssize_t) i))
+    return items;
+}
+
 /** 
  * Creates a new simulator and returns a handle to it.
  * 
@@ -15,9 +27,50 @@ using namespace core;
  * \returns Pointer to the new simulator.
  */
 static PyObject* simulator_new(PyObject *self, PyObject *args) {
-    /* TODO: Obtain simulator configuration as a file path. */
-    /* TODO: Obtain simulator configuration as Python object. */
-    return PyLong_FromVoidPtr(new simulator());
+    unsigned int* max_steps_per_movement;
+    unsigned int* scent_num_dims;
+    unsigned int* color_num_dims;
+    unsigned int* vision_range;
+    unsigned int* patch_size;
+    unsigned int* gibbs_iterations;
+    PyObject* py_items;
+    if (!PyArg_ParseTuple(
+      args, "IIIIIIO", &max_steps_per_movement, &scent_num_dims, &color_num_dims, 
+      &vision_range, &patch_size, &gibbs_iterations, &py_items))
+        return NULL;
+    PyObject *py_items_iter = PyObject_GetIter(py_items);
+    if (!py_items_iter)
+        return NULL;
+    array<item_properties> item_types(8);
+    while (true) {
+        PyObject *next_py_item = PyIter_Next(py_items_iter);
+        if (!next_py_item) break;
+        const char* name;
+        PyObject* py_scent;
+        PyObject* py_color;
+        float* intensity;
+        if (!PyArg_ParseTuple(args, "sOOf", &name, &py_scent, &py_color, &intensity))
+            return NULL;
+        float* scent = PyArg_ParseFloatList(py_scent);
+        float* color = PyArg_ParseFloatList(py_color);
+        item_properties& new_item = item_types[item_types.length];
+        init(new_item.name, name);
+        new_item.scent = scent;
+        new_item.color = color;
+        new_item.intensity = *intensity;
+        item_types.length += 1
+    }
+    simulator_config config;
+    config.max_steps_per_movement = *max_steps_per_movement;
+    config.scent_num_dims = *scent_num_dims;
+    config.color_num_dims = *color_num_dims;
+    config.vision_range = *vision_range;
+    config.patch_size = *patch_size;
+    config.gibbs_iterations = *gibbs_iterations;
+    config.item_types = item_types;
+    // TODO: intensity and interaction functions.
+    // TODO: step callback function.
+    return PyLong_FromVoidPtr(new simulator(config, nullptr));
 }
 
 /**

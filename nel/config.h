@@ -2,6 +2,7 @@
 #define NEL_CONFIG_H_
 
 #include <core/array.h>
+#include <core/utility.h>
 #include "gibbs_field.h"
 
 namespace nel {
@@ -9,6 +10,8 @@ namespace nel {
 using namespace core;
 
 struct item_properties {
+	string name;
+
 	float* scent;
 	float* color;
 
@@ -16,6 +19,7 @@ struct item_properties {
 	float intensity;
 
 	static inline void free(item_properties& properties) {
+		core::free(properties.name);
 		core::free(properties.scent);
 		core::free(properties.color);
 	}
@@ -25,6 +29,7 @@ inline bool init(
 		item_properties& properties, const item_properties& src,
 		unsigned int scent_dimension, unsigned int color_dimension)
 {
+	properties.name = src.name;
 	properties.scent = (float*) malloc(sizeof(float) * scent_dimension);
 	if (properties.scent == NULL) {
 		fprintf(stderr, "init ERROR: Insufficient memory for item_properties.scent.\n");
