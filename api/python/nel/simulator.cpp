@@ -2,6 +2,7 @@
 
 #include <thread>
 #include <nel/gibbs_field.h>
+#include <nel/mpi.h>
 #include <nel/simulator.h>
 
 namespace nel {
@@ -130,10 +131,10 @@ static PyObject* simulator_start_server(PyObject *self, PyObject *args) {
             args, "OssII", &py_sim_handle, &address, &port, &conn_queue_capacity, &worker_count))
         return NULL;
     simulator* sim_handle = (simulator*) PyLong_AsVoidPtr(py_sim_handle);
-    std::thread* sim_thread = new std::thread([]() {
-        // TODO !!!
-    });
-    return PyLong_FromVoidPtr(sim_thread);
+    async_server* sim_server = new async_server();
+    // TODO: Pass a reference to the simulator.
+    init_server(*sim_server, address, port, conn_queue_capacity, worker_count);
+    return PyLong_FromVoidPtr(sim_server);
 }
 
 /** 
@@ -148,8 +149,9 @@ static PyObject* simulator_stop_server(PyObject *self, PyObject *args) {
     PyObject* py_sim_server;
     if (!PyArg_ParseTuple(args, "O", &py_sim_server))
         return NULL;
-    std::thread* sim_thread = (std::thread*) PyLong_AsVoidPtr(py_sim_server);
-    // TODO !!!
+    async_server* sim_server = (async_server*) PyLong_AsVoidPtr(py_sim_server);
+    stop_server(*sim_server);
+    delete sim_server;
     Py_INCREF(Py_None);
     return Py_None;
 }
