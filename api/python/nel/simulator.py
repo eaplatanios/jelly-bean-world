@@ -19,7 +19,7 @@ class SimulatorType(Enum):
   C = 0   # Uses the C-Python API bindings to interface with the simulator 
           # and should be faster than the MPI simulator. However, this does 
           # not allow the simulator to run as a separate server process, that 
-          # multiple agent processed can attach to. In this case, all agents 
+          # multiple agent processes can attach to. In this case, all agents 
           # must be defined and used as part of the same Python process that 
           # creates the simulator.
   MPI = 1 # Uses message passing over a socket (using TCP) and allows the 
