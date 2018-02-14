@@ -31,6 +31,7 @@ inline bool write(const message_type& type, Stream& out) {
 
 struct async_server {
 	std::thread server_thread;
+	socket_type server_socket;
 	bool server_running;
 };
 
@@ -73,13 +74,14 @@ void server_process_message(socket_type& connection, simulator& sim) {
 	}
 }
 
-bool init_server(async_server& new_server, simulator& sim,
-		const char* server_address, const char* server_port,
+bool init_server(
+		async_server& new_server, simulator& sim, uint16_t server_port,
 		unsigned int connection_queue_capacity, unsigned int worker_count)
 {
 	std::condition_variable cv; std::mutex lock;
 	auto dispatch = [&]() {
-		run_server(server_address, server_port, connection_queue_capacity, worker_count, new_server.server_running, cv, server_process_message, sim);
+		run_server(new_server.server_socket, server_port, connection_queue_capacity,
+				worker_count, new_server.server_running, cv, server_process_message, sim);
 	};
 	new_server.server_running = true;
 	new_server.server_thread = std::thread(dispatch);
@@ -93,16 +95,18 @@ bool init_server(async_server& new_server, simulator& sim,
 	return true;
 }
 
-inline bool init_server(simulator& sim,
-		const char* server_address, const char* server_port,
+inline bool init_server(simulator& sim, uint16_t server_port,
 		unsigned int connection_queue_capacity, unsigned int worker_count)
 {
+	socket_type server_socket;
 	bool dummy = true; std::condition_variable cv;
-	return run_server(server_address, server_port, connection_queue_capacity, worker_count, dummy, cv, server_process_message, sim);
+	return run_server(server_socket, server_port, connection_queue_capacity,
+			worker_count, dummy, cv, server_process_message, sim);
 }
 
 void stop_server(async_server& server) {
 	server.server_running = false;
+	write(0, server.server_socket);
 	server.server_thread.join();
 }
 
@@ -178,7 +182,8 @@ inline bool receive_step_response(client& c) {
 void run_response_listener(client& c) {
 	while (c.client_running) {
 		message_type type;
-		read(type, c.connection);
+		bool success = read(type, c.connection);
+		if (!success) return;
 		switch (type) {
 			case message_type::ADD_AGENT_RESPONSE:
 				receive_add_agent_response(c); break;
@@ -212,6 +217,7 @@ bool init_client(client& new_client, client_callbacks callbacks,
 }
 
 void stop_client(client& c) {
+	shutdown(c.connection, 2);
 	c.client_running = false;
 	c.response_listener.join();
 }

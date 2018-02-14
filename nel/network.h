@@ -97,48 +97,50 @@ void run_worker(array<socket_type>& connection_queue,
 		lck.unlock();
 
 		process_message(connection, std::forward<CallbackArgs>(callback_args)...);
+fprintf(stderr, "run_worker: Finished process_message.\n");
 	}
 }
 
 template<typename ProcessMessageCallback, typename... CallbackArgs>
-bool run_server(
-		const char* server_address, const char* server_port,
+bool run_server(socket_type& sock, uint16_t server_port,
 		unsigned int connection_queue_capacity, unsigned int worker_count,
 		bool& server_running, std::condition_variable& init_cv,
 		ProcessMessageCallback process_message, CallbackArgs&&... callback_args)
 {
-	socket_type sock = socket(AF_INET, SOCK_STREAM, );
-	for (addrinfo* entry = addresses; entry != NULL; entry++) {
-		sock = socket(entry->ai_family, entry->ai_socktype, entry->ai_protocol);
-		if (!valid_socket(sock)) {
-			network_error("run_server ERROR: Unable to open socket");
-			continue;
-		}
-
-		int yes = 1;
-		if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) != 0) {
-			network_error("run_server ERROR: Unable to set socket option");
-			server_running = false; init_cv.notify_one(); return false;
-		}
-
-		if (!bind(sock, entry->ai_addr, entry->ai_addrlen)) {
-			shutdown(sock, 2);
-			continue;
-		}
-		break;
-	}
-	freeaddrinfo(addresses);
-
-	if (listen(sock, connection_queue_capacity) != 0) {
-		network_error("run_server ERROR: Unable to listen to socket");
-		shutdown(sock, 2); server_running = false; init_cv.notify_one();
+	sock = socket(AF_INET6, SOCK_STREAM, 0);
+	if (!valid_socket(sock)) {
+		network_error("run_server ERROR: Unable to open socket");
+		shutdown(sock, 2); server_running = false; init_cv.notify_all();
 		return false;
 	}
 
-	epoll_type epoll_instance = epoll_create(0);
-	if (valid_epoll(epoll_instance)) {
+	int yes = 1;
+	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) != 0) {
+		network_error("run_server ERROR: Unable to set socket option");
+		server_running = false; init_cv.notify_all(); return false;
+	}
+
+	sockaddr_in6 server_addr;
+	memset(&server_addr, 0, sizeof(server_addr));
+	server_addr.sin6_family = AF_INET6;
+	server_addr.sin6_port = htons(server_port);
+	server_addr.sin6_addr = in6addr_any;
+	if (bind(sock, (sockaddr*) &server_addr, sizeof(server_addr)) != 0) {
+		network_error("run_server ERROR: Unable to bind to socket");
+		shutdown(sock, 2); server_running = false; init_cv.notify_all();
+		return false;
+	}
+
+	if (listen(sock, connection_queue_capacity) != 0) {
+		network_error("run_server ERROR: Unable to listen to socket");
+		shutdown(sock, 2); server_running = false; init_cv.notify_all();
+		return false;
+	}
+
+	epoll_type epoll_instance = epoll_create1(0);
+	if (!valid_epoll(epoll_instance)) {
 		network_error("run_server ERROR: Failed to initialize network event polling");
-		shutdown(sock, 2); server_running = false; init_cv.notify_one();
+		shutdown(sock, 2); server_running = false; init_cv.notify_all();
 		return false;
 	}
 
@@ -149,7 +151,7 @@ bool run_server(
 	if (epoll_ctl(epoll_instance, EPOLL_CTL_ADD, sock, &new_event) == -1) {
 		network_error("run_server ERROR: Failed to add network polling event");
 		shutdown(sock, 2); epoll_close(epoll_instance);
-		server_running = false; init_cv.notify_one();
+		server_running = false; init_cv.notify_all();
 		return false;
 	}
 
@@ -164,7 +166,7 @@ bool run_server(
 		workers[i] = std::thread(start_worker);
 
 	/* notify that the server has successfully started */
-	init_cv.notify_one();
+	init_cv.notify_all();
 
 	/* the main loop */
 	sockaddr_storage client_address;
@@ -196,8 +198,9 @@ bool run_server(
 			} else {
 				if (events[i].events & EPOLLIN) {
 					/* there is incoming data from a client */
+					lock.lock();
 					connection_queue.add(events[i].data.fd);
-					cv.notify_one();
+					lock.unlock(); cv.notify_one();
 				} if (events[i].events & (EPOLLHUP | EPOLLERR)) {
 					/* the client has closed this connection, so remove it */
 					if (epoll_ctl(epoll_instance, EPOLL_CTL_DEL, events[i].data.fd, NULL) == -1) {
@@ -227,8 +230,10 @@ bool run_client(
 		ProcessConnectionCallback process_connection)
 {
 	addrinfo hints;
+	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_protocol = IPPROTO_TCP;
 
 	addrinfo* addresses;
 	int result = getaddrinfo(server_address, server_port, &hints, &addresses);
