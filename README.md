@@ -100,9 +100,9 @@ user to specify which intensity/interaction functions they wish to use, for
 each item.
 
 Vision is implemented straightforwardly: within the visual field of each agent,
-cells with items are rendered with a single color. Then for each item within
-the visual field of the agent, we render the corresponding pixel with the color
-of the item.
+empty cells are rendered with a single color. Then for each item within the
+visual field of the agent, we render the corresponding pixel with the color of
+the item.
 
 Scent is modeled as a simple diffusion system on the grid, where each cell is
 given a vector of scents (where each dimension can be used to model
