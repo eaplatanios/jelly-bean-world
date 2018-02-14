@@ -49,26 +49,26 @@ static PyObject* simulator_set_step_callback(PyObject *self, PyObject *args) {
     return result;
 }
 
-enum class step_callback_fns {
-    C_API = 0, MPI_API = 1
+enum class simulator_type {
+    C = 0, MPI = 1
 };
 
-void c_api_step_callback_fn(const agent_state& agent) {
+void c_step_callback_fn(const agent_state& agent) {
     // TODO!!!
-    fprintf(stderr, "The C API simulator step callback function has not been implemented yet.");
+    fprintf(stderr, "The C simulator step callback function has not been implemented yet.");
     exit(EXIT_FAILURE);
 }
 
-void mpi_api_step_callback_fn(const agent_state& agent) {
+void mpi_step_callback_fn(const agent_state& agent) {
     // TODO!!!
-    fprintf(stderr, "The MPI API simulator step callback function has not been implemented yet.");
+    fprintf(stderr, "The MPI simulator step callback function has not been implemented yet.");
     exit(EXIT_FAILURE);
 }
 
-step_callback get_step_callback_fn(step_callback_fns type) {
+step_callback get_step_callback_fn(simulator_type type) {
     switch (type) {
-        case step_callback_fns::C_API  : return c_api_step_callback_fn;
-        case step_callback_fns::MPI_API: return mpi_api_step_callback_fn;
+        case simulator_type::C  : return c_step_callback_fn;
+        case simulator_type::MPI: return mpi_step_callback_fn;
     }
 }
 
@@ -91,13 +91,13 @@ static PyObject* simulator_new(PyObject *self, PyObject *args) {
     PyObject* py_intensity_fn_args;
     unsigned int* py_interaction_fn;
     PyObject* py_interaction_fn_args;
-    unsigned int* py_step_callback_fn;
+    unsigned int* py_sim_type;
     if (!PyArg_ParseTuple(
       args, "IIIIIIOIOIOI", &max_steps_per_movement, &scent_num_dims, &color_num_dims, 
       &vision_range, &patch_size, &gibbs_iterations, &py_items, 
       &py_intensity_fn, &py_intensity_fn_args, 
       &py_interaction_fn, &py_interaction_fn_args, 
-      &py_step_callback_fn)) {
+      &py_sim_type)) {
         fprintf(stderr, "Invalid argument types in the call to 'simulator_c.new'.");
         exit(EXIT_FAILURE);
     }
@@ -137,7 +137,7 @@ static PyObject* simulator_new(PyObject *self, PyObject *args) {
     config.intensity_fn = get_intensity_fn((intensity_fns) *py_intensity_fn, intensity_fn_args.key, (unsigned int) intensity_fn_args.value);
     pair<float*, Py_ssize_t> interaction_fn_args = PyArg_ParseFloatList(py_interaction_fn_args);
     config.interaction_fn = get_interaction_fn((interaction_fns) *py_interaction_fn, interaction_fn_args.key, (unsigned int) interaction_fn_args.value);
-    step_callback step_callback_fn = get_step_callback_fn((step_callback_fns) *py_step_callback_fn);
+    simulator_type step_callback_fn = get_step_callback_fn((simulator_type) *py_sim_type);
     return PyLong_FromVoidPtr(new simulator(config, step_callback_fn));
 }
 
@@ -211,14 +211,24 @@ static PyObject* simulator_stop_server(PyObject *self, PyObject *args) {
  * \param   self    Pointer to the Python object calling this method.
  * \param   args    Arguments:
  *                  - Handle to the native simulator object as a PyLong.
+ *                  - Simulator type encoded as an integer:
+ *                      C = 0,
+ *                      MPI = 1.
  * \returns Pointer to the new agent's state.
  */
 static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
     PyObject* py_sim_handle;
-    if (!PyArg_ParseTuple(args, "O", &py_sim_handle))
+    unsigned int* py_sim_type;
+    if (!PyArg_ParseTuple(args, "OI", &py_sim_handle, &py_sim_type))
         return NULL;
     simulator* sim_handle = (simulator*) PyLong_AsVoidPtr(py_sim_handle);
-    return PyLong_FromVoidPtr((void*) sim_handle->add_agent());
+    switch ((simulator_type) *py_sim_type) {
+        case simulator_type::C:
+            return PyLong_FromVoidPtr((void*) sim_handle->add_agent());
+        case simulator_type::MPI:
+            /* TODO !!! */
+            return NULL;
+    }
 }
 
 /** 
@@ -228,6 +238,9 @@ static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
  * \param   self    Pointer to the Python object calling this method.
  * \param   args    Arguments:
  *                  - Handle to the native simulator object as a PyLong.
+ *                  - Simulator type encoded as an integer:
+ *                      C = 0,
+ *                      MPI = 1.
  *                  - Agent ID.
  *                  - Move direction encoded as an integer:
  *                      UP = 0,
@@ -239,15 +252,22 @@ static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
  */
 static PyObject* simulator_move(PyObject *self, PyObject *args) {
     PyObject* py_sim_handle;
+    unsigned int* py_sim_type;
     PyObject* py_agt_handle;
     int* dir;
     int* num_steps;
-    if (!PyArg_ParseTuple(args, "OOii", &py_sim_handle, &py_agt_handle, &dir, &num_steps))
+    if (!PyArg_ParseTuple(args, "OIOii", &py_sim_handle, &py_sim_type, &py_agt_handle, &dir, &num_steps))
         return NULL;
     simulator* sim_handle = (simulator*) PyLong_AsVoidPtr(py_sim_handle);
     agent_state* agt_handle = (agent_state*) PyLong_AsVoidPtr(py_agt_handle);
-    bool success = sim_handle->move(*agt_handle, static_cast<direction>(*dir), *num_steps);
-    return Py_BuildValue("O", success ? Py_True : Py_False);
+    switch ((simulator_type) *py_sim_type) {
+        case simulator_type::C: 
+            bool success = sim_handle->move(*agt_handle, static_cast<direction>(*dir), *num_steps);
+            return Py_BuildValue("O", success ? Py_True : Py_False);
+        case simulator_type::MPI: 
+            /* TODO !!! */ 
+            return NULL;
+    }
 }
 
 /** 
