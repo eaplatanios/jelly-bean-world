@@ -3,6 +3,7 @@
 
 #include <core/array.h>
 #include <core/utility.h>
+#include <atomic>
 #include "map.h"
 
 namespace nel {
@@ -11,6 +12,19 @@ using namespace core;
 
 /** Represents all possible directions of motion in the environment. */
 enum class direction { UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3 };
+
+template<typename Stream>
+inline bool read(direction& dir, Stream& in) {
+    uint8_t c;
+    if (!read(c, in)) return false;
+    dir = (direction) c;
+    return true;
+}
+
+template<typename Stream>
+inline bool write(const direction& dir, Stream& out) {
+    return write((uint8_t) dir, out);
+}
 
 /** Represents the state of an agent in the simulator. */
 struct agent_state {

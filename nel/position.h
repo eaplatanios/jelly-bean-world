@@ -87,11 +87,21 @@ struct position {
 	static constexpr int64_t MAX_INT64 = std::numeric_limits<int64_t>::max();
 };
 
-} /* namespace nel */
+template<typename Stream>
+inline bool read(position& p, Stream& in) {
+	return read(p.x, in) && read(p.y, in);
+}
 
 template<typename Stream>
-inline bool print(const nel::position& p, Stream& out) {
+inline bool write(const position& p, Stream& out) {
+	return write(p.x, out) && write(p.y, out);
+}
+
+template<typename Stream>
+inline bool print(const position& p, Stream& out) {
 	return fprintf(out, "(%ld, %ld)", p.x, p.y) > 0;
 }
+
+} /* namespace nel */
 
 #endif /* NEL_POSITION_H_ */
