@@ -4,7 +4,7 @@ A framework for experimenting with never-ending learning.
 
 ## Requirements
 
-- GCC 5
+- GCC 5+ or Clang 5+
 - Python 2.7 or 3.6 (for the Python API)
 
 ## Installation Instructions
@@ -45,7 +45,7 @@ Under the current design:
   - Each simulator *owns* a set of agents.
   - Users can easily add/register new agents to an existing simulator. 
   - Each agent interacts with the simulator by deciding 
-    **when and where to move**. 
+    **when and where to move**.
   - Once all agents have requested to move, the simulator progresses by one 
     time step and notifies all the agents (by invoking the `on_step()` method 
     that they implement).
@@ -74,7 +74,44 @@ Simulators currently support two modes of operation:
 
 #### Mechanics
 
-TODO: Incremental map generation, vision, and scent.
+We simulate an infinite map by dividing it into a collection of `n x n`
+*patches*. When agents move around, they may move into new patches. The
+simulator ensures that when an agent approaches a new patch, that patch is
+appropriately initialized (if it wasn't previously). When new patches are
+initialized, we fill them with items.
+
+The items are distributed according to a pairwise interaction point process on
+the 2-dimensional grid of integers. The probability of a collection of points
+`X = {X_1, X_2, ...}` is given by:
+```
+    p(X) = c * exp{sum from i to inf of f(X_i) * sum from j to inf of g(X_i, X_j)}.
+```
+Here, `c` is a normalizing constant. `f(x)` is the **intensity** function, that
+controls the likelihood of generating a point at `x` independent of other
+points. `g(x,y)` is the **interaction** function, which controls the likelihood
+of generating the point at `x` given the existence of a point at `y`. Gibbs
+sampling is used to sample from this distribution, and only requires a small
+number of iterations to mix for non-pathological intensity/interaction
+functions.
+
+It is through the interaction function that we can control whether items of one
+type are "attracted to" or "repelled by" items of another type. We allow the
+user to specify which intensity/interaction functions they wish to use, for
+each item.
+
+Vision is implemented straightforwardly: within the visual field of each agent,
+cells with items are rendered with a single color. Then for each item within
+the visual field of the agent, we render the corresponding pixel with the color
+of the item.
+
+Scent is modeled as a simple diffusion system on the grid, where each cell is
+given a vector of scents (where each dimension can be used to model
+orthogonal/unrelated scents). More precisely, if `S(x,y,t)` is the scent at
+location `(x,y)` at time `t`, then
+```
+    S(x,y,t+1) = lambda*S(x,y,t) + C(x,y,t) + alpha*(S(x-1,y,t) + S(x+1,y,t) + S(x,y-1,t) + S(x,y+1,t)).
+```
+<!-- TODO: add details about modeling scent in inactive patches -->
 
 ### Agents
 
