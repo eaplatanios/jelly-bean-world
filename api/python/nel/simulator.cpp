@@ -25,11 +25,13 @@ static pair<float*, Py_ssize_t> PyArg_ParseFloatList(PyObject* arg) {
 static PyObject* py_step_callback = NULL;
 
 /** 
- * Sets the step callback function for Python simulators using the C callback method.
+ * Sets the step callback function for Python simulators using the C callback 
+ * method.
  * 
  * \param   self    Pointer to the Python object calling this method.
  * \param   args    Arguments:
- *                  - Handle to a Python callable acting as the callback.
+ *                  - Handle to a Python callable acting as the callback. This 
+ *                    callable should take an agent state as input.
  * \returns None.
  */
 static PyObject* simulator_set_step_callback(PyObject *self, PyObject *args) {
@@ -42,7 +44,7 @@ static PyObject* simulator_set_step_callback(PyObject *self, PyObject *args) {
         }
         Py_XINCREF(temp);         /* Add a reference to new callback. */
         Py_XDECREF(my_callback);  /* Dispose of the previous callback. */
-        py_step_callback = temp;       /* Store the new callback. */
+        py_step_callback = temp;  /* Store the new callback. */
         Py_INCREF(Py_None);
         result = Py_None;
     }
@@ -53,14 +55,31 @@ enum class simulator_type {
     C = 0, MPI = 1
 };
 
-void c_step_callback_fn(const agent_state& agent) {
-    // TODO!!!
-    fprintf(stderr, "The C simulator step callback function has not been implemented yet.");
-    exit(EXIT_FAILURE);
+void c_step_callback_fn(
+        const simulator* sim, const unsigned int id, 
+        const agent_state& agent, const simulator_config& sim_config) {
+    /* Construct the callback arguments. */
+    PyObject* py_sim_handle = PyLong_FromVoidPtr(sim);
+    PyObject* py_scent = PyList_New((Py_ssize_t) sim_config.scent_dimension);
+    for (unsigned int i = 0; i < sim_config.scent_dimension; i++)
+        PyList_SetItem(py_scent, (Py_ssize_t) i, PyFloat_FromDouble((double) agent.current_scent[i]));
+    PyObject* py_vision = PyList_New((Py_ssize_t) sim_config.color_dimension);
+    for (unsigned int i = 0; i < sim_config.color_dimension; i++)
+        PyList_SetItem(py_vision, (Py_ssize_t) i, PyFloat_FromDouble((double) agent.current_vision[i]));
+    
+    /* Invoke the callback. */
+    PyObject* args = Py_BuildValue("OI(II)OO", 
+        py_sim_handle, id, agent.current_position.x, , agent.current_position.y, 
+        py_scent, py_vision);
+    PyObject_CallObject(py_step_callback, arglist);
+    Py_DECREF(args);
 }
 
-void mpi_step_callback_fn(const agent_state& agent) {
-    // TODO!!!
+void mpi_step_callback_fn(
+        const simulator* sim, const unsigned int id, 
+        const agent_state& agent, const simulator_config& sim_config) {
+    // TODO !!!
+    // TODO: Does this need to be different than the C one? Who handles messages in this case?
     fprintf(stderr, "The MPI simulator step callback function has not been implemented yet.");
     exit(EXIT_FAILURE);
 }
@@ -224,7 +243,7 @@ static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
     simulator* sim_handle = (simulator*) PyLong_AsVoidPtr(py_sim_handle);
     switch ((simulator_type) *py_sim_type) {
         case simulator_type::C:
-            return PyLong_FromVoidPtr((void*) sim_handle->add_agent());
+            return Py_BuildValue("I", sim_handle->add_agent());
         case simulator_type::MPI:
             /* TODO !!! */
             return NULL;
@@ -253,13 +272,13 @@ static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
 static PyObject* simulator_move(PyObject *self, PyObject *args) {
     PyObject* py_sim_handle;
     unsigned int* py_sim_type;
-    PyObject* py_agt_handle;
+    unsigned int* agent_id;
     int* dir;
     int* num_steps;
-    if (!PyArg_ParseTuple(args, "OIOii", &py_sim_handle, &py_sim_type, &py_agt_handle, &dir, &num_steps))
+    if (!PyArg_ParseTuple(args, "OIIii", &py_sim_handle, &py_sim_type, &agent_id, &dir, &num_steps))
         return NULL;
     simulator* sim_handle = (simulator*) PyLong_AsVoidPtr(py_sim_handle);
-    agent_state* agt_handle = (agent_state*) PyLong_AsVoidPtr(py_agt_handle);
+    agent_state* agt_handle = sim_handle->agents[agent_id];
     switch ((simulator_type) *py_sim_type) {
         case simulator_type::C: 
             bool success = sim_handle->move(*agt_handle, static_cast<direction>(*dir), *num_steps);
@@ -282,11 +301,11 @@ static PyObject* simulator_move(PyObject *self, PyObject *args) {
  */
 static PyObject* simulator_position(PyObject *self, PyObject *args) {
     PyObject* py_sim_handle;
-    PyObject* py_agt_handle;
-    if (!PyArg_ParseTuple(args, "OO", &py_sim_handle, &py_agt_handle))
+    unsigned int* agent_id;
+    if (!PyArg_ParseTuple(args, "OI", &py_sim_handle, &agent_id))
         return NULL;
     simulator* sim_handle = (simulator*) PyLong_AsVoidPtr(py_sim_handle);
-    agent_state* agt_handle = (agent_state*) PyLong_AsVoidPtr(py_agt_handle);
+    agent_state* agt_handle = sim_handle->agents[agent_id];
     position pos = sim_handle->get_position(*agt_handle);
     return Py_BuildValue("(ii)", pos.x, pos.y);
 }

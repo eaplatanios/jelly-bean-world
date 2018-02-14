@@ -106,8 +106,6 @@ inline bool init(agent_state& agent_state, map& world,
     return true;
 }
 
-typedef void (*step_callback)(const agent_state&);
-
 struct item_properties {
 	string name;
 
@@ -185,8 +183,12 @@ struct simulator_config {
 	~simulator_config() {
 		for (item_properties& properties : item_types)
 			core::free(properties);
-	}
+    }
 };
+
+typedef void (*step_callback)(
+    const simulator* sim, const unsigned int id, 
+    const agent_state&, const simulator_config&);
 
 /**
  * Simulator that forms the core of our experimentation framework.
@@ -235,6 +237,7 @@ public:
      */
     inline agent_state* add_agent() {
         agent_array_lock.lock();
+        unsigned int id = agents.length;
         agents.ensure_capacity(agents.length + 1);
         agent_state* new_agent = (agent_state*) malloc(sizeof(agent_state));
         agents.add(new_agent);
@@ -242,7 +245,7 @@ public:
 
         init(*new_agent, world, config.color_dimension, 
             config.vision_range, config.scent_dimension);
-        return new_agent;
+        return id;
     }
 
     /** 
@@ -304,8 +307,8 @@ private:
         time++;
 
         // Invoke the step callback function for each agent.
-        for (agent_state* agent : agents)
-            step_callback_fn(*agent);
+        for (unsigned int id = 0; id < agents.length; id++)
+            step_callback_fn(this, id, *agents[id], config);            
     }
 
     inline void get_scent(position world_position) {

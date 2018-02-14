@@ -3,9 +3,14 @@ from __future__ import absolute_import, division, print_function
 from enum import Enum
 from nel_c import simulator_c
 
+from .agent import AgentState
 from .item import IntensityFunction, InteractionFunction
+from .position import Position
 
 __all__ = ['SimulatorType', 'SimulatorConfig', 'Simulator']
+
+
+__SIM_HANDLE_TO_SIM__ = dict()
 
 
 class SimulatorType(Enum):
@@ -21,6 +26,22 @@ class SimulatorType(Enum):
           # simulator to run as a separate server process that multiple agent 
           # processes can attach to. However, it may result in slower 
           # performance than the C simulator.
+
+
+def _step_callback(sim_handle, agent_id, pos, scent, vision):
+  """Step callback function helper for C simulators.
+  
+  Arguments:
+    sim_handle: Handle to a C simulator instance.
+    agent_id:   Agent ID in that simulator.
+    pos:        Tuple containing the horizontal and vertical coordinates of the 
+                agent at this step.
+    scent:      List of floats representing scent at the current grid cell.
+    vision:     List of floats representing vision from the current grid cell.
+  """
+  agent = __SIM_HANDLE_TO_SIM__[sim_handle].agents[agent_id]
+  state = agent.AgentState(Position(pos[0], pos[1]), scent, vision)
+  agent.on_step(state)
 
 
 class SimulatorConfig(object):
@@ -84,8 +105,6 @@ class Simulator(object):
                 the `MPI` type should be used. The default is to use the `C` 
                 simulator.
     """
-    self.config = config
-    self.sim_type = sim_type
     self._handle = simulator_c.new(
       config.max_steps_per_movement, config.scent_num_dims, 
       config.color_num_dims, config.vision_range, config.patch_size, 
@@ -93,7 +112,10 @@ class Simulator(object):
       [(i.name, i.scent, i.color, i.intensity) for i in config.items], 
       config.intensity_fn, config.intensity_fn_args, 
       config.interaction_fn, config.interaction_fn_args, sim_type)
+    self.sim_type = sim_type
+    self.agents = dict()
     self._server_handle = None
+    __SIM_HANDLE_TO_SIM__[self._handle] = self
   
   def start_server(self, port=54353, conn_queue_capacity=256, num_workers=8):
     """Starts the simulator server.
@@ -138,13 +160,18 @@ class Simulator(object):
     again after it's been deleted."""
     simulator_c.delete(self._handle)
   
-  def _add_agent(self):
+  def _add_agent(self, py_agent):
     """Adds a new agent to this simulator.
     
+    Arguments:
+      py_agent: Python agent to be added to this simulator.
+
     Returns:
       The new agent's ID.
     """
-    return simulator_c.add_agent(self._handle, self.sim_type)
+    id = simulator_c.add_agent(self._handle, self.sim_type)
+    self.agents[id] = py_agent
+    return id
 
   def _move(self, agent_id, direction, num_steps):
     """Moves the specified agent in the simulated environment.
