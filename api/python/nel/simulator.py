@@ -99,9 +99,7 @@ class Simulator(object):
       step_callback)
     self._server_handle = None
   
-  def start_server(
-      self, address='localhost', port=54353, conn_queue_capacity=256, 
-      num_workers=8):
+  def start_server(self, port=54353, conn_queue_capacity=256, num_workers=8):
     """Starts the simulator server.
     
     Note that the simulator can only be started as a server if the MPI 
@@ -109,7 +107,6 @@ class Simulator(object):
     C step callback is being used.
 
     Arguments:
-      address:             Server address.
       port:                Server port.
       conn_queue_capacity: Connection queue capacity for the server.
       num_workers:         Number of worker threads for the server.
@@ -123,7 +120,7 @@ class Simulator(object):
         "Ignoring request to start the simulation server, because one "
         "is already running.")
     self._server_handle = simulator_c.start_server(
-      self._handle, address, str(port), conn_queue_capacity, num_workers)
+      self._handle, port, conn_queue_capacity, num_workers)
 
   def stop_server(self):
     """Stops the simulator server.

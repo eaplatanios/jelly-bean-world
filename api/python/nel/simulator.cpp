@@ -166,8 +166,7 @@ static PyObject* simulator_delete(PyObject *self, PyObject *args) {
  * \param   self    Pointer to the Python object calling this method.
  * \param   args    Arguments:
  *                  - Handle to the native simulator object as a PyLong.
- *                  - Server address (string).
- *                  - Server port (string).
+ *                  - Server port (integer).
  *                  - Connection queue capacity (integer).
  *                  - Worker count (integer).
  * \returns Handle to the simulator server thread.
@@ -175,16 +174,14 @@ static PyObject* simulator_delete(PyObject *self, PyObject *args) {
 static PyObject* simulator_start_server(PyObject *self, PyObject *args) {
     PyObject* py_sim_handle;
     const char* address;
-    const char* port;
+    unsigned short int* port;
     unsigned int* conn_queue_capacity;
     unsigned int* worker_count;
-    if (!PyArg_ParseTuple(
-            args, "OssII", &py_sim_handle, &address, &port, &conn_queue_capacity, &worker_count))
+    if (!PyArg_ParseTuple(args, "OHII", &py_sim_handle, &port, &conn_queue_capacity, &worker_count))
         return NULL;
     simulator* sim_handle = (simulator*) PyLong_AsVoidPtr(py_sim_handle);
     async_server* sim_server = new async_server();
-    // TODO: Pass a reference to the simulator.
-    init_server(*sim_server, address, port, conn_queue_capacity, worker_count);
+    init_server(*sim_server, *sim_handle, (uint16_t) *port, conn_queue_capacity, worker_count);
     return PyLong_FromVoidPtr(sim_server);
 }
 
