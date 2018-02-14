@@ -1,6 +1,7 @@
 #include "mpi.h"
 
 using namespace nel;
+using namespace core;
 
 struct test_server {
 	std::thread server_thread;
@@ -9,12 +10,31 @@ struct test_server {
 };
 
 void process_test_server_message(socket_type& server) {
-	unsigned int i;
-	if (!read(i, server)) {
-		fprintf(stderr, "Server failed to read message.\n");
-		return;
+	static std::mutex lock;
+
+	bool is_string;
+	lock.lock();
+	if (!read(is_string, server)) {
+		fprintf(stderr, "Server failed to read is_string.\n");
+		lock.unlock(); return;
 	}
-	fprintf(stderr, "Server received message: %u.\n", i);
+	if (is_string) {
+		string s;
+		if (!read(s, server)) {
+			fprintf(stderr, "Server failed to read string.\n");
+			lock.unlock(); return;
+		}
+		fprintf(stderr, "Server received message: \"");
+		print(s, stderr); fprintf(stderr, "\".\n");
+	} else {
+		int64_t i;
+		if (!read(i, server)) {
+			fprintf(stderr, "Server failed to read int64_t.\n");
+			lock.unlock(); return;
+		}
+		fprintf(stderr, "Server received message: %ld.\n", i);
+	}
+	lock.unlock();
 }
 
 bool init_server(test_server& new_server, uint16_t server_port,
@@ -53,25 +73,58 @@ bool init_client(socket_type& new_client,
 }
 
 void stop_client(client& c) {
-	shutdown(c.connection, 2);
+	shutdown(c.connection.handle, 2);
 	c.client_running = false;
 	c.response_listener.join();
 }
 
-int main(int argc, const char** argv) {
+void test_client_send(socket_type& client, int64_t i) {
+	if (!write(false, client)
+	 || !write(i, client))
+		 fprintf(stderr, "test_client_send ERROR: Failed to send int64_t to server.\n");
+}
+
+void test_client_send(socket_type& client, const string& s) {
+	if (!write(true, client)
+	 || !write(s, client))
+		 fprintf(stderr, "test_client_send ERROR: Failed to send string to server.\n");
+}
+
+void test_network() {
 	test_server new_server;
 	bool success = init_server(new_server, 52342, 16, 8);
 	fprintf(stderr, "init_server returned %s.\n", success ? "true" : "false");
 
-	socket_type new_client;
-	success = init_client(new_client, "localhost", "52342");
-	fprintf(stderr, "init_client returned %s.\n", success ? "true" : "false");
+	unsigned int client_count = 10;
+	std::thread* client_threads = new std::thread[client_count];
+	std::atomic_uint counter(0);
+	auto dispatch = [&counter]() {
+		unsigned int thread_id = counter++;
+		socket_type client;
+		bool success = init_client(client, "localhost", "52342");
+		fprintf(stderr, "[client %u] init_client returned %s.\n", thread_id, success ? "true" : "false");
 
-	//for (int i = 0; i < 10; i++)
-		write(2, new_client);
-	shutdown(new_client, 2);
+		char message[1024];
+		snprintf(message, 1024, "Hello from client %u!", thread_id);
+		test_client_send(client, string(message));
 
-	std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+		for (int64_t i = 0; i < 10; i++)
+			test_client_send(client, thread_id * 10 + i);
+		shutdown(client.handle, 2);
+	};
+	for (unsigned int i = 0; i < client_count; i++)
+		client_threads[i] = std::thread(dispatch);
+	for (unsigned int i = 0; i < client_count; i++)
+		client_threads[i].join();
+	delete[] client_threads;
+
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
 	stop_server(new_server);
+}
+
+int main(int argc, const char** argv) {
+	test_network();
 	return EXIT_SUCCESS;
 }

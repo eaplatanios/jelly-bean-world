@@ -129,6 +129,8 @@ step_callback get_step_callback_fn(step_callback_fns type) {
         case step_callback_fns::C_API  : return c_api_step_callback_fn;
         case step_callback_fns::MPI_API: return mpi_api_step_callback_fn;
     }
+    fprintf(stderr, "get_step_callback_fn ERROR: Unrecognized callback function type.\n");
+    return NULL;
 }
 
 struct item_properties {

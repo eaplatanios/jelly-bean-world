@@ -6,6 +6,8 @@
 
 namespace nel {
 
+using namespace core;
+
 enum class message_type : uint64_t {
 	ADD_AGENT = 0,
 	ADD_AGENT_RESPONSE = 1,
@@ -66,12 +68,19 @@ void server_process_message(socket_type& connection, simulator& sim) {
 	read(type, connection);
 	switch (type) {
 		case message_type::ADD_AGENT:
-			receive_add_agent(connection, sim); break;
+			receive_add_agent(connection, sim); return;
 		case message_type::MOVE:
-			receive_move(connection, sim); break;
+			receive_move(connection, sim); return;
 		case message_type::GET_POSITION:
-			receive_get_position(connection, sim); break;
+			receive_get_position(connection, sim); return;
+
+		case message_type::ADD_AGENT_RESPONSE:
+		case message_type::MOVE_RESPONSE:
+		case message_type::GET_POSITION_RESPONSE:
+		case message_type::STEP_RESPONSE:
+			break;
 	}
+	fprintf(stderr, "server_process_message WARNING: Received message with unsupported type.\n");
 }
 
 bool init_server(
@@ -111,16 +120,17 @@ void stop_server(async_server& server) {
 }
 
 
+typedef void (*mpi_callback)();
 typedef void (*mpi_add_agent_callback)(uint64_t);
 typedef void (*mpi_move_callback)(bool);
 typedef void (*mpi_get_position_callback)(const position&);
-typedef void (*mpi_step_callback)();
 
 struct client_callbacks {
 	mpi_add_agent_callback on_add_agent;
 	mpi_move_callback on_move;
 	mpi_get_position_callback on_get_position;
-	mpi_step_callback on_step;
+	mpi_callback on_step;
+	mpi_callback on_lost_connection;
 };
 
 struct client {
@@ -130,9 +140,13 @@ struct client {
 	bool client_running;
 };
 
+inline bool send_message(client& c, const void* data, unsigned int length) {
+	return send(c.connection.handle, data, length, 0) != 0;
+}
+
 bool send_add_agent(client& c) {
 	message_type message = message_type::ADD_AGENT;
-	return send(c.connection, &message, sizeof(message), 0) != 0;
+	return send_message(c, &message, sizeof(message));
 }
 
 bool send_move(client& c, uint64_t agent_handle, direction dir, unsigned int num_steps) {
@@ -141,14 +155,14 @@ bool send_move(client& c, uint64_t agent_handle, direction dir, unsigned int num
 		&& write(agent_handle, out)
 		&& write(dir, out)
 		&& write(num_steps, out)
-		&& send(c.connection, out.buffer, out.length, 0) != 0;
+		&& send_message(c, out.buffer, out.length);
 }
 
 bool send_get_position(client& c, uint64_t agent_handle) {
 	memory_stream out = memory_stream(sizeof(message_type) + sizeof(uint64_t));
 	return write(message_type::GET_POSITION, out)
 		&& write(agent_handle, out)
-		&& send(c.connection, out.buffer, out.length, 0) != 0;
+		&& send_message(c, out.buffer, out.length);
 }
 
 inline bool receive_add_agent_response(client& c) {
@@ -177,26 +191,33 @@ inline bool receive_get_position_response(client& c) {
 
 inline bool receive_step_response(client& c) {
 	c.callbacks.on_step();
+	return true;
 }
 
 void run_response_listener(client& c) {
 	while (c.client_running) {
 		message_type type;
 		bool success = read(type, c.connection);
-		if (!success) return;
+		if (!success) {
+			c.callbacks.on_lost_connection();
+			return;
+		}
 		switch (type) {
 			case message_type::ADD_AGENT_RESPONSE:
-				receive_add_agent_response(c); break;
+				receive_add_agent_response(c); continue;
 			case message_type::MOVE_RESPONSE:
-				receive_move_response(c); break;
+				receive_move_response(c); continue;
 			case message_type::GET_POSITION_RESPONSE:
-				receive_get_position_response(c); break;
+				receive_get_position_response(c); continue;
 			case message_type::STEP_RESPONSE:
-				receive_step_response(c); break;
-			default:
-				fprintf(stderr, "run_response_listener ERROR: Received invalid message type from server.\n");
-				continue;
+				receive_step_response(c); continue;
+
+			case message_type::ADD_AGENT:
+			case message_type::MOVE:
+			case message_type::GET_POSITION:
+				break;
 		}
+		fprintf(stderr, "run_response_listener ERROR: Received invalid message type from server.\n");
 	}
 }
 
@@ -217,7 +238,7 @@ bool init_client(client& new_client, client_callbacks callbacks,
 }
 
 void stop_client(client& c) {
-	shutdown(c.connection, 2);
+	shutdown(c.connection.handle, 2);
 	c.client_running = false;
 	c.response_listener.join();
 }
