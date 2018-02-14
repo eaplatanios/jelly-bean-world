@@ -21,6 +21,57 @@ static pair<float*, Py_ssize_t> PyArg_ParseFloatList(PyObject* arg) {
     return make_pair(items, len);
 }
 
+/* Python callback function for when the simulator advances by a step. */
+static PyObject* py_step_callback = NULL;
+
+/** 
+ * Sets the step callback function for Python simulators using the C callback method.
+ * 
+ * \param   self    Pointer to the Python object calling this method.
+ * \param   args    Arguments:
+ *                  - Handle to a Python callable acting as the callback.
+ * \returns None.
+ */
+static PyObject* simulator_set_step_callback(PyObject *self, PyObject *args) {
+    PyObject *result = NULL;
+    PyObject *temp;
+    if (PyArg_ParseTuple(args, "O:set_step_callback", &temp)) {
+        if (!PyCallable_Check(temp)) {
+            PyErr_SetString(PyExc_TypeError, "Parameter must be a callable.");
+            return NULL;
+        }
+        Py_XINCREF(temp);         /* Add a reference to new callback. */
+        Py_XDECREF(my_callback);  /* Dispose of the previous callback. */
+        py_step_callback = temp;       /* Store the new callback. */
+        Py_INCREF(Py_None);
+        result = Py_None;
+    }
+    return result;
+}
+
+enum class step_callback_fns {
+    C_API = 0, MPI_API = 1
+};
+
+void c_api_step_callback_fn(const agent_state& agent) {
+    // TODO!!!
+    fprintf(stderr, "The C API simulator step callback function has not been implemented yet.");
+    exit(EXIT_FAILURE);
+}
+
+void mpi_api_step_callback_fn(const agent_state& agent) {
+    // TODO!!!
+    fprintf(stderr, "The MPI API simulator step callback function has not been implemented yet.");
+    exit(EXIT_FAILURE);
+}
+
+step_callback get_step_callback_fn(step_callback_fns type) {
+    switch (type) {
+        case step_callback_fns::C_API  : return c_api_step_callback_fn;
+        case step_callback_fns::MPI_API: return mpi_api_step_callback_fn;
+    }
+}
+
 /** 
  * Creates a new simulator and returns a handle to it.
  * 
@@ -226,6 +277,7 @@ static PyObject* simulator_position(PyObject *self, PyObject *args) {
 } /* namespace nel */
 
 static PyMethodDef SimulatorMethods[] = {
+    {"set_step_callback",  nel::simulator_set_step_callback, METH_VARARGS, "Sets the step callback for simulators."},
     {"new",  nel::simulator_new, METH_VARARGS, "Creates a new simulator and returns its pointer."},
     {"delete",  nel::simulator_delete, METH_VARARGS, "Deletes an existing simulator."},
     {"start_server",  nel::simulator_start_server, METH_VARARGS, "Starts the simulator server."},

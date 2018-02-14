@@ -108,31 +108,6 @@ inline bool init(agent_state& agent_state, map& world,
 
 typedef void (*step_callback)(const agent_state&);
 
-enum class step_callback_fns {
-    C_API = 0, MPI_API = 1
-};
-
-void c_api_step_callback_fn(const agent_state& agent) {
-    // TODO!!!
-    fprintf(stderr, "The C API simulator step callback function has not been implemented yet.");
-    exit(EXIT_FAILURE);
-}
-
-void mpi_api_step_callback_fn(const agent_state& agent) {
-    // TODO!!!
-    fprintf(stderr, "The MPI API simulator step callback function has not been implemented yet.");
-    exit(EXIT_FAILURE);
-}
-
-step_callback get_step_callback_fn(step_callback_fns type) {
-    switch (type) {
-        case step_callback_fns::C_API  : return c_api_step_callback_fn;
-        case step_callback_fns::MPI_API: return mpi_api_step_callback_fn;
-    }
-    fprintf(stderr, "get_step_callback_fn ERROR: Unrecognized callback function type.\n");
-    return NULL;
-}
-
 struct item_properties {
 	string name;
 
