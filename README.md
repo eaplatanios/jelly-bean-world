@@ -109,8 +109,12 @@ given a vector of scents (where each dimension can be used to model
 orthogonal/unrelated scents). More precisely, if `S(x,y,t)` is the scent at
 location `(x,y)` at time `t`, then
 ```
-    S(x,y,t+1) = lambda*S(x,y,t) + C(x,y,t) + alpha*(S(x-1,y,t) + S(x+1,y,t) + S(x,y-1,t) + S(x,y+1,t)).
+    S(x,y,t+1) = lambda*S(x,y,t) + C(x,y,t) + alpha*(S(x-1,y,t) + S(x+1,y,t) + S(x,y-1,t) + S(x,y+1,t)),
 ```
+where `lambda` is the rate of decay of the scent at the current location,
+`alpha` is the rate of diffusion from neighboring cells, and `C(x,y,t)` is the
+scent of any items located at `(x,y)` at time `t` (this is zero if there are no
+items at that position).
 <!-- TODO: add details about modeling scent in inactive patches -->
 
 ### Agents
