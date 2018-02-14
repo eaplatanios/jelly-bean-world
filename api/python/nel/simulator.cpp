@@ -21,6 +21,17 @@ static pair<float*, Py_ssize_t> PyArg_ParseFloatList(PyObject* arg) {
     return make_pair(items, len);
 }
 
+static PyObject* Py_BuildAgentState(const agent_state* state) {
+    PyObject* py_sim_handle = PyLong_FromVoidPtr(sim);
+    PyObject* py_scent = PyList_New((Py_ssize_t) sim_config.scent_dimension);
+    for (unsigned int i = 0; i < sim_config.scent_dimension; i++)
+        PyList_SetItem(py_scent, (Py_ssize_t) i, PyFloat_FromDouble((double) agent.current_scent[i]));
+    PyObject* py_vision = PyList_New((Py_ssize_t) sim_config.color_dimension);
+    for (unsigned int i = 0; i < sim_config.color_dimension; i++)
+        PyList_SetItem(py_vision, (Py_ssize_t) i, PyFloat_FromDouble((double) agent.current_vision[i]));
+    return Py_BuildValue("(II)OO", agent.current_position.x, , agent.current_position.y, py_scent, py_vision);
+}
+
 /* Python callback function for when the simulator advances by a step. */
 static PyObject* py_step_callback = NULL;
 
@@ -58,19 +69,8 @@ enum class simulator_type {
 void c_step_callback_fn(
         const simulator* sim, const unsigned int id, 
         const agent_state& agent, const simulator_config& sim_config) {
-    /* Construct the callback arguments. */
-    PyObject* py_sim_handle = PyLong_FromVoidPtr(sim);
-    PyObject* py_scent = PyList_New((Py_ssize_t) sim_config.scent_dimension);
-    for (unsigned int i = 0; i < sim_config.scent_dimension; i++)
-        PyList_SetItem(py_scent, (Py_ssize_t) i, PyFloat_FromDouble((double) agent.current_scent[i]));
-    PyObject* py_vision = PyList_New((Py_ssize_t) sim_config.color_dimension);
-    for (unsigned int i = 0; i < sim_config.color_dimension; i++)
-        PyList_SetItem(py_vision, (Py_ssize_t) i, PyFloat_FromDouble((double) agent.current_vision[i]));
-    
-    /* Invoke the callback. */
-    PyObject* args = Py_BuildValue("OI(II)OO", 
-        py_sim_handle, id, agent.current_position.x, , agent.current_position.y, 
-        py_scent, py_vision);
+    PyObject* py_agent = Py_BuildAgentState(agent);
+    PyObject* args = Py_BuildValue("OIO", py_sim_handle, id, py_agent);
     PyObject_CallObject(py_step_callback, arglist);
     Py_DECREF(args);
 }
@@ -241,9 +241,11 @@ static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
     if (!PyArg_ParseTuple(args, "OI", &py_sim_handle, &py_sim_type))
         return NULL;
     simulator* sim_handle = (simulator*) PyLong_AsVoidPtr(py_sim_handle);
+    unsigned int id = sim_handle->add_agent();
+    PyObject* py_agent = Py_BuildAgentState(sim_handle->agents[id]);
     switch ((simulator_type) *py_sim_type) {
         case simulator_type::C:
-            return Py_BuildValue("I", sim_handle->add_agent());
+            return Py_BuildValue("IO", id, py_agent);
         case simulator_type::MPI:
             /* TODO !!! */
             return NULL;

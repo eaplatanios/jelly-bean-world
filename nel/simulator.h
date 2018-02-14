@@ -235,7 +235,7 @@ public:
      * 
      * \returns Initial state of the new agent.
      */
-    inline agent_state* add_agent() {
+    inline unsigned int add_agent() {
         agent_array_lock.lock();
         unsigned int id = agents.length;
         agents.ensure_capacity(agents.length + 1);

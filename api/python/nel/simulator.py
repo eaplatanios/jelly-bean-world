@@ -28,7 +28,7 @@ class SimulatorType(Enum):
           # performance than the C simulator.
 
 
-def _step_callback(sim_handle, agent_id, pos, scent, vision):
+def _step_callback(sim_handle, agent_id, agent_state):
   """Step callback function helper for C simulators.
   
   Arguments:
@@ -40,8 +40,11 @@ def _step_callback(sim_handle, agent_id, pos, scent, vision):
     vision:     List of floats representing vision from the current grid cell.
   """
   agent = __SIM_HANDLE_TO_SIM__[sim_handle].agents[agent_id]
-  state = agent.AgentState(Position(pos[0], pos[1]), scent, vision)
-  agent.on_step(state)
+  state = AgentState(
+    Position(agent_state[0][0], agent_state[0][1]), 
+    agent_state[1], agent_state[2])
+  agent._update_state(state)
+  agent.on_step()
 
 
 class SimulatorConfig(object):
@@ -169,9 +172,12 @@ class Simulator(object):
     Returns:
       The new agent's ID.
     """
-    id = simulator_c.add_agent(self._handle, self.sim_type)
-    self.agents[id] = py_agent
-    return id
+    agent_id, agent_state = simulator_c.add_agent(self._handle, self.sim_type)
+    state = AgentState(
+      Position(agent_state[0][0], agent_state[0][1]), 
+      agent_state[1], agent_state[2])
+    self.agents[agent_id] = py_agent
+    return agent_id, state
 
   def _move(self, agent_id, direction, num_steps):
     """Moves the specified agent in the simulated environment.
