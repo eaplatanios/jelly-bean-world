@@ -17,7 +17,7 @@ float interaction(
 		const position& first_position, const position& second_position,
 		unsigned int first_type, unsigned int second_type, float* args)
 {
-	unsigned int item_type_count = args[0];
+	unsigned int item_type_count = (unsigned int) args[0];
 	float first_cutoff = args[4 * (first_type * item_type_count + second_type) + 1];
 	float second_cutoff = args[4 * (first_type * item_type_count + second_type) + 2];
 	float first_value = args[4 * (first_type * item_type_count + second_type) + 3];
@@ -43,8 +43,9 @@ int main(int argc, const char** argv) {
 
 	array<item_position> item_positions(128);
 	m.get_items({-2*n, -2*n}, {2*n - 1, 2*n - 1}, item_positions);
+
+	FILE* out = stdout;
 	item_position_printer printer;
-	print(item_positions, stdout, printer); print('\n', stdout);
-	fflush(stdout);
-	return EXIT_SUCCESS;
+	print(item_positions, out, printer); print('\n', out); fflush(out);
+ 	return EXIT_SUCCESS;
 }

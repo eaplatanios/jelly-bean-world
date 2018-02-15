@@ -224,8 +224,10 @@ class simulator {
 
 public:
     simulator(const simulator_config& config, const step_callback step_callback) :
-        world(config.patch_size, config.item_types.length, config.gibbs_iterations, 
-            config.intensity_fn, config.intensity_fn_args, 
+        world(config.patch_size,
+			(unsigned int) config.item_types.length,
+			config.gibbs_iterations,
+			config.intensity_fn, config.intensity_fn_args, 
             config.interaction_fn, config.interaction_fn_args),
         agents(16), acted_agent_count(0), config(config), 
         step_callback_fn(step_callback), time(0) { }

@@ -1,10 +1,13 @@
 #include "mpi.h"
 
+#include <inttypes.h>
+
 using namespace nel;
 using namespace core;
 
 /* a lock to synchronize printing */
 std::mutex lock;
+FILE* out = stderr;
 
 struct test_server {
 	std::thread server_thread;
@@ -25,26 +28,26 @@ void process_test_server_message(socket_type& server) {
 			fprintf(stderr, "Server failed to read string.\n");
 			lock.unlock(); return;
 		}
-		fprintf(stderr, "Server received message: \"");
-		print(s, stderr); fprintf(stderr, "\".\n");
+		fprintf(out, "Server received message: \"");
+		print(s, out); fprintf(out, "\".\n");
 	} else {
 		int64_t i;
 		if (!read(i, server)) {
 			fprintf(stderr, "Server failed to read int64_t.\n");
 			lock.unlock(); return;
 		}
-		fprintf(stderr, "Server received message: %ld.\n", i);
+		fprintf(out, "Server received message: %" PRId64 ".\n", i);
 	}
 	lock.unlock();
 }
 
 bool init_server(test_server& new_server, uint16_t server_port,
-		unsigned int connection_queue_capacity, unsigned int worker_count)
+	unsigned int connection_queue_capacity, unsigned int worker_count)
 {
 	std::condition_variable cv; std::mutex lock;
 	auto dispatch = [&]() {
 		run_server(new_server.server_socket, server_port, connection_queue_capacity,
-				worker_count, new_server.server_running, cv, process_test_server_message);
+			worker_count, new_server.server_running, cv, process_test_server_message);
 	};
 	new_server.server_running = true;
 	new_server.server_thread = std::thread(dispatch);
@@ -60,7 +63,8 @@ bool init_server(test_server& new_server, uint16_t server_port,
 
 void stop_server(test_server& server) {
 	server.server_running = false;
-	write(0, server.server_socket);
+	//write(0, server.server_socket);
+	closesocket(server.server_socket.handle);
 	server.server_thread.join();
 }
 
@@ -94,7 +98,8 @@ void test_client_send(socket_type& client, const string& s) {
 void test_network() {
 	test_server new_server;
 	bool success = init_server(new_server, 52342, 16, 8);
-	fprintf(stderr, "init_server returned %s.\n", success ? "true" : "false");
+	fprintf(out, "init_server returned %s.\n", success ? "true" : "false");
+	if (!success) return;
 
 	unsigned int client_count = 10;
 	std::thread* client_threads = new std::thread[client_count];
@@ -104,8 +109,9 @@ void test_network() {
 		socket_type client;
 		bool success = init_client(client, "localhost", "52342");
 		lock.lock();
-		fprintf(stderr, "[client %u] init_client returned %s.\n", thread_id, success ? "true" : "false");
+		fprintf(out, "[client %u] init_client returned %s.\n", thread_id, success ? "true" : "false");
 		lock.unlock();
+		if (!success) return;
 
 		char message[1024];
 		snprintf(message, 1024, "Hello from client %u!", thread_id);
@@ -129,5 +135,6 @@ void test_network() {
 
 int main(int argc, const char** argv) {
 	test_network();
+	fflush(out);
 	return EXIT_SUCCESS;
 }

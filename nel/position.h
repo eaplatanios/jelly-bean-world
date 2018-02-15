@@ -2,6 +2,7 @@
 #define NEL_POSITION_H_
 
 #include <core/map.h>
+#include <inttypes.h>
 
 namespace nel {
 
@@ -20,7 +21,7 @@ struct position {
 	position(const position& src) : x(src.x), y(src.y) { }
 
 	inline uint64_t squared_length() const {
-		return x*x + y*y;
+		return (uint64_t) x*x + (uint64_t) y*y;
 	}
 
 	inline position up() const {
@@ -99,7 +100,7 @@ inline bool write(const position& p, Stream& out) {
 
 template<typename Stream>
 inline bool print(const position& p, Stream& out) {
-	return fprintf(out, "(%ld, %ld)", p.x, p.y) > 0;
+	return fprintf(out, "(%" PRId64 ", %" PRId64 ")", p.x, p.y) > 0;
 }
 
 } /* namespace nel */
