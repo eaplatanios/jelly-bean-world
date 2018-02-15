@@ -136,7 +136,7 @@ struct socket_listener {
 		return true;
 	}
 
-	constexpr bool remove_socket(socket_type& socket) { return true; }
+	constexpr bool remove_socket(socket_type& socket) const { return true; }
 
 	template<typename AcceptedConnectionCallback>
 	inline bool accept(socket_type& server_socket, AcceptedConnectionCallback callback)
@@ -203,7 +203,7 @@ struct socket_listener {
 
 #elif defined(__APPLE__) /* on Mac */
 	int listener;
-	kevent events[EVENT_QUEUE_CAPACITY];
+	struct kevent events[EVENT_QUEUE_CAPACITY];
 	array<socket_type> event_queue;
 	std::condition_variable cv;
 	std::mutex event_queue_lock;
@@ -214,7 +214,7 @@ struct socket_listener {
 	inline bool add_socket(socket_type& socket,
 		const char* error_message = "socket_listener.add_socket ERROR: Failed to listen to socket")
 	{
-		kevent new_event;
+		struct kevent new_event;
 		EV_SET(&new_event, socket.handle, EVFILT_READ, EV_ADD | (Oneshot ? EV_ONESHOT : 0), 0, 0, NULL);
 		if (kevent(listener, &new_event, 1, NULL, 0, NULL) == -1) {
 			listener_error(error_message);
@@ -228,13 +228,7 @@ struct socket_listener {
 		return add_socket<Oneshot>(socket, "socket_listener.update_socket ERROR: Failed to modify listen event");
 	}
 
-	inline bool remove_socket(socket_type& socket) {
-		kevent new_event;
-		EV_SET(&new_event, socket.handle, EVFILT_READ, EV_DELETE, 0, 0, NULL);
-		if (kevent(listener, &new_event, 1, NULL, 0, NULL) == -1) {
-			listener_error("socket_listener.remove_socket ERROR: Failed to remove listen event");
-			return false;
-		}
+	constexpr bool remove_socket(socket_type& socket) const {
 		return true;
 	}
 
@@ -247,7 +241,7 @@ struct socket_listener {
 		}
 
 		for (int i = 0; i < event_count; i++) {
-			socket_type socket = events[i].data.fd;
+			socket_type socket = (int) events[i].ident;
 
 			if (!server_running) {
 				return true;
