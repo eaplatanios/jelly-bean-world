@@ -17,6 +17,7 @@ typedef int socklen_t;
 #include <sys/event.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <unistd.h>
 
 #else /* on Linux */
 #include <sys/epoll.h>
@@ -109,9 +110,9 @@ struct socket_listener {
 	}
 
 	template<bool Oneshot>
-	constexpr bool update_socket(socket_type& socket) { return true; }
+	constexpr bool update_socket(socket_type& socket) const { return true; }
 
-	constexpr bool remove_socket(socket_type& socket) { return true; }
+	constexpr bool remove_socket(socket_type& socket) const { return true; }
 
 	template<typename SocketReadyFunction>
 	inline bool listen(SocketReadyFunction callback) {
@@ -133,13 +134,13 @@ struct socket_listener {
 	}
 #elif defined(__APPLE__) /* on Mac */
 	int listener;
-	kevent events[EVENT_QUEUE_CAPACITY];
+	struct kevent events[EVENT_QUEUE_CAPACITY];
 
 	template<bool Oneshot>
 	inline bool add_socket(socket_type& socket,
 			const char* error_message = "socket_listener.add_socket ERROR: Failed to listen to socket")
 	{
-		kevent new_event;
+		struct kevent new_event;
 		EV_SET(&new_event, socket.handle, EVFILT_READ, EV_ADD | (Oneshot ? EV_ONESHOT : 0), 0, 0, NULL);
 		if (kevent(listener, &new_event, 1, NULL, 0, NULL) == -1) {
 			listener_error(error_message);
@@ -153,13 +154,7 @@ struct socket_listener {
 		return add_socket<Oneshot>(socket, "socket_listener.update_socket ERROR: Failed to modify listen event");
 	}
 
-	inline bool remove_socket(socket_type& socket) {
-		kevent new_event;
-		EV_SET(&new_event, socket.handle, EVFILT_READ, EV_DELETE, 0, 0, NULL);
-		if (kevent(listener, &new_event, 1, NULL, 0, NULL) == -1) {
-			listener_error("socket_listener.remove_socket ERROR: Failed to remove listen event");
-			return false;
-		}
+	constexpr bool remove_socket(socket_type& socket) const {
 		return true;
 	}
 
@@ -172,8 +167,8 @@ struct socket_listener {
 		}
 
 		for (int i = 0; i < event_count; i++) {
-			socket_type socket = events[i].data.fd;
-			callback((int) events[i].ident);
+			socket_type socket = (int) events[i].ident;
+			callback(socket);
 		}
 		return true;
 	}
@@ -316,6 +311,7 @@ void run_worker(
 	while (server_running) {
 		std::unique_lock<std::mutex> lck(event_queue_lock);
 		cv.wait(lck);
+		if (!server_running) break;
 		socket_type connection = event_queue.pop();
 		lck.unlock();
 
@@ -415,7 +411,6 @@ bool run_server(socket_type& sock, uint16_t server_port,
 		cleanup_server<false>(server_running, init_cv, sock); return false;
 	}
 
-	epoll_event events[EVENT_QUEUE_CAPACITY];
 	if (!listener.add_socket<false>(sock)) {
 		cleanup_server<false>(server_running, init_cv, sock, listener); return false;
 	}
@@ -440,7 +435,7 @@ bool run_server(socket_type& sock, uint16_t server_port,
 	sockaddr_storage client_address;
 	socklen_t address_size = sizeof(client_address);
 	while (server_running) {
-		listener.listen([&](socket_type& socket) { 
+		listener.listen([&](socket_type& socket) {
 			if (socket == sock.handle) {
 				/* there's a new connection on the server socket */
 				socket_type connection = accept(sock.handle, (sockaddr*) &client_address, &address_size);
@@ -464,6 +459,7 @@ bool run_server(socket_type& sock, uint16_t server_port,
 		});
 	}
 
+	cv.notify_all();
 	for (unsigned int i = 0; i < worker_count; i++)
 		workers[i].join();
 	delete[] workers;
