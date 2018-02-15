@@ -10,24 +10,19 @@
 #include <condition_variable>
 
 #if defined(_WIN32) /* on Windows */
-
 #include <winsock2.h>
-#include <wepoll.h>
 typedef int socklen_t;
-typedef HANDLE epoll_type;
 
-#else /* on Mac and Linux */
+#elif __APPLE__ /* on Mac */
+#include <sys/event.h>
+#include <sys/socket.h>
+#include <netdb.h>
 
+#else /* on Linux */
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <unistd.h>
-typedef int epoll_type;
-
-inline void epoll_close(epoll_type& instance) {
-	close(instance);
-}
-
 #endif
 
 
@@ -46,6 +41,10 @@ struct socket_type {
 
 	socket_type() { }
 	socket_type(const SOCKET& src) : handle(src) { }
+
+	inline bool is_valid() const {
+		return handle != INVALID_SOCKET;
+	}
 #else
 	int handle;
 
@@ -53,6 +52,10 @@ struct socket_type {
 
 	socket_type() { }
 	socket_type(int src) : handle(src) { }
+
+	inline bool is_valid() const {
+		return handle >= 0;
+	}
 #endif
 
 	inline bool operator == (const socket_type& other) const {
@@ -82,6 +85,175 @@ void* alloc_socket_keys(size_t n, size_t element_size) {
 	for (unsigned int i = 0; i < n; i++)
 		socket_type::set_empty(keys[i]);
 	return (void*) keys;
+}
+
+inline void listener_error(const char* message) {
+#if defined(_WIN32)
+	errno = GetLastError();
+#endif
+	perror(message);
+}
+
+struct socket_listener {
+#if defined(_WIN32) /* on Windows */
+	HANDLE listener;
+	OVERLAPPED_ENTRY overlapped[EVENT_QUEUE_CAPACITY];
+
+	template<bool Oneshot>
+	inline bool add_socket(socket_type& socket) {
+		if (CreateIoCompletionPort(socket.handle, listener, (DWORD) socket.handle, 0) == NULL) {
+			listener_error("socket_listener.add_socket ERROR: Failed to listen to socket");
+			return false;
+		}
+		return true;
+	}
+
+	template<bool Oneshot>
+	constexpr bool update_socket(socket_type& socket) { return true; }
+
+	constexpr bool remove_socket(socket_type& socket) { return true; }
+
+	template<typename SocketReadyFunction>
+	inline bool listen(SocketReadyFunction callback) {
+		ULONG event_count;
+		bool result = GetQueuedCompletionStatusEx(listener, overlapped, EVENT_QUEUE_CAPACITY, &event_count, INFINITE, false);
+		if (!result) {
+			listener_error("socket_listener.listen ERROR: Error listening for incoming network activity");
+			return false;
+		}
+
+		for (ULONG i = 0; i < event_count; i++) {
+			socket_type socket = (SOCKET) overlapped[i].lpCompletionKey;
+			callback(socket);
+		}
+	}
+
+	static inline void free(socket_listener& listener) {
+		CloseHandle(listener.listener);
+	}
+#elif defined(__APPLE__) /* on Mac */
+	int listener;
+	kevent events[EVENT_QUEUE_CAPACITY];
+
+	template<bool Oneshot>
+	inline bool add_socket(socket_type& socket,
+			const char* error_message = "socket_listener.add_socket ERROR: Failed to listen to socket")
+	{
+		kevent new_event;
+		EV_SET(&new_event, socket.handle, EVFILT_READ, EV_ADD | (Oneshot ? EV_ONESHOT : 0), 0, 0, NULL);
+		if (kevent(listener, &new_event, 1, NULL, 0, NULL) == -1) {
+			listener_error(error_message);
+			return false;
+		}
+		return true;
+	}
+
+	template<bool Oneshot>
+	inline bool update_socket(socket_type& socket) {
+		return add_socket<Oneshot>(socket, "socket_listener.update_socket ERROR: Failed to modify listen event");
+	}
+
+	inline bool remove_socket(socket_type& socket) {
+		kevent new_event;
+		EV_SET(&new_event, socket.handle, EVFILT_READ, EV_DELETE, 0, 0, NULL);
+		if (kevent(listener, &new_event, 1, NULL, 0, NULL) == -1) {
+			listener_error("socket_listener.remove_socket ERROR: Failed to remove listen event");
+			return false;
+		}
+		return true;
+	}
+
+	template<typename SocketReadyFunction>
+	inline bool listen(SocketReadyFunction callback) {
+		int event_count = kevent(listener, NULL, 0, events, EVENT_QUEUE_CAPACITY, NULL);
+		if (event_count == -1) {
+			listener_error("socket_listener.listen ERROR: Error listening for incoming network activity");
+			return false;
+		}
+
+		for (int i = 0; i < event_count; i++) {
+			socket_type socket = events[i].data.fd;
+			callback((int) events[i].ident);
+		}
+		return true;
+	}
+
+	static inline void free(socket_listener& listener) {
+		close(listener.listener);
+	}
+#else /* on Linux */
+	int listener;
+	epoll_event events[EVENT_QUEUE_CAPACITY];
+
+	template<bool Oneshot>
+	inline bool add_socket(socket_type& socket) {
+		epoll_event new_event = {0};
+		new_event.events = EPOLLIN | EPOLLERR | (Oneshot ? EPOLLONESHOT : 0);
+		new_event.data.fd = socket.handle;
+		if (epoll_ctl(listener, EPOLL_CTL_ADD, socket.handle, &new_event) == -1) {
+			listener_error("socket_listener.add_socket ERROR: Failed to listen to socket");
+			return false;
+		}
+		return true;
+	}
+
+	template<bool Oneshot>
+	inline bool update_socket(socket_type& socket) {
+		epoll_event new_event = {0};
+		new_event.events = EPOLLIN | EPOLLERR | (Oneshot ? EPOLLONESHOT : 0);
+		new_event.data.fd = socket.handle;
+		if (epoll_ctl(listener, EPOLL_CTL_MOD, socket.handle, &new_event) == -1) {
+			listener_error("socket_listener.update_socket ERROR: Failed to modify listen event");
+			shutdown(socket.handle, 2); return false;
+		}
+		return true;
+	}
+
+	inline bool remove_socket(socket_type& socket) {
+		if (epoll_ctl(listener, EPOLL_CTL_DEL, socket.handle, NULL) == -1) {
+			listener_error("socket_listener.remove_socket ERROR: Failed to remove listen event");
+			return false;
+		}
+		return true;
+	}
+
+	template<typename SocketReadyFunction>
+	inline bool listen(SocketReadyFunction callback) {
+		int event_count = epoll_wait(listener, events, EVENT_QUEUE_CAPACITY, -1);
+		if (event_count == -1) {
+			listener_error("socket_listener.listen ERROR: Error listening for incoming network activity");
+			return false;
+		}
+
+		for (int i = 0; i < event_count; i++) {
+			socket_type socket = events[i].data.fd;
+			callback(socket);
+		}
+		return true;
+	}
+
+	static inline void free(socket_listener& listener) {
+		close(listener.listener);
+	}
+#endif
+};
+
+inline bool init(socket_listener& listener) {
+#if defined(_WIN32)
+	listener.listener = CreateIoCompletionPort(INVALID_QUEUE_HANDLE, NULL, 0, 0);
+	bool success = (listener.listener != NULL);
+#elif defined(__APPLE__)
+	listener.listener = kqueue();
+	bool success = (listener.listener != -1);
+#else
+	listener.listener = epoll_create1(0);
+	bool success = (listener.listener != -1);
+#endif
+	if (!success) {
+		listener_error("init ERROR: Unable to initialize socket listener");
+		return false;
+	}
+	return true;
 }
 
 /**
@@ -135,62 +307,65 @@ inline void network_error(const char* message) {
 	perror(message);
 }
 
-inline bool valid_socket(const socket_type& sock) {
-#if defined(_WIN32)
-	return sock.handle != INVALID_SOCKET;
-#else
-	return sock.handle >= 0;
-#endif
-}
-
-inline bool valid_epoll(const epoll_type& instance) {
-#if defined(_WIN32)
-	return instance != NULL;
-#else
-	return instance != -1;
-#endif
-}
-
-struct socket_event {
-	socket_type connection;
-	uint32_t event_type;
-};
-
 template<typename ProcessMessageCallback, typename... CallbackArgs>
 void run_worker(
-		array<socket_event>& event_queue, epoll_type& epoll_instance, hash_set<socket_type>& connections,
+		array<socket_type>& event_queue, socket_listener& listener, hash_set<socket_type>& connections,
 		std::condition_variable& cv, std::mutex& event_queue_lock, std::mutex& connection_set_lock,
 		bool& server_running, ProcessMessageCallback process_message, CallbackArgs&&... callback_args)
 {
 	while (server_running) {
 		std::unique_lock<std::mutex> lck(event_queue_lock);
 		cv.wait(lck);
-		socket_event event = event_queue.pop();
+		socket_type connection = event_queue.pop();
 		lck.unlock();
 
 		uint8_t next;
-		if (recv(event.connection.handle, &next, sizeof(next), MSG_PEEK) == 0) {
+		if (recv(connection.handle, &next, sizeof(next), MSG_PEEK) == 0) {
 			/* the other end of the socket was closed by the client */
-			if (epoll_ctl(epoll_instance, EPOLL_CTL_DEL, event.connection.handle, NULL) == -1)
-				network_error("run_worker ERROR: Failed to remove network polling event");
+			listener.remove_socket(connection);
 			connection_set_lock.lock();
-			connections.remove(event.connection);
+			connections.remove(connection);
 			connection_set_lock.unlock();
-			shutdown(event.connection.handle, 2);
+			shutdown(connection.handle, 2);
 		} else {
 			/* there is a data waiting to be read, so read it */
-			process_message(event.connection, std::forward<CallbackArgs>(callback_args)...);
+			process_message(connection, std::forward<CallbackArgs>(callback_args)...);
 
 			/* tell epoll to continue polling this socket */
-			epoll_event new_event = {0};
-			new_event.events = EPOLLONESHOT | EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
-			new_event.data.fd = event.connection.handle;
-			if (epoll_ctl(epoll_instance, EPOLL_CTL_MOD, event.connection.handle, &new_event) == -1) {
-				network_error("run_worker ERROR: Failed to modify network polling event");
-				shutdown(event.connection.handle, 2);
-			}
+			if (!listener.update_socket<true>(connection))
+				shutdown(connection.handle, 2);
 		}
 	}
+}
+
+template<bool Success>
+inline void cleanup_server(
+		bool& server_running, std::condition_variable& init_cv)
+{
+#if defined(_WIN32)
+	WSACleanup();
+#endif
+	if (!Success) {
+		server_running = false;
+		init_cv.notify_all();
+	}
+}
+
+template<bool Success>
+inline void cleanup_server(
+		bool& server_running, std::condition_variable& init_cv, socket_type& sock)
+{
+	shutdown(sock.handle, 2);
+	cleanup_server<Success>(server_running, init_cv);
+}
+
+template<bool Success>
+inline void cleanup_server(
+		bool& server_running, std::condition_variable& init_cv,
+		socket_type& sock, socket_listener& listener)
+{
+	core::free(listener);
+	cleanup_server<Success>(server_running, init_cv, sock);
 }
 
 template<typename ProcessMessageCallback, typename... CallbackArgs>
@@ -199,17 +374,24 @@ bool run_server(socket_type& sock, uint16_t server_port,
 		bool& server_running, std::condition_variable& init_cv,
 		ProcessMessageCallback process_message, CallbackArgs&&... callback_args)
 {
+#if defined(_WIN32)
+	WSADATA wsa_state;
+	if (WSAStartup(MAKEWORD(2,2), &wsa_state) != NO_ERROR) {
+		fprintf(stderr, "run_server ERROR: Unable to initialize WinSock.\n");
+		server_running = false; init_cv.notify_all(); return false;
+	}
+#endif
+
 	sock = socket(AF_INET6, SOCK_STREAM, 0);
-	if (!valid_socket(sock)) {
+	if (!sock.is_valid()) {
 		network_error("run_server ERROR: Unable to open socket");
-		shutdown(sock.handle, 2); server_running = false; init_cv.notify_all();
-		return false;
+		cleanup_server<false>(server_running, init_cv); return false;
 	}
 
 	int yes = 1;
 	if (setsockopt(sock.handle, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) != 0) {
 		network_error("run_server ERROR: Unable to set socket option");
-		server_running = false; init_cv.notify_all(); return false;
+		cleanup_server<false>(server_running, init_cv, sock); return false;
 	}
 
 	sockaddr_in6 server_addr;
@@ -219,42 +401,33 @@ bool run_server(socket_type& sock, uint16_t server_port,
 	server_addr.sin6_addr = in6addr_any;
 	if (bind(sock.handle, (sockaddr*) &server_addr, sizeof(server_addr)) != 0) {
 		network_error("run_server ERROR: Unable to bind to socket");
-		shutdown(sock.handle, 2); server_running = false; init_cv.notify_all();
-		return false;
+		cleanup_server<false>(server_running, init_cv, sock); return false;
 	}
 
 	if (listen(sock.handle, connection_queue_capacity) != 0) {
 		network_error("run_server ERROR: Unable to listen to socket");
-		shutdown(sock.handle, 2); server_running = false; init_cv.notify_all();
-		return false;
+		cleanup_server<false>(server_running, init_cv, sock); return false;
 	}
 
-	epoll_type epoll_instance = epoll_create1(0);
-	if (!valid_epoll(epoll_instance)) {
-		network_error("run_server ERROR: Failed to initialize network event polling");
-		shutdown(sock.handle, 2); server_running = false; init_cv.notify_all();
-		return false;
+	socket_listener listener;
+	if (!init(listener)) {
+		network_error("run_server ERROR: Failed to initialize socket listener");
+		cleanup_server<false>(server_running, init_cv, sock); return false;
 	}
 
 	epoll_event events[EVENT_QUEUE_CAPACITY];
-	epoll_event new_event = {0};
-	new_event.events = EPOLLIN | EPOLLERR;
-	new_event.data.fd = sock.handle;
-	if (epoll_ctl(epoll_instance, EPOLL_CTL_ADD, sock.handle, &new_event) == -1) {
-		network_error("run_server ERROR: Failed to add network polling event");
-		shutdown(sock.handle, 2); epoll_close(epoll_instance);
-		server_running = false; init_cv.notify_all();
-		return false;
+	if (!listener.add_socket<false>(sock)) {
+		cleanup_server<false>(server_running, init_cv, sock, listener); return false;
 	}
 
 	/* make the thread pool */
 	std::condition_variable cv;
 	std::mutex event_queue_lock, connection_set_lock;
 	hash_set<socket_type> connections(1024, alloc_socket_keys);
-	array<socket_event> event_queue(64);
+	array<socket_type> event_queue(64);
 	std::thread* workers = new std::thread[worker_count];
 	auto start_worker = [&]() {
-		run_worker(event_queue, epoll_instance, connections, cv, event_queue_lock, connection_set_lock,
+		run_worker(event_queue, listener, connections, cv, event_queue_lock, connection_set_lock,
 				server_running, process_message, std::forward<CallbackArgs>(callback_args)...);
 	};
 	for (unsigned int i = 0; i < worker_count; i++)
@@ -267,27 +440,17 @@ bool run_server(socket_type& sock, uint16_t server_port,
 	sockaddr_storage client_address;
 	socklen_t address_size = sizeof(client_address);
 	while (server_running) {
-		int event_count = epoll_wait(epoll_instance, events, EVENT_QUEUE_CAPACITY, -1);
-		if (event_count == -1) {
-			network_error("run_server ERROR: Error waiting for incoming network activity");
-			continue;
-		}
-
-		for (int i = 0; i < event_count; i++) {
-			if (events[i].data.fd == sock.handle) {
-				/* there's a new connection */
+		listener.listen([&](socket_type& socket) { 
+			if (socket == sock.handle) {
+				/* there's a new connection on the server socket */
 				socket_type connection = accept(sock.handle, (sockaddr*) &client_address, &address_size);
-				if (!valid_socket(connection)) {
+				if (!connection.is_valid()) {
 					network_error("run_server ERROR: Error establishing connection with client");
-					continue;
+					return;
 				}
 
-				epoll_event new_event = {0};
-				new_event.events = EPOLLONESHOT | EPOLLIN | EPOLLERR;
-				new_event.data.fd = connection.handle;
-				if (epoll_ctl(epoll_instance, EPOLL_CTL_ADD, connection.handle, &new_event) == -1) {
-					network_error("run_server ERROR: Failed to add network polling event");
-					shutdown(connection.handle, 2); continue;
+				if (!listener.add_socket<true>(connection)) {
+					shutdown(connection.handle, 2); return;
 				}
 				connection_set_lock.lock();
 				connections.add(connection, alloc_socket_keys);
@@ -295,10 +458,10 @@ bool run_server(socket_type& sock, uint16_t server_port,
 			} else {
 				/* there is an event on a client connection */
 				event_queue_lock.lock();
-				event_queue.add({events[i].data.fd, events[i].events});
+				event_queue.add(socket);
 				event_queue_lock.unlock(); cv.notify_one();
 			}
-		}
+		});
 	}
 
 	for (unsigned int i = 0; i < worker_count; i++)
@@ -307,8 +470,7 @@ bool run_server(socket_type& sock, uint16_t server_port,
 
 	for (socket_type& connection : connections)
 		shutdown(connection.handle, 2);
-	shutdown(sock.handle, 2);
-	epoll_close(epoll_instance);
+	cleanup_server<true>(server_running, init_cv, sock, listener);
 	return true;
 }
 
@@ -333,7 +495,7 @@ bool run_client(
 	socket_type sock;
 	for (addrinfo* entry = addresses; entry != NULL; entry++) {
 		sock = socket(entry->ai_family, entry->ai_socktype, entry->ai_protocol);
-		if (!valid_socket(sock)) {
+		if (!sock.is_valid()) {
 			network_error("run_client ERROR: Unable to open socket");
 			continue;
 		}

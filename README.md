@@ -84,7 +84,7 @@ The items are distributed according to a pairwise interaction point process on
 the 2-dimensional grid of integers. The probability of a collection of points
 `X = {X_1, X_2, ...}` is given by:
 ```
-    p(X) = c * exp{sum from i to inf of f(X_i) + sum from j to inf of g(X_i, X_j)}.
+    p(X) = c * exp{sum over i of f(X_i) + sum over j of g(X_i, X_j)}.
 ```
 Here, `c` is a normalizing constant. `f(x)` is the **intensity** function, that
 controls the likelihood of generating a point at `x` independent of other

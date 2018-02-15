@@ -10,6 +10,9 @@ namespace nel {
 
 using namespace core;
 
+/* forward declarations */
+class simulator;
+
 /** Represents all possible directions of motion in the environment. */
 enum class direction { UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3 };
 
@@ -235,9 +238,8 @@ public:
      * 
      * \returns Initial state of the new agent.
      */
-    inline unsigned int add_agent() {
+    inline agent_state* add_agent() {
         agent_array_lock.lock();
-        unsigned int id = agents.length;
         agents.ensure_capacity(agents.length + 1);
         agent_state* new_agent = (agent_state*) malloc(sizeof(agent_state));
         agents.add(new_agent);
@@ -245,7 +247,7 @@ public:
 
         init(*new_agent, world, config.color_dimension, 
             config.vision_range, config.scent_dimension);
-        return id;
+        return new_agent;
     }
 
     /** 

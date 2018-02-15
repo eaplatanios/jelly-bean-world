@@ -3,6 +3,9 @@
 using namespace nel;
 using namespace core;
 
+/* a lock to synchronize printing */
+std::mutex lock;
+
 struct test_server {
 	std::thread server_thread;
 	socket_type server_socket;
@@ -10,8 +13,6 @@ struct test_server {
 };
 
 void process_test_server_message(socket_type& server) {
-	static std::mutex lock;
-
 	bool is_string;
 	lock.lock();
 	if (!read(is_string, server)) {
@@ -102,7 +103,9 @@ void test_network() {
 		unsigned int thread_id = counter++;
 		socket_type client;
 		bool success = init_client(client, "localhost", "52342");
+		lock.lock();
 		fprintf(stderr, "[client %u] init_client returned %s.\n", thread_id, success ? "true" : "false");
+		lock.unlock();
 
 		char message[1024];
 		snprintf(message, 1024, "Hello from client %u!", thread_id);
