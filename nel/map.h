@@ -312,7 +312,8 @@ private:
 
 		/* construct the Gibbs field and sample the patches at positions_to_sample */
 		gibbs_field<map> field(*this,
-				positions_to_sample.data, positions_to_sample.length,
+				positions_to_sample.data,
+				(unsigned int) positions_to_sample.length,
 				n, item_type_count);
 		for (unsigned int i = 0; i < gibbs_iterations; i++)
 			field.sample();

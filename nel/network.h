@@ -11,6 +11,7 @@
 
 #if defined(_WIN32) /* on Windows */
 #include <winsock2.h>
+#include <ws2tcpip.h>
 typedef int socklen_t;
 
 #elif __APPLE__ /* on Mac */
@@ -89,7 +90,7 @@ void* alloc_socket_keys(size_t n, size_t element_size) {
 
 inline void listener_error(const char* message) {
 #if defined(_WIN32)
-	errno = GetLastError();
+	errno = (int) GetLastError();
 #endif
 	perror(message);
 }
@@ -97,11 +98,12 @@ inline void listener_error(const char* message) {
 struct socket_listener {
 #if defined(_WIN32) /* on Windows */
 	HANDLE listener;
-	OVERLAPPED_ENTRY overlapped[EVENT_QUEUE_CAPACITY];
+	WSABUF buffer_wrapper;
+	char buffer[4];
 
 	template<bool Oneshot>
 	inline bool add_socket(socket_type& socket) {
-		if (CreateIoCompletionPort(socket.handle, listener, (DWORD) socket.handle, 0) == NULL) {
+		if (CreateIoCompletionPort((HANDLE)socket.handle, listener, (ULONG_PTR)socket.handle, 0) == NULL) {
 			listener_error("socket_listener.add_socket ERROR: Failed to listen to socket");
 			return false;
 		}
@@ -109,35 +111,99 @@ struct socket_listener {
 	}
 
 	template<bool Oneshot>
-	constexpr bool update_socket(socket_type& socket) { return true; }
+	inline bool update_socket(socket_type& socket) {
+		OVERLAPPED* overlapped = (OVERLAPPED*)calloc(1, sizeof(OVERLAPPED));
+		DWORD bytes_received = 0;
+		DWORD flags = MSG_PEEK;
+		int result = WSARecv(socket.handle, &buffer_wrapper, 1, &bytes_received, &flags, overlapped, NULL);
+		if (result == SOCKET_ERROR) {
+			int error = WSAGetLastError();
+			if (error != WSA_IO_PENDING) {
+				errno = error;
+				perror("socket_listener.update_socket ERROR: Unable to begin receiving data from client");
+				shutdown(socket.handle, 2); return false;
+			}
+		}
+		return true;
+	}
 
 	constexpr bool remove_socket(socket_type& socket) { return true; }
 
-	template<typename SocketReadyFunction>
-	inline bool listen(SocketReadyFunction callback) {
-		ULONG event_count;
-		bool result = GetQueuedCompletionStatusEx(listener, overlapped, EVENT_QUEUE_CAPACITY, &event_count, INFINITE, false);
-		if (!result) {
-			listener_error("socket_listener.listen ERROR: Error listening for incoming network activity");
-			return false;
+	template<typename AcceptedConnectionCallback>
+	inline bool accept(socket_type& server_socket, AcceptedConnectionCallback callback)
+	{
+		/* listen for a new connection on the server socket */
+		sockaddr_storage client_address;
+		socklen_t address_size = sizeof(client_address);
+		socket_type connection = ::accept(server_socket.handle, (sockaddr*) &client_address, &address_size);
+		if (!connection.is_valid()) {
+			int error = WSAGetLastError();
+			if (error == WSAEINTR) {
+				/* the server is shutting down */
+				return true;
+			} else {
+				errno = error;
+				perror("run_server ERROR: Error establishing connection with client");
+				return false;
+			}
 		}
 
-		for (ULONG i = 0; i < event_count; i++) {
-			socket_type socket = (SOCKET) overlapped[i].lpCompletionKey;
-			callback(socket);
+		if (!add_socket<true>(connection)) {
+			shutdown(connection.handle, 2); return false;
 		}
+
+		OVERLAPPED* overlapped = (OVERLAPPED*) calloc(1, sizeof(OVERLAPPED));
+		DWORD bytes_received = 0;
+		DWORD flags = MSG_PEEK;
+		int result = WSARecv(connection.handle, &buffer_wrapper, 1, &bytes_received, &flags, overlapped, NULL);
+		if (result == SOCKET_ERROR) {
+			int error = WSAGetLastError();
+			if (error != WSA_IO_PENDING) {
+				errno = error;
+				perror("run_server ERROR: Unable to begin receiving data from client");
+				shutdown(connection.handle, 2); return false;
+			}
+		}
+
+		callback(connection);
+		return true;
 	}
 
-	static inline void free(socket_listener& listener) {
+	inline bool listen(socket_type& connection) {
+		ULONG_PTR completion_key = NULL;
+		DWORD bytes_transferred;
+		OVERLAPPED* overlapped;
+		bool result = GetQueuedCompletionStatus(listener,
+			&bytes_transferred, &completion_key, &overlapped, INFINITE);
+		core::free(overlapped);
+		if (!result) {
+			listener_error("run_worker ERROR: Error waiting for IO completion packet");
+			return false;
+		} if (completion_key == NULL) {
+			return true;
+		}
+		connection = (SOCKET) completion_key;
+		return true;
+	}
+
+	static inline void free(socket_listener& listener, unsigned int thread_count) {
+		for (unsigned int i = 0; i < thread_count; i++)
+			PostQueuedCompletionStatus(listener.listener, 0, (DWORD)NULL, NULL);
 		CloseHandle(listener.listener);
 	}
+
 #elif defined(__APPLE__) /* on Mac */
 	int listener;
 	kevent events[EVENT_QUEUE_CAPACITY];
+	array<socket_type> event_queue;
+	std::condition_variable cv;
+	std::mutex event_queue_lock;
+
+	listener() : event_queue(EVENT_QUEUE_CAPACITY) { }
 
 	template<bool Oneshot>
 	inline bool add_socket(socket_type& socket,
-			const char* error_message = "socket_listener.add_socket ERROR: Failed to listen to socket")
+		const char* error_message = "socket_listener.add_socket ERROR: Failed to listen to socket")
 	{
 		kevent new_event;
 		EV_SET(&new_event, socket.handle, EVFILT_READ, EV_ADD | (Oneshot ? EV_ONESHOT : 0), 0, 0, NULL);
@@ -163,8 +229,8 @@ struct socket_listener {
 		return true;
 	}
 
-	template<typename SocketReadyFunction>
-	inline bool listen(SocketReadyFunction callback) {
+	template<typename AcceptedConnectionCallback>
+	inline bool accept(socket_type& server_socket, AcceptedConnectionCallback callback) {
 		int event_count = kevent(listener, NULL, 0, events, EVENT_QUEUE_CAPACITY, NULL);
 		if (event_count == -1) {
 			listener_error("socket_listener.listen ERROR: Error listening for incoming network activity");
@@ -173,17 +239,52 @@ struct socket_listener {
 
 		for (int i = 0; i < event_count; i++) {
 			socket_type socket = events[i].data.fd;
-			callback((int) events[i].ident);
+
+			if (!server_running) {
+				return true;
+			} else if (socket == server_socket) {
+				/* there's a new connection on the server socket */
+				sockaddr_storage client_address;
+				socklen_t address_size = sizeof(client_address);
+				socket_type connection = ::accept(sock.handle, (sockaddr*) &client_address, &address_size);
+				if (!connection.is_valid()) {
+					network_error("socket_listener.accept ERROR: Error establishing connection with client");
+					return;
+				}
+
+				if (!add_socket<true>(connection)) {
+					shutdown(connection.handle, 2); continue;
+				}
+				callback(connection);
+			} else {
+				/* there is an event on a client connection */
+				event_queue_lock.lock();
+				event_queue.add(socket);
+				event_queue_lock.unlock(); cv.notify_one();
+			}
 		}
 		return true;
 	}
 
-	static inline void free(socket_listener& listener) {
+	inline bool listen(socket_type& connection) {
+		std::unique_lock<std::mutex> lck(event_queue_lock);
+		cv.wait(lck);
+		socket_type connection = event_queue.pop();
+		return true;
+	}
+
+	static inline void free(socket_listener& listener, unsigned int thread_count) {
 		close(listener.listener);
 	}
+
 #else /* on Linux */
 	int listener;
 	epoll_event events[EVENT_QUEUE_CAPACITY];
+	array<socket_type> event_queue;
+	std::condition_variable cv;
+	std::mutex event_queue_lock;
+
+	listener() : event_queue(EVENT_QUEUE_CAPACITY) { }
 
 	template<bool Oneshot>
 	inline bool add_socket(socket_type& socket) {
@@ -217,22 +318,53 @@ struct socket_listener {
 		return true;
 	}
 
-	template<typename SocketReadyFunction>
-	inline bool listen(SocketReadyFunction callback) {
+	template<typename AcceptedConnectionCallback>
+	inline bool accept(socket_type& server_socket, AcceptedConnectionCallback callback) {
 		int event_count = epoll_wait(listener, events, EVENT_QUEUE_CAPACITY, -1);
 		if (event_count == -1) {
-			listener_error("socket_listener.listen ERROR: Error listening for incoming network activity");
+			listener_error("socket_listener.accept ERROR: Error listening for incoming network activity");
 			return false;
 		}
 
 		for (int i = 0; i < event_count; i++) {
 			socket_type socket = events[i].data.fd;
-			callback(socket);
+
+			if (!server_running) {
+				return true;
+			}
+			else if (socket == server_socket) {
+				/* there's a new connection on the server socket */
+				sockaddr_storage client_address;
+				socklen_t address_size = sizeof(client_address);
+				socket_type connection = ::accept(sock.handle, (sockaddr*) &client_address, &address_size);
+				if (!connection.is_valid()) {
+					network_error("socket_listener.accept ERROR: Error establishing connection with client");
+					return;
+				}
+
+				if (!add_socket<true>(connection)) {
+					shutdown(connection.handle, 2); continue;
+				}
+				callback(connection);
+			}
+			else {
+				/* there is an event on a client connection */
+				event_queue_lock.lock();
+				event_queue.add(socket);
+				event_queue_lock.unlock(); cv.notify_one();
+			}
 		}
 		return true;
 	}
 
-	static inline void free(socket_listener& listener) {
+	inline bool listen(socket_type& connection) {
+		std::unique_lock<std::mutex> lck(event_queue_lock);
+		cv.wait(lck);
+		socket_type connection = event_queue.pop();
+		return true;
+	}
+
+	static inline void free(socket_listener& listener, unsigned int thread_count) {
 		close(listener.listener);
 	}
 #endif
@@ -240,7 +372,9 @@ struct socket_listener {
 
 inline bool init(socket_listener& listener) {
 #if defined(_WIN32)
-	listener.listener = CreateIoCompletionPort(INVALID_QUEUE_HANDLE, NULL, 0, 0);
+	listener.buffer_wrapper.buf = listener.buffer;
+	listener.buffer_wrapper.len = 4;
+	listener.listener = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);
 	bool success = (listener.listener != NULL);
 #elif defined(__APPLE__)
 	listener.listener = kqueue();
@@ -264,7 +398,7 @@ inline bool init(socket_listener& listener) {
  */
 template<typename T, typename std::enable_if<std::is_fundamental<T>::value>::type* = nullptr>
 inline bool read(T& value, socket_type& in) {
-	return (recv(in.handle, &value, sizeof(T), MSG_WAITALL) > 0);
+	return (recv(in.handle, (char*) &value, sizeof(T), MSG_WAITALL) > 0);
 }
 
 /**
@@ -275,7 +409,7 @@ inline bool read(T& value, socket_type& in) {
  */
 template<typename T, typename std::enable_if<std::is_fundamental<T>::value>::type* = nullptr>
 inline bool read(T* values, socket_type& in, unsigned int length) {
-	return (recv(in.handle, values, sizeof(T) * length, MSG_WAITALL) > 0);
+	return (recv(in.handle, (char*) values, sizeof(T) * length, MSG_WAITALL) > 0);
 }
 
 /**
@@ -286,7 +420,7 @@ inline bool read(T* values, socket_type& in, unsigned int length) {
  */
 template<typename T, typename std::enable_if<std::is_fundamental<T>::value>::type* = nullptr>
 inline bool write(const T& value, socket_type& out) {
-	return (send(out.handle, &value, sizeof(T), 0) > 0);
+	return (send(out.handle, (const char*) &value, sizeof(T), 0) > 0);
 }
 
 /**
@@ -297,7 +431,7 @@ inline bool write(const T& value, socket_type& out) {
  */
 template<typename T, typename std::enable_if<std::is_fundamental<T>::value>::type* = nullptr>
 inline bool write(const T* values, socket_type& out, unsigned int length) {
-	return (send(out.handle, values, sizeof(T) * length, 0) > 0);
+	return (send(out.handle, (const char*) values, sizeof(T) * length, 0) > 0);
 }
 
 inline void network_error(const char* message) {
@@ -308,19 +442,18 @@ inline void network_error(const char* message) {
 }
 
 template<typename ProcessMessageCallback, typename... CallbackArgs>
-void run_worker(
-		array<socket_type>& event_queue, socket_listener& listener, hash_set<socket_type>& connections,
-		std::condition_variable& cv, std::mutex& event_queue_lock, std::mutex& connection_set_lock,
-		bool& server_running, ProcessMessageCallback process_message, CallbackArgs&&... callback_args)
+void run_worker(socket_listener& listener, hash_set<socket_type>& connections,
+		std::mutex& connection_set_lock, bool& server_running,
+		ProcessMessageCallback process_message, CallbackArgs&&... callback_args)
 {
 	while (server_running) {
-		std::unique_lock<std::mutex> lck(event_queue_lock);
-		cv.wait(lck);
-		socket_type connection = event_queue.pop();
-		lck.unlock();
+		socket_type connection;
+		if (!listener.listen(connection))
+			continue;
+		if (!server_running) return;
 
 		uint8_t next;
-		if (recv(connection.handle, &next, sizeof(next), MSG_PEEK) == 0) {
+		if (recv(connection.handle, (char*) &next, sizeof(next), MSG_PEEK) == 0) {
 			/* the other end of the socket was closed by the client */
 			listener.remove_socket(connection);
 			connection_set_lock.lock();
@@ -331,9 +464,13 @@ void run_worker(
 			/* there is a data waiting to be read, so read it */
 			process_message(connection, std::forward<CallbackArgs>(callback_args)...);
 
-			/* tell epoll to continue polling this socket */
-			if (!listener.update_socket<true>(connection))
+			/* continue listening on this socket */
+			if (!listener.update_socket<true>(connection)) {
+				connection_set_lock.lock();
+				connections.remove(connection);
+				connection_set_lock.unlock();
 				shutdown(connection.handle, 2);
+			}
 		}
 	}
 }
@@ -352,20 +489,11 @@ inline void cleanup_server(
 }
 
 template<bool Success>
-inline void cleanup_server(
-		bool& server_running, std::condition_variable& init_cv, socket_type& sock)
+inline void cleanup_server(bool& server_running,
+		std::condition_variable& init_cv, socket_type& sock)
 {
 	shutdown(sock.handle, 2);
 	cleanup_server<Success>(server_running, init_cv);
-}
-
-template<bool Success>
-inline void cleanup_server(
-		bool& server_running, std::condition_variable& init_cv,
-		socket_type& sock, socket_listener& listener)
-{
-	core::free(listener);
-	cleanup_server<Success>(server_running, init_cv, sock);
 }
 
 template<typename ProcessMessageCallback, typename... CallbackArgs>
@@ -380,16 +508,18 @@ bool run_server(socket_type& sock, uint16_t server_port,
 		fprintf(stderr, "run_server ERROR: Unable to initialize WinSock.\n");
 		server_running = false; init_cv.notify_all(); return false;
 	}
+	sock = WSASocket(AF_INET6, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
+#else
+	sock = socket(AF_INET6, SOCK_STREAM, 0);
 #endif
 
-	sock = socket(AF_INET6, SOCK_STREAM, 0);
 	if (!sock.is_valid()) {
 		network_error("run_server ERROR: Unable to open socket");
 		cleanup_server<false>(server_running, init_cv); return false;
 	}
 
 	int yes = 1;
-	if (setsockopt(sock.handle, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) != 0) {
+	if (setsockopt(sock.handle, SOL_SOCKET, SO_REUSEADDR, (const char*) &yes, sizeof(yes)) != 0) {
 		network_error("run_server ERROR: Unable to set socket option");
 		cleanup_server<false>(server_running, init_cv, sock); return false;
 	}
@@ -415,20 +545,19 @@ bool run_server(socket_type& sock, uint16_t server_port,
 		cleanup_server<false>(server_running, init_cv, sock); return false;
 	}
 
-	epoll_event events[EVENT_QUEUE_CAPACITY];
 	if (!listener.add_socket<false>(sock)) {
-		cleanup_server<false>(server_running, init_cv, sock, listener); return false;
+		core::free(listener, worker_count);
+		cleanup_server<false>(server_running, init_cv, sock);
+		return false;
 	}
 
 	/* make the thread pool */
-	std::condition_variable cv;
-	std::mutex event_queue_lock, connection_set_lock;
+	std::mutex connection_set_lock;
 	hash_set<socket_type> connections(1024, alloc_socket_keys);
-	array<socket_type> event_queue(64);
 	std::thread* workers = new std::thread[worker_count];
 	auto start_worker = [&]() {
-		run_worker(event_queue, listener, connections, cv, event_queue_lock, connection_set_lock,
-				server_running, process_message, std::forward<CallbackArgs>(callback_args)...);
+		run_worker(listener, connections, connection_set_lock, server_running,
+				process_message, std::forward<CallbackArgs>(callback_args)...);
 	};
 	for (unsigned int i = 0; i < worker_count; i++)
 		workers[i] = std::thread(start_worker);
@@ -437,40 +566,21 @@ bool run_server(socket_type& sock, uint16_t server_port,
 	init_cv.notify_all();
 
 	/* the main loop */
-	sockaddr_storage client_address;
-	socklen_t address_size = sizeof(client_address);
 	while (server_running) {
-		listener.listen([&](socket_type& socket) { 
-			if (socket == sock.handle) {
-				/* there's a new connection on the server socket */
-				socket_type connection = accept(sock.handle, (sockaddr*) &client_address, &address_size);
-				if (!connection.is_valid()) {
-					network_error("run_server ERROR: Error establishing connection with client");
-					return;
-				}
-
-				if (!listener.add_socket<true>(connection)) {
-					shutdown(connection.handle, 2); return;
-				}
-				connection_set_lock.lock();
-				connections.add(connection, alloc_socket_keys);
-				connection_set_lock.unlock();
-			} else {
-				/* there is an event on a client connection */
-				event_queue_lock.lock();
-				event_queue.add(socket);
-				event_queue_lock.unlock(); cv.notify_one();
-			}
+		listener.accept(sock, [&](socket_type& connection) {
+			connection_set_lock.lock();
+			connections.add(connection, alloc_socket_keys);
+			connection_set_lock.unlock();
 		});
 	}
 
+	core::free(listener, worker_count);
 	for (unsigned int i = 0; i < worker_count; i++)
 		workers[i].join();
-	delete[] workers;
-
 	for (socket_type& connection : connections)
 		shutdown(connection.handle, 2);
-	cleanup_server<true>(server_running, init_cv, sock, listener);
+	cleanup_server<true>(server_running, init_cv, sock);
+	delete[] workers;
 	return true;
 }
 
@@ -488,7 +598,11 @@ bool run_client(
 	addrinfo* addresses;
 	int result = getaddrinfo(server_address, server_port, &hints, &addresses);
 	if (result != 0 || addresses == NULL) {
+#if defined(_WIN32)
+		network_error("run_client ERROR: Unable to resolve address");
+#else
 		fprintf(stderr, "run_client ERROR: Unable to resolve address. %s\n", gai_strerror(result));
+#endif
 		return false;
 	}
 
@@ -500,7 +614,7 @@ bool run_client(
 			continue;
 		}
 
-		if (connect(sock.handle, entry->ai_addr, entry->ai_addrlen) != 0) {
+		if (connect(sock.handle, entry->ai_addr, (socklen_t) entry->ai_addrlen) != 0) {
 			network_error("run_client ERROR: Unable to connect");
 			shutdown(sock.handle, 2); continue;
 		}

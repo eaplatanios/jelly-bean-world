@@ -141,7 +141,7 @@ struct client {
 };
 
 inline bool send_message(client& c, const void* data, unsigned int length) {
-	return send(c.connection.handle, data, length, 0) != 0;
+	return send(c.connection.handle, (const char*) data, length, 0) != 0;
 }
 
 bool send_add_agent(client& c) {
