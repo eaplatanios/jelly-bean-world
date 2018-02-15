@@ -47,7 +47,7 @@ inline bool receive_move(socket_type& connection, simulator& sim) {
 	uint64_t agent_handle;
 	direction dir;
 	unsigned int num_steps;
-	if (!read(agent_handle, connection) && !read(dir, connection) && !read(num_steps, connection))
+	if (!read(agent_handle, connection) || !read(dir, connection) || !read(num_steps, connection))
 		return false;
 	bool result = sim.move(*((agent_state*) agent_handle), dir, num_steps);
 	return write(message_type::MOVE_RESPONSE, connection)

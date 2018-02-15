@@ -63,8 +63,8 @@ bool init_server(test_server& new_server, uint16_t server_port,
 
 void stop_server(test_server& server) {
 	server.server_running = false;
-	//write(0, server.server_socket);
-	closesocket(server.server_socket.handle);
+	write(0, server.server_socket);
+	close(server.server_socket);
 	server.server_thread.join();
 }
 

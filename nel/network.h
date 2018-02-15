@@ -18,6 +18,7 @@ typedef int socklen_t;
 #include <sys/event.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <unistd.h>
 
 #else /* on Linux */
 #include <sys/epoll.h>
@@ -79,6 +80,14 @@ struct socket_type {
 		dst.handle = src.handle;
 	}
 };
+
+inline void close(socket_type& socket) {
+#if defined(_WIN32)
+	closesocket(socket.handle);
+#else
+	::close(socket.handle);
+#endif
+}
 
 void* alloc_socket_keys(size_t n, size_t element_size) {
 	socket_type* keys = (socket_type*) malloc(sizeof(socket_type) * n);
@@ -199,7 +208,7 @@ struct socket_listener {
 	std::condition_variable cv;
 	std::mutex event_queue_lock;
 
-	listener() : event_queue(EVENT_QUEUE_CAPACITY) { }
+	socket_listener() : event_queue(EVENT_QUEUE_CAPACITY) { }
 
 	template<bool Oneshot>
 	inline bool add_socket(socket_type& socket,
@@ -246,10 +255,11 @@ struct socket_listener {
 				/* there's a new connection on the server socket */
 				sockaddr_storage client_address;
 				socklen_t address_size = sizeof(client_address);
-				socket_type connection = ::accept(sock.handle, (sockaddr*) &client_address, &address_size);
+				socket_type connection = ::accept(server_socket.handle, (sockaddr*) &client_address, &address_size);
 				if (!connection.is_valid()) {
-					network_error("socket_listener.accept ERROR: Error establishing connection with client");
-					return;
+					errno = connection.handle;
+					perror("socket_listener.accept ERROR: Error establishing connection with client");
+					return false;
 				}
 
 				if (!add_socket<true>(connection)) {
@@ -269,12 +279,12 @@ struct socket_listener {
 	inline bool listen(socket_type& connection) {
 		std::unique_lock<std::mutex> lck(event_queue_lock);
 		cv.wait(lck);
-		socket_type connection = event_queue.pop();
+		connection = event_queue.pop();
 		return true;
 	}
 
 	static inline void free(socket_listener& listener, unsigned int thread_count) {
-		close(listener.listener);
+		::close(listener.listener);
 	}
 
 #else /* on Linux */
@@ -284,7 +294,7 @@ struct socket_listener {
 	std::condition_variable cv;
 	std::mutex event_queue_lock;
 
-	listener() : event_queue(EVENT_QUEUE_CAPACITY) { }
+	socket_listener() : event_queue(EVENT_QUEUE_CAPACITY) { }
 
 	template<bool Oneshot>
 	inline bool add_socket(socket_type& socket) {
@@ -329,25 +339,21 @@ struct socket_listener {
 		for (int i = 0; i < event_count; i++) {
 			socket_type socket = events[i].data.fd;
 
-			if (!server_running) {
-				return true;
-			}
-			else if (socket == server_socket) {
+			if (socket == server_socket) {
 				/* there's a new connection on the server socket */
 				sockaddr_storage client_address;
 				socklen_t address_size = sizeof(client_address);
-				socket_type connection = ::accept(sock.handle, (sockaddr*) &client_address, &address_size);
+				socket_type connection = ::accept(server_socket.handle, (sockaddr*) &client_address, &address_size);
 				if (!connection.is_valid()) {
-					network_error("socket_listener.accept ERROR: Error establishing connection with client");
-					return;
+					perror("socket_listener.accept ERROR: Error establishing connection with client");
+					return false;
 				}
 
 				if (!add_socket<true>(connection)) {
 					shutdown(connection.handle, 2); continue;
 				}
 				callback(connection);
-			}
-			else {
+			} else {
 				/* there is an event on a client connection */
 				event_queue_lock.lock();
 				event_queue.add(socket);
@@ -360,12 +366,12 @@ struct socket_listener {
 	inline bool listen(socket_type& connection) {
 		std::unique_lock<std::mutex> lck(event_queue_lock);
 		cv.wait(lck);
-		socket_type connection = event_queue.pop();
+		connection = event_queue.pop();
 		return true;
 	}
 
 	static inline void free(socket_listener& listener, unsigned int thread_count) {
-		close(listener.listener);
+		::close(listener.listener);
 	}
 #endif
 };
