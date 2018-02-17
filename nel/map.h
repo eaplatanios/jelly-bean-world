@@ -8,18 +8,27 @@ namespace nel {
 
 using namespace core;
 
-struct item_position {
+struct item {
 	unsigned int item_type;
+
+	/* the position of the item, in world coordinates */
 	position location;
+
+	/* a time of 0 indicates the item always existed */
+	uint64_t creation_time;
+	uint64_t deletion_time;
+
+	static inline void move(const item& src, item& dst) {
+		dst.item_type = src.item_type;
+		dst.location = src.location;
+		dst.creation_time = src.creation_time;
+		dst.deletion_time = src.deletion_time;
+	}
 };
 
 struct patch
 {
-	/**
-	 * For each type of item, we keep an array of the position of each item
-	 * instance in this patch, in world coordinates.
-	 */
-	array<position>* item_positions;
+	array<item> items;
 
 	/**
 	 * Indicates if this patch is fixed, or if it can be resampled (for
@@ -28,29 +37,20 @@ struct patch
 	bool fixed;
 
 	static inline void move(const patch& src, patch& dst) {
-		dst.item_positions = src.item_positions;
+		core::move(src.items, dst.items);
 		dst.fixed = src.fixed;
 	}
 
-	static inline void free(patch& p, unsigned int item_type_count) {
-		for (unsigned int i = 0; i < item_type_count; i++)
-			core::free(p.item_positions[i]);
-		core::free(p.item_positions);
+	static inline void free(patch& p) {
+		core::free(p.items);
 	}
 };
 
-inline bool init(patch& new_patch, unsigned int item_type_count) {
+inline bool init(patch& new_patch) {
 	new_patch.fixed = false;
-	new_patch.item_positions = (array<position>*) malloc(sizeof(array<position>) * item_type_count);
-	if (new_patch.item_positions == NULL) {
-		fprintf(stderr, "init ERROR: Insufficient memory for patch.item_positions.\n");
+	if (!array_init(new_patch.items, 8)) {
+		fprintf(stderr, "init ERROR: Insufficient memory for patch.items.\n");
 		return false;
-	}
-	for (unsigned int i = 0; i < item_type_count; i++) {
-		if (!array_init(new_patch.item_positions[i], 8)) {
-			for (unsigned int j = 0; j < i; j++) free(new_patch.item_positions[j]);
-			free(new_patch.item_positions); return false;
-		}
 	}
 	return true;
 }
@@ -78,6 +78,7 @@ struct map {
 	unsigned int gibbs_iterations;
 
 	typedef patch patch_type;
+	typedef item item_type;
 
 public:
 	map(unsigned int n, unsigned int item_type_count, unsigned int gibbs_iterations,
@@ -88,10 +89,7 @@ public:
 		intensity_fn_args(intensity_fn_args), interaction_fn_args(interaction_fn_args), 
 		n(n), item_type_count(item_type_count), gibbs_iterations(gibbs_iterations) { }
 
-	~map() {
-		for (auto entry : patches)
-			core::free(entry.value, item_type_count);
-	}
+	~map() { free_helper(); }
 
 	inline float intensity(const position& pos, unsigned int item_type) {
 		return intensity_fn(pos, item_type, intensity_fn_args);
@@ -118,7 +116,7 @@ public:
 		patch& p = patches.get(patch_position, contains, bucket);
 		if (!contains) {
 			/* add a new patch */
-			init(p, item_type_count);
+			init(p);
 			patches.table.keys[bucket] = patch_position;
 			patches.table.size++;
 		}
@@ -173,7 +171,7 @@ public:
 	void get_items(
 			position bottom_left_corner,
 			position top_right_corner,
-			array<item_position>& items)
+			array<item>& items)
 	{
 		position bottom_left_patch_position, top_right_patch_position;
 		world_to_patch_coordinates(bottom_left_corner, bottom_left_patch_position);
@@ -186,11 +184,10 @@ public:
 				patch* p = get_patch_if_exists({x, y});
 				if (p == NULL) continue;
 
-				for (unsigned int i = 0; i < item_type_count; i++)
-					for (position item_position : p->item_positions[i])
-						if (item_position.x >= bottom_left_corner.x && item_position.x <= top_right_corner.x
-						 && item_position.y >= bottom_left_corner.y && item_position.y <= top_right_corner.y)
-							items.add({i, item_position});
+				for (const item& i : p->items)
+					if (i.location.x >= bottom_left_corner.x && i.location.x <= top_right_corner.x
+						&& i.location.y >= bottom_left_corner.y && i.location.y <= top_right_corner.y)
+						items.add(i);
 			}
 		}
 	}
@@ -213,6 +210,11 @@ public:
 		lldiv_t y_quotient = floored_div_with_remainder(world_position.y, n);
 		patch_position = {x_quotient.quot, y_quotient.quot};
 		position_within_patch = {x_quotient.rem, y_quotient.rem};
+	}
+
+	static inline void free(map& world) {
+		world.free_helper();
+		core::free(world.patches);
 	}
 
 private:
@@ -321,7 +323,29 @@ private:
 		for (unsigned int i = 0; i < patch_count; i++)
 			patches[i]->fixed = true;
 	}
+
+	inline void free_helper() {
+		for (auto entry : patches)
+			core::free(entry.value);
+	}
 };
+
+inline bool init(map& world, unsigned int n,
+		unsigned int item_type_count, unsigned int gibbs_iterations,
+		intensity_function intensity_fn, float* intensity_fn_args, 
+		interaction_function interaction_fn, float* interaction_fn_args)
+{
+	if (!hash_map_init(world.patches, 1024, alloc_position_keys))
+		return false;
+	world.intensity_fn = intensity_fn;
+	world.interaction_fn = interaction_fn;
+	world.intensity_fn_args = intensity_fn_args;
+	world.interaction_fn_args = interaction_fn_args;
+	world.n = n;
+	world.item_type_count = item_type_count;
+	world.gibbs_iterations = gibbs_iterations;
+	return true;
+}
 
 } /* namespace nel */
 

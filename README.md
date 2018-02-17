@@ -130,9 +130,9 @@ current state in the simulation.
 ### Implementation
 
 The core library is implemented in **C++** and has no dependencies. It should 
-be able to run on Mac and Linux (and maybe even Windows, but we have not tested 
-that case). We already provide a **Python** API that is quite simple to use and 
-extend. APIs for other languages should also be easy to implement.
+be able to run on Mac, Linux, and Windows. We already provide a **Python** API
+that is quite simple to use and extend. APIs for other languages should also be
+easy to implement.
 
 ## Workflow
 

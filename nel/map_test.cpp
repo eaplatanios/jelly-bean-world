@@ -5,8 +5,8 @@ using namespace nel;
 struct item_position_printer { };
 
 template<typename Stream>
-inline bool print(const item_position& item_pos, Stream& out, const item_position_printer& printer) {
-	return print(item_pos.location, out);
+inline bool print(const item& item, Stream& out, const item_position_printer& printer) {
+	return print(item.location, out);
 }
 
 float intensity(const position& world_position, unsigned int type, float* args) {
@@ -41,11 +41,11 @@ int main(int argc, const char** argv) {
 	position neighbor_positions[4];
 	m.get_fixed_neighborhood({0, 0}, neighborhood, neighbor_positions);
 
-	array<item_position> item_positions(128);
-	m.get_items({-2*n, -2*n}, {2*n - 1, 2*n - 1}, item_positions);
+	array<item> items(128);
+	m.get_items({-2*n, -2*n}, {2*n - 1, 2*n - 1}, items);
 
 	FILE* out = stdout;
 	item_position_printer printer;
-	print(item_positions, out, printer); print('\n', out); fflush(out);
+	print(items, out, printer); print('\n', out); fflush(out);
  	return EXIT_SUCCESS;
 }

@@ -110,18 +110,18 @@ struct socket_listener {
 	WSABUF buffer_wrapper;
 	char buffer[4];
 
-	template<bool Oneshot>
-	inline bool add_socket(socket_type& socket) {
-		if (CreateIoCompletionPort((HANDLE)socket.handle, listener, (ULONG_PTR)socket.handle, 0) == NULL) {
-			listener_error("socket_listener.add_socket ERROR: Failed to listen to socket");
+	constexpr bool add_server_socket(socket_type& socket) { return true; }
+
+	inline bool add_client_socket(socket_type& socket) {
+		if (CreateIoCompletionPort((HANDLE) socket.handle, listener, (ULONG_PTR) socket.handle, 0) == NULL) {
+			listener_error("socket_listener.add_client_socket ERROR: Failed to listen to socket");
 			return false;
 		}
 		return true;
 	}
 
-	template<bool Oneshot>
 	inline bool update_socket(socket_type& socket) {
-		OVERLAPPED* overlapped = (OVERLAPPED*)calloc(1, sizeof(OVERLAPPED));
+		OVERLAPPED* overlapped = (OVERLAPPED*) calloc(1, sizeof(OVERLAPPED));
 		DWORD bytes_received = 0;
 		DWORD flags = MSG_PEEK;
 		int result = WSARecv(socket.handle, &buffer_wrapper, 1, &bytes_received, &flags, overlapped, NULL);
@@ -157,7 +157,7 @@ struct socket_listener {
 			}
 		}
 
-		if (!add_socket<true>(connection)) {
+		if (!add_client_socket(connection)) {
 			shutdown(connection.handle, 2); return false;
 		}
 
@@ -210,12 +210,12 @@ struct socket_listener {
 
 	socket_listener() : event_queue(EVENT_QUEUE_CAPACITY) { }
 
-	template<bool Oneshot>
+	template<bool ServerSocket>
 	inline bool add_socket(socket_type& socket,
 		const char* error_message = "socket_listener.add_socket ERROR: Failed to listen to socket")
 	{
 		struct kevent new_event;
-		EV_SET(&new_event, socket.handle, EVFILT_READ, EV_ADD | (Oneshot ? EV_ONESHOT : 0), 0, 0, NULL);
+		EV_SET(&new_event, socket.handle, EVFILT_READ, EV_ADD | (!ServerSocket ? EV_ONESHOT : 0), 0, 0, NULL);
 		if (kevent(listener, &new_event, 1, NULL, 0, NULL) == -1) {
 			listener_error(error_message);
 			return false;
@@ -223,9 +223,11 @@ struct socket_listener {
 		return true;
 	}
 
-	template<bool Oneshot>
-	inline bool update_socket(socket_type& socket) {
-		return add_socket<Oneshot>(socket, "socket_listener.update_socket ERROR: Failed to modify listen event");
+	inline bool add_server_socket(socket_type& socket) { return add_socket<true>(socket); }
+	inline bool add_client_socket(socket_type& socket) { return add_socket<false>(socket); }
+
+	inline bool update_client_socket(socket_type& socket) {
+		return add_socket<false>(socket, "socket_listener.update_socket ERROR: Failed to modify listen event");
 	}
 
 	constexpr bool remove_socket(socket_type& socket) const {
@@ -256,7 +258,7 @@ struct socket_listener {
 					return false;
 				}
 
-				if (!add_socket<true>(connection)) {
+				if (!add_client_socket(connection)) {
 					shutdown(connection.handle, 2); continue;
 				}
 				callback(connection);
@@ -290,10 +292,10 @@ struct socket_listener {
 
 	socket_listener() : event_queue(EVENT_QUEUE_CAPACITY) { }
 
-	template<bool Oneshot>
+	template<bool ServerSocket>
 	inline bool add_socket(socket_type& socket) {
 		epoll_event new_event = {0};
-		new_event.events = EPOLLIN | EPOLLERR | (Oneshot ? EPOLLONESHOT : 0);
+		new_event.events = EPOLLIN | EPOLLERR | (!ServerSocket ? EPOLLONESHOT : 0);
 		new_event.data.fd = socket.handle;
 		if (epoll_ctl(listener, EPOLL_CTL_ADD, socket.handle, &new_event) == -1) {
 			listener_error("socket_listener.add_socket ERROR: Failed to listen to socket");
@@ -302,10 +304,12 @@ struct socket_listener {
 		return true;
 	}
 
-	template<bool Oneshot>
+	inline bool add_server_socket(socket_type& socket) { return add_socket<true>(socket); }
+	inline bool add_client_socket(socket_type& socket) { return add_socket<false>(socket); }
+
 	inline bool update_socket(socket_type& socket) {
 		epoll_event new_event = {0};
-		new_event.events = EPOLLIN | EPOLLERR | (Oneshot ? EPOLLONESHOT : 0);
+		new_event.events = EPOLLIN | EPOLLERR | EPOLLONESHOT;
 		new_event.data.fd = socket.handle;
 		if (epoll_ctl(listener, EPOLL_CTL_MOD, socket.handle, &new_event) == -1) {
 			listener_error("socket_listener.update_socket ERROR: Failed to modify listen event");
@@ -343,7 +347,7 @@ struct socket_listener {
 					return false;
 				}
 
-				if (!add_socket<true>(connection)) {
+				if (!add_client_socket(connection)) {
 					shutdown(connection.handle, 2); continue;
 				}
 				callback(connection);
@@ -465,7 +469,7 @@ void run_worker(socket_listener& listener, hash_set<socket_type>& connections,
 			process_message(connection, std::forward<CallbackArgs>(callback_args)...);
 
 			/* continue listening on this socket */
-			if (!listener.update_socket<true>(connection)) {
+			if (!listener.update_socket(connection)) {
 				connection_set_lock.lock();
 				connections.remove(connection);
 				connection_set_lock.unlock();
@@ -545,7 +549,7 @@ bool run_server(socket_type& sock, uint16_t server_port,
 		cleanup_server<false>(server_running, init_cv, sock); return false;
 	}
 
-	if (!listener.add_socket<false>(sock)) {
+	if (!listener.add_server_socket(sock)) {
 		core::free(listener, worker_count);
 		cleanup_server<false>(server_running, init_cv, sock);
 		return false;

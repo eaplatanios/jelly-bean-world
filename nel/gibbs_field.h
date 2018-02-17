@@ -85,6 +85,7 @@ class gibbs_field
 	unsigned int item_type_count;
 
 	typedef typename Map::patch_type patch_type;
+	typedef typename Map::item_type item_type;
 
 public:
 	/* NOTE: `patches` and `patch_positions` are used directly, and not copied */
@@ -118,17 +119,15 @@ private:
 			/* compute the energy contribution of this cell when the item type is `i` */
 			log_probabilities[i] = map.intensity(world_position, i);
 			for (unsigned int j = 0; j < neighbor_count; j++) {
-				for (unsigned int k = 0; k < item_type_count; k++) {
-					const array<position>& item_positions = neighborhood[j]->item_positions[k];
-					for (unsigned int m = 0; m < item_positions.length; m++) {
-						if (item_positions[m] == world_position) {
-							old_item_index = m;
-							old_item_type = k;
-							continue; /* ignore the current position */
-						}
-
-						log_probabilities[i] += map.interaction(world_position, item_positions[m], i, k);
+				const array<item_type>& items = neighborhood[j]->items;
+				for (unsigned int m = 0; m < items.length; m++) {
+					if (items[m].location == world_position) {
+						old_item_index = m;
+						old_item_type = items[m].item_type;
+						continue; /* ignore the current position */
 					}
+
+					log_probabilities[i] += map.interaction(world_position, items[m].location, i, items[m].item_type);
 				}
 			}
 		}
@@ -144,10 +143,10 @@ private:
 			return;
 		} if (old_item_type < item_type_count) {
 			/* remove the old item position */
-			current_patch.item_positions[old_item_type].remove(old_item_index);
+			current_patch.items.remove(old_item_index);
 		} if (sampled_item_type < item_type_count) {
 			/* add the new item position */
-			current_patch.item_positions[sampled_item_type].add(world_position);
+			current_patch.items.add({sampled_item_type, world_position, 0, 0});
 		}
 	}
 };
