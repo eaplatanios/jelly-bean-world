@@ -191,6 +191,12 @@ struct patch_data {
     std::mutex patch_lock;
     array<agent_state*> agents;
 
+    static inline void move(const patch_data& src, patch_data& dst) {
+        core::move(src.agents, dst.agents);
+        src.patch_lock.~mutex();
+        new (&dst.patch_lock) std::mutex();
+    }
+
     static inline void free(patch_data& data) {
         core::free(data.agents);
         data.patch_lock.~mutex();
@@ -378,10 +384,23 @@ inline bool init(
     unsigned int index = world.get_fixed_neighborhood(agent.current_position, neighborhood, patch_positions);
     agent.update_state(neighborhood, scent_model, config, current_time);
 
-    /* update the scent and vision of nearby agents */
     neighborhood[index]->data.patch_lock.lock();
+    if (config.collision_policy != movement_conflict_policy::NO_COLLISION) {
+        for (const agent_state* neighbor : neighborhood[index]->data.agents) {
+            if (agent.current_position == neighbor->current_position)
+            {
+                /* there is already an agent at this position */
+                free(agent.current_scent); free(agent.current_vision);
+                free(agent.collected_items); agent.lock.~mutex();
+                neighborhood[index]->data.patch_lock.unlock();
+                return false;
+            }
+        }
+    }
     neighborhood[index]->data.agents.add(&agent);
     neighborhood[index]->data.patch_lock.unlock();
+
+    /* update the scent and vision of nearby agents */
     for (unsigned int i = 0; i < 4; i++) {
         for (agent_state* neighbor : neighborhood[i]->data.agents) {
             if (neighbor == &agent) continue;
@@ -401,7 +420,7 @@ typedef void (*step_callback)(
 /**
  * Simulator that forms the core of our experimentation framework.
  * 
- * \tparam  StepCallback    Callback function type for when the simulator 
+ * \tparam  StepCallback    Callback function type for when the simulator
  *                          advances a time step.
  */
 class simulator {
@@ -424,8 +443,8 @@ class simulator {
     std::mutex requested_move_lock;
 
     /** 
-     * Atomic counter for how many agents have acted during each time step. 
-     * This counter is used to force the simulator to wait until all agents 
+     * Atomic counter for how many agents have acted during each time step.
+     * This counter is used to force the simulator to wait until all agents
      * have acted, before advancing the simulation time step.
      */
     std::atomic<unsigned int> acted_agent_count;
@@ -465,16 +484,27 @@ public:
     /** 
      * Adds a new agent to this simulator and returns its initial state.
      * 
-     * \returns Initial state of the new agent.
+     * \returns Initial state of the new agent, or NULL if there is an error.
      */
     inline agent_state* add_agent() {
         agent_array_lock.lock();
         agents.ensure_capacity(agents.length + 1);
         agent_state* new_agent = (agent_state*) malloc(sizeof(agent_state));
-        agents.add(new_agent);
+        if (new_agent == NULL) {
+            fprintf(stderr, "simulator.add_agent ERROR: Insufficient memory for new agent.\n");
+            return NULL;
+        } else if (!agents.add(new_agent)) {
+            core::free(new_agent);
+            return NULL;
+        }
         agent_array_lock.unlock();
 
-        init(*new_agent, world, scent_model, config, time);
+        if (!init(*new_agent, world, scent_model, config, time)) {
+            agent_array_lock.lock();
+            agents.remove(agents.index_of(new_agent));
+            core::free(new_agent);
+            agent_array_lock.unlock();
+        }
         return new_agent;
     }
 
@@ -553,10 +583,13 @@ private:
         }
 
         time++;
+        acted_agent_count = 0;
         for (agent_state* agent : agents) {
             if (!agent->agent_acted) continue;
 
             /* check if this agent moved, in accordance with the collision policy */
+            position old_patch_position;
+            world.world_to_patch_coordinates(agent->current_position, old_patch_position);
             if (config.collision_policy == movement_conflict_policy::NO_COLLISION
              || (agent == requested_moves.get(agent->requested_position)[0]))
             {
@@ -576,6 +609,16 @@ private:
                         }
                     }
                 }
+
+                if (old_patch_position != patch_positions[index]) {
+                    patch_type& prev_patch = world.get_existing_patch(old_patch_position);
+                    prev_patch.data.patch_lock.lock();
+                    prev_patch.data.agents.remove(prev_patch.data.agents.index_of(agent));
+                    prev_patch.data.patch_lock.unlock();
+                    current_patch.data.patch_lock.lock();
+                    current_patch.data.agents.add(agent);
+                    current_patch.data.patch_lock.unlock();
+                }
             }
             agent->agent_acted = false;
         }
@@ -592,7 +635,6 @@ private:
             world.get_fixed_neighborhood(agent->current_position, neighborhood, patch_positions);
             agent->update_state(neighborhood, scent_model, config, time);
         }
-        agent_array_lock.unlock();
 
         /* Invoke the step callback function for each agent. */
         for (unsigned int id = 0; id < agents.length; id++)

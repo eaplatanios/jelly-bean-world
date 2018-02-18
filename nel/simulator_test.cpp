@@ -38,7 +38,8 @@ inline void set_interaction_args(float* args, unsigned int item_type_count,
 void on_step(const simulator* sim, unsigned int id,
 		const agent_state& agent, const simulator_config& config)
 {
-
+	print("on_step: agent position is ", stderr);
+	print(agent.current_position, stderr); print('\n', stderr);
 }
 
 int main(int argc, const char** argv)
@@ -80,4 +81,9 @@ int main(int argc, const char** argv)
 	simulator sim(config, on_step);
 
 	agent_state* agent = sim.add_agent();
+	for (unsigned int t = 0; t < 100000; t++) {
+		fprintf(stderr, "time = %u\n", t);
+		bool status = sim.move(*agent, direction::RIGHT, 1);
+		fprintf(stderr, "move returned %s.\n", status ? "true" : "false");
+	}
 }

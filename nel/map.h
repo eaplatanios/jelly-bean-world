@@ -41,6 +41,7 @@ struct patch
 
 	static inline void move(const patch& src, patch& dst) {
 		core::move(src.items, dst.items);
+		core::move(src.data, dst.data);
 		dst.fixed = src.fixed;
 	}
 
@@ -108,6 +109,17 @@ public:
 		return interaction_fn(pos1, pos2, item_type1, item_type2, interaction_fn_args);
 	}
 
+	inline patch_type& get_existing_patch(const position& patch_position) {
+#if !defined(NDEBUG)
+		bool contains;
+		patch_type& patch = patches.get(patch_position, contains);
+		if (!contains) fprintf(stderr, "map.get_existing_patch WARNING: The requested patch does not exist.\n");
+		return patch;
+#else
+		return patches.get(patch_position);
+#endif
+	}
+
 	inline patch_type* get_patch_if_exists(const position& patch_position)
 	{
 		bool contains; unsigned int bucket;
@@ -117,10 +129,11 @@ public:
 		else return &p;
 	}
 
+	template<bool ResizeMap = true>
 	inline patch_type& get_or_make_patch(const position& patch_position)
 	{
 		bool contains; unsigned int bucket;
-		patches.check_size(alloc_position_keys);
+		if (ResizeMap) patches.check_size(alloc_position_keys);
 		patch_type& p = patches.get(patch_position, contains, bucket);
 		if (!contains) {
 			/* add a new patch */
@@ -146,8 +159,9 @@ public:
 	{
 		unsigned int index = get_neighborhood_positions(world_position, patch_positions);
 
+		patches.check_size(patches.table.size + 16, alloc_position_keys);
 		for (unsigned int i = 0; i < 4; i++)
-			neighborhood[i] = &get_or_make_patch(patch_positions[i]);
+			neighborhood[i] = &get_or_make_patch<false>(patch_positions[i]);
 
 		fix_patches(neighborhood, patch_positions, 4);
 		return index;
@@ -294,6 +308,9 @@ private:
 	 * This function ensures that the given patches are fixed: they cannot be
 	 * modified in the future by further sampling. New neighboring patches are
 	 * created as needed, and sampling is done accordingly.
+	 *
+	 * NOTE: This function assumes `patches` has sufficient capacity to store
+	 * any new patches that may be initialized.
 	 */
 	void fix_patches(
 			patch_type** patches,
@@ -317,7 +334,7 @@ private:
 		}
 
 		for (unsigned int i = 0; i < positions_to_sample.length; i++) {
-			if (get_or_make_patch(positions_to_sample[i]).fixed) {
+			if (get_or_make_patch<false>(positions_to_sample[i]).fixed) {
 				positions_to_sample.remove(i);
 				i--;
 			}
