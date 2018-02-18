@@ -21,6 +21,8 @@ struct diffusion
 	/* the cache of pre-computed states */
 	T** cache;
 
+	~diffusion() { free_helper(); }
+
 	inline T get_value(unsigned int t, int x, int y) const {
 		if (x < 0) return get_value(t, -x, y);
 		if (y < 0) return get_value(t, x, -y);
@@ -37,9 +39,14 @@ struct diffusion
 	}
 
 	static inline void free(diffusion<T>& model) {
-		for (unsigned int t = 0; t < model.max_time; t++)
-			core::free(model.cache[t]);
-		core::free(model.cache);
+		model.free_helper();
+	}
+
+private:
+	inline void free_helper() {
+		for (unsigned int t = 0; t < max_time; t++)
+			core::free(cache[t]);
+		core::free(cache);
 	}
 };
 

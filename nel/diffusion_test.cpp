@@ -19,7 +19,6 @@ void test_diffusion(T alpha, T lambda,
 				model.get_value(t, 0, 0), model.get_value(t, radius - 1, 0), radius - 1,
 				model.get_value(t, radius - 1, radius - 1), radius - 1, radius - 1);
 	}
-	free(model);
 }
 
 int main(int argc, const char** argv) {

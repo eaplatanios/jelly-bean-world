@@ -43,9 +43,6 @@ struct item_properties {
 	float* scent;
 	float* color;
 
-	/* energy function parameters for the Gibbs field */
-	float intensity;
-
     bool automatically_collected;
 
 	static inline void free(item_properties& properties) {
@@ -75,7 +72,6 @@ inline bool init(
 		properties.scent[i] = src.scent[i];
 	for (unsigned int i = 0; i < color_dimension; i++)
 		properties.color[i] = src.color[i];
-	properties.intensity = src.intensity;
     properties.automatically_collected = src.automatically_collected;
 	return true;
 }
@@ -101,11 +97,17 @@ struct simulator_config {
 	intensity_function intensity_fn;
 	interaction_function interaction_fn;
 
-	/* We assume that the length of the args arrays is known at this point and has been checked. */
     float* intensity_fn_args;
     float* interaction_fn_args;
+    unsigned int intensity_fn_arg_count;
+    unsigned int interaction_fn_arg_count;
 
 	simulator_config() : item_types(8) { }
+
+    simulator_config(const simulator_config& src) : item_types(src.item_types.length) {
+        if (!init_helper(src))
+            exit(EXIT_FAILURE);
+    }
 
     ~simulator_config() { free_helper(); }
 
@@ -115,46 +117,73 @@ struct simulator_config {
     }
 
 private:
+    inline bool init_helper(const simulator_config& src)
+    {
+        agent_color = (float*) malloc(sizeof(float) * src.color_dimension);
+        if (agent_color == NULL) {
+            fprintf(stderr, "simulator_config.init_helper ERROR: Insufficient memory for agent_color.\n");
+            return false;
+        }
+        intensity_fn_args = (float*) malloc(sizeof(float) * src.intensity_fn_arg_count);
+        if (intensity_fn_args == NULL) {
+            fprintf(stderr, "simulator_config.init_helper ERROR: Insufficient memory for intensity_fn_args.\n");
+            core::free(agent_color); return false;
+        }
+        interaction_fn_args = (float*) malloc(sizeof(float) * src.interaction_fn_arg_count);
+        if (interaction_fn_args == NULL) {
+            fprintf(stderr, "simulator_config.init_helper ERROR: Insufficient memory for interaction_fn_args.\n");
+            core::free(agent_color); core::free(intensity_fn_args); return false;
+        }
+
+        for (unsigned int i = 0; i < src.color_dimension; i++)
+            agent_color[i] = src.agent_color[i];
+        for (unsigned int i = 0; i < src.intensity_fn_arg_count; i++)
+            intensity_fn_args[i] = src.intensity_fn_args[i];
+        for (unsigned int i = 0; i < src.interaction_fn_arg_count; i++)
+            interaction_fn_args[i] = src.interaction_fn_args[i];
+
+        for (unsigned int i = 0; i < src.item_types.length; i++) {
+            if (!init(item_types[i], src.item_types[i], src.scent_dimension, src.color_dimension)) {
+                for (unsigned int j = 0; j < i; j++) core::free(item_types[i]);
+                core::free(intensity_fn_args); core::free(interaction_fn_args);
+                core::free(agent_color); return false;
+            }
+        }
+        item_types.length = src.item_types.length;
+
+        max_steps_per_movement = src.max_steps_per_movement;
+        scent_dimension = src.scent_dimension;
+        color_dimension = src.color_dimension;
+        vision_range = src.vision_range;
+        patch_size = src.patch_size;
+        gibbs_iterations = src.gibbs_iterations;
+        collision_policy = src.collision_policy;
+        decay_param = src.decay_param;
+        diffusion_param = src.diffusion_param;
+        deleted_item_lifetime = src.deleted_item_lifetime;
+        intensity_fn_arg_count = src.intensity_fn_arg_count;
+        interaction_fn_arg_count = src.interaction_fn_arg_count;
+        return true;
+    }
+
     inline void free_helper() {
         for (item_properties& properties : item_types)
 			core::free(properties);
+        core::free(agent_color);
+        core::free(intensity_fn_args);
+        core::free(interaction_fn_args);
     }
+
+    friend bool init(simulator_config&, const simulator_config&);
 };
 
 inline bool init(simulator_config& config, const simulator_config& src)
 {
-    config.agent_color = (float*) malloc(sizeof(float) * src.color_dimension);
-    if (config.agent_color == NULL) {
-        fprintf(stderr, "init ERROR: Insufficient memory for simulator_config.agent_color.\n");
-        return false;
-    }
-    for (unsigned int i = 0; i < src.color_dimension; i++)
-        config.agent_color[i] = src.agent_color[i];
-
     if (!array_init(config.item_types, src.item_types.length)) {
-        free(config.agent_color); return false;
+        return false;
+    } else if (!config.init_helper(src)) {
+        free(config.item_types); return false;
     }
-    for (unsigned int i = 0; i < src.item_types.length; i++) {
-        if (!init(config.item_types[i], src.item_types[i], src.scent_dimension, src.color_dimension)) {
-            for (unsigned int j = 0; j < i; j++) free(config.item_types[i]);
-            free(config.item_types); free(config.agent_color); return false;
-        }
-    }
-
-    config.max_steps_per_movement = src.max_steps_per_movement;
-    config.scent_dimension = src.scent_dimension;
-    config.color_dimension = src.color_dimension;
-    config.vision_range = src.vision_range;
-    config.patch_size = src.patch_size;
-    config.gibbs_iterations = src.gibbs_iterations;
-    config.collision_policy = src.collision_policy;
-    config.decay_param = src.decay_param;
-    config.diffusion_param = src.diffusion_param;
-    config.deleted_item_lifetime = src.deleted_item_lifetime;
-    config.intensity_fn = src.intensity_fn;
-    config.interaction_fn = src.interaction_fn;
-    config.intensity_fn_args = src.intensity_fn_args;
-    config.interaction_fn_args = src.interaction_fn_args;
     return true;
 }
 
@@ -299,6 +328,7 @@ struct agent_state {
     inline static void free(agent_state& agent) {
         core::free(agent.current_scent);
         core::free(agent.current_vision);
+        core::free(agent.collected_items);
         agent.lock.~mutex();
     }
 };
@@ -365,7 +395,7 @@ inline bool init(
 }
 
 typedef void (*step_callback)(
-    const simulator* sim, const unsigned int id, 
+    const simulator* sim, unsigned int id, 
     const agent_state&, const simulator_config&);
 
 /**
@@ -409,6 +439,26 @@ class simulator {
     typedef patch<patch_data> patch_type;
 
 public:
+    simulator(const simulator_config& config,
+            const step_callback step_callback) :
+        world(config.patch_size,
+            (unsigned int) config.item_types.length,
+            config.gibbs_iterations,
+            config.intensity_fn, config.intensity_fn_args,
+            config.interaction_fn, config.interaction_fn_args),
+        agents(16), requested_moves(32, alloc_position_keys),
+        acted_agent_count(0), config(config),
+        step_callback_fn(step_callback), time(0)
+    {
+        if (!init(scent_model, (double) config.diffusion_param,
+                (double) config.decay_param, config.patch_size, config.deleted_item_lifetime)) {
+            fprintf(stderr, "simulator ERROR: Unable to initialize scent_model.\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    ~simulator() { free_helper(); }
+
     /* Current simulation time step. */
     uint64_t time;
 
@@ -478,9 +528,8 @@ public:
     }
 
     static inline void free(simulator& s) {
+        s.free_helper();
         core::free(s.agents);
-        for (auto entry : s.requested_moves)
-            core::free(entry.value);
         core::free(s.requested_moves);
         core::free(s.config);
         core::free(s.scent_model);
@@ -568,6 +617,15 @@ private:
         requested_move_lock.unlock();
     }
 
+    inline void free_helper() {
+        for (auto entry : requested_moves)
+            core::free(entry.value);
+        for (agent_state* agent : agents) {
+            core::free(*agent);
+            core::free(agent);
+        }
+    }
+
     friend bool init(simulator&, const simulator_config&, const step_callback);
 };
 
@@ -575,7 +633,6 @@ bool init(simulator& sim,
         const simulator_config& config,
         const step_callback step_callback)
 {
-    sim.acted_agent_count = 0;
     sim.step_callback_fn = step_callback;
     sim.time = 0;
     if (!array_init(sim.agents, 16)) {
