@@ -2,6 +2,12 @@
 
 using namespace nel;
 
+struct empty_data {
+	static inline void free(empty_data& data) { }
+};
+
+constexpr bool init(empty_data& data) { return true; }
+
 struct item_position_printer { };
 
 template<typename Stream>
@@ -35,9 +41,9 @@ int main(int argc, const char** argv) {
 	static constexpr int n = 32;
 	float intensity_per_item[] = { -2.0f };
 	float interaction_args[] = { 1, 40.0f, 200.0f, 0.0f, -40.0f };
-	auto m = map(n, 1, 10, intensity, intensity_per_item, interaction, interaction_args);
+	auto m = map<empty_data>(n, 1, 10, intensity, intensity_per_item, interaction, interaction_args);
 
-	patch* neighborhood[4];
+	patch<empty_data>* neighborhood[4];
 	position neighbor_positions[4];
 	m.get_fixed_neighborhood({0, 0}, neighborhood, neighbor_positions);
 

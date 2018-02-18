@@ -26,6 +26,7 @@ struct item {
 	}
 };
 
+template<typename Data>
 struct patch
 {
 	array<item> items;
@@ -36,6 +37,8 @@ struct patch
 	 */
 	bool fixed;
 
+	Data data;
+
 	static inline void move(const patch& src, patch& dst) {
 		core::move(src.items, dst.items);
 		dst.fixed = src.fixed;
@@ -43,14 +46,18 @@ struct patch
 
 	static inline void free(patch& p) {
 		core::free(p.items);
+		core::free(p.data);
 	}
 };
 
-inline bool init(patch& new_patch) {
+template<typename Data>
+inline bool init(patch<Data>& new_patch) {
 	new_patch.fixed = false;
-	if (!array_init(new_patch.items, 8)) {
-		fprintf(stderr, "init ERROR: Insufficient memory for patch.items.\n");
+	if (!init(new_patch.data)) {
 		return false;
+	} else if (!array_init(new_patch.items, 8)) {
+		fprintf(stderr, "init ERROR: Insufficient memory for patch.items.\n");
+		free(new_patch.data); return false;
 	}
 	return true;
 }
@@ -63,8 +70,9 @@ void* alloc_position_keys(size_t n, size_t element_size) {
 	return (void*) keys;
 }
 
+template<typename PerPatchData>
 struct map {
-	hash_map<position, patch> patches;
+	hash_map<position, patch<PerPatchData>> patches;
 
 	intensity_function intensity_fn;
 	interaction_function interaction_fn;
@@ -77,7 +85,7 @@ struct map {
 	unsigned int item_type_count;
 	unsigned int gibbs_iterations;
 
-	typedef patch patch_type;
+	typedef patch<PerPatchData> patch_type;
 	typedef item item_type;
 
 public:
@@ -100,20 +108,20 @@ public:
 		return interaction_fn(pos1, pos2, item_type1, item_type2, interaction_fn_args);
 	}
 
-	inline patch* get_patch_if_exists(const position& patch_position)
+	inline patch_type* get_patch_if_exists(const position& patch_position)
 	{
 		bool contains; unsigned int bucket;
 		patches.check_size(alloc_position_keys);
-		patch& p = patches.get(patch_position, contains, bucket);
+		patch_type& p = patches.get(patch_position, contains, bucket);
 		if (!contains) return NULL;
 		else return &p;
 	}
 
-	inline patch& get_or_make_patch(const position& patch_position)
+	inline patch_type& get_or_make_patch(const position& patch_position)
 	{
 		bool contains; unsigned int bucket;
 		patches.check_size(alloc_position_keys);
-		patch& p = patches.get(patch_position, contains, bucket);
+		patch_type& p = patches.get(patch_position, contains, bucket);
 		if (!contains) {
 			/* add a new patch */
 			init(p);
@@ -127,19 +135,22 @@ public:
 	 * Returns the patches in the world that intersect with a bounding box of
 	 * size n centered at `world_position`. This function will create any
 	 * missing patches and ensure that the returned patches are 'fixed': they
-	 * cannot be modified in the future by further sampling.
+	 * cannot be modified by future sampling. The patches and their positions
+	 * are returned in row-major order, and the function returns the index in
+	 * `neighborhood` of the patch containing `world_position`.
 	 */
-	void get_fixed_neighborhood(
+	unsigned int get_fixed_neighborhood(
 			position world_position,
-			patch* neighborhood[4],
+			patch_type* neighborhood[4],
 			position patch_positions[4])
 	{
-		get_neighborhood_positions(world_position, patch_positions);
+		unsigned int index = get_neighborhood_positions(world_position, patch_positions);
 
 		for (unsigned int i = 0; i < 4; i++)
 			neighborhood[i] = &get_or_make_patch(patch_positions[i]);
 
 		fix_patches(neighborhood, patch_positions, 4);
+		return index;
 	}
 
 	/**
@@ -150,7 +161,7 @@ public:
 	 */
 	unsigned int get_neighborhood(
 			position world_position,
-			patch* neighborhood[4],
+			patch_type* neighborhood[4],
 			position patch_positions[4],
 			unsigned int& patch_index)
 	{
@@ -177,11 +188,11 @@ public:
 		world_to_patch_coordinates(bottom_left_corner, bottom_left_patch_position);
 		world_to_patch_coordinates(top_right_corner, top_right_patch_position);
 
-		array<patch*> patches(32);
+		array<patch_type*> patches(32);
 		array<position> patch_positions(32);
 		for (int64_t x = bottom_left_patch_position.x; x <= top_right_patch_position.x; x++) {
 			for (int64_t y = bottom_left_patch_position.y; y <= top_right_patch_position.y; y++) {
-				patch* p = get_patch_if_exists({x, y});
+				patch_type* p = get_patch_if_exists({x, y});
 				if (p == NULL) continue;
 
 				for (const item& i : p->items)
@@ -285,7 +296,7 @@ private:
 	 * created as needed, and sampling is done accordingly.
 	 */
 	void fix_patches(
-			patch** patches,
+			patch_type** patches,
 			const position* patch_positions,
 			unsigned int patch_count)
 	{
@@ -330,7 +341,8 @@ private:
 	}
 };
 
-inline bool init(map& world, unsigned int n,
+template<typename PerPatchData>
+inline bool init(map<PerPatchData>& world, unsigned int n,
 		unsigned int item_type_count, unsigned int gibbs_iterations,
 		intensity_function intensity_fn, float* intensity_fn_args, 
 		interaction_function interaction_fn, float* interaction_fn_args)

@@ -85,6 +85,11 @@ struct position {
 		p.y = MAX_INT64;
 	}
 
+	static inline void set_empty(position* p, unsigned int length) {
+		for (unsigned int i = 0; i < length; i++)
+			set_empty(p[i]);
+	}
+
 	static constexpr int64_t MAX_INT64 = std::numeric_limits<int64_t>::max();
 };
 

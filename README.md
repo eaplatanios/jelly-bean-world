@@ -4,7 +4,7 @@ A framework for experimenting with never-ending learning.
 
 ## Requirements
 
-- GCC 5+ or Clang 5+
+- GCC 5+, Clang 5+, or Visual C++ 14+
 - Python 2.7 or 3.6 (for the Python API)
 
 ## Installation Instructions
