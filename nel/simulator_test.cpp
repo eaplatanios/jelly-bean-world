@@ -1,6 +1,9 @@
+
+#define _USE_MATH_DEFINES
 #include "simulator.h"
 
 #include <core/timer.h>
+#include <cmath>
 #include <thread>
 #include <condition_variable>
 
@@ -53,13 +56,7 @@ bool agent_direction[agent_count];
 std::condition_variable conditions[agent_count];
 std::mutex locks[agent_count];
 std::mutex print_lock;
-
-/* for debugging */
-position prev_position[agent_count];
-std::condition_variable prev_position_cv;
-std::mutex prev_position_lock;
-unsigned int prev_position_counter = 0;
-unsigned int prev_position_waiting = 0;
+FILE* out = stderr;
 
 #define MULTITHREADED
 
@@ -110,33 +107,17 @@ inline bool try_move(simulator& sim, agent_state** agents,
 		dir = next_direction(agents[i]->current_position, -10 * (int64_t) agent_count, 10 * agent_count, reverse);
 	}
 
-	prev_position[i] = agents[i]->current_position;
 	if (!sim.move(*agents[i], dir, 1)) {
 		print_lock.lock();
-		print("ERROR: Unable to move agent ", stderr);
-		print(i, stderr); print(" from ", stderr);
-		print(agents[i]->current_position, stderr);
-		print(" in direction ", stderr);
-		print(dir, stderr); print(".\n", stderr);
+		print("ERROR: Unable to move agent ", out);
+		print(i, out); print(" from ", out);
+		print(agents[i]->current_position, out);
+		print(" in direction ", out);
+		print(dir, out); print(".\n", out);
 		print_lock.unlock();
 		return false;
 	}
 	return true;
-}
-
-inline void check_collisions(const agent_state* const* agents, unsigned int id) {
-	if (collision_policy != movement_conflict_policy::NO_COLLISION) {
-		/* check that the current position is not occupied by another agent */
-		for (unsigned int i = id + 1; i < agent_count; i++)
-			if (agents[i]->current_position == agents[id]->current_position) {
-				fprintf(stderr, "WARNING: Agent %u and %u are at the same position at time %u.\n", id, i, sim_time);
-fprintf(stderr, "agent movements last turn:\n");
-for (unsigned int j = 0; j < agent_count; j++) {
-	fprintf(stderr, "agent %u: ", j); print(prev_position[j], stderr);
-	print(" -> ", stderr); print(agents[j]->current_position, stderr); print('\n', stderr);
-}
-			}
-	}
 }
 
 void run_agent(simulator& sim, agent_state** agents,
@@ -144,31 +125,13 @@ void run_agent(simulator& sim, agent_state** agents,
 		bool& simulation_running)
 {
 	while (simulation_running) {
-bool old_agent_direction = agent_direction[id];
 		if (try_move(sim, agents, id, agent_count, agent_direction[id])) {
 			move_count++;
-if (agent_direction[id] != old_agent_direction) {
-//fprintf(stderr, "agent %u switched direction at ", id); print(agents[id]->current_position, stderr); print('\n', stderr);
-}
 
 			std::unique_lock<std::mutex> lck(locks[id]);
 			while (agents[id]->agent_acted && simulation_running)
 				conditions[id].wait(lck);
 			lck.unlock();
-
-			std::unique_lock<std::mutex> prev_position_lck(prev_position_lock);
-			check_collisions(agents, id);
-			prev_position_counter++;
-			prev_position_waiting++;
-			if (prev_position_counter == agent_count) {
-				prev_position_cv.notify_all();
-			} else {
-				prev_position_cv.wait(prev_position_lck, []{ return prev_position_counter >= agent_count; });
-			}
-			prev_position_waiting--;
-			if (prev_position_waiting == 0)
-				prev_position_counter = 0;
-			prev_position_lck.unlock();
 		}
 	}
 }
@@ -186,7 +149,7 @@ void on_step(const simulator* sim, unsigned int id,
 int main(int argc, const char** argv)
 {
 	//set_seed(2890104773);
-	fprintf(stderr, "random seed: %u\n", get_seed());
+	fprintf(out, "random seed: %u\n", get_seed());
 	simulator_config config;
 	config.max_steps_per_movement = 1;
 	config.scent_dimension = 3;
@@ -197,8 +160,8 @@ int main(int argc, const char** argv)
 	config.agent_color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.agent_color[2] = 1.0f;
 	config.collision_policy = collision_policy;
-	config.decay_param = 0.5;
-	config.diffusion_param = 0.12;
+	config.decay_param = 0.5f;
+	config.diffusion_param = 0.12f;
 	config.deleted_item_lifetime = 2000;
 
 	/* configure item types */
@@ -211,15 +174,15 @@ int main(int argc, const char** argv)
 	config.item_types[0].automatically_collected = true;
 	config.item_types.length = 1;
 
-	config.intensity_fn_arg_count = config.item_types.length;
-	config.interaction_fn_arg_count = 4 * config.item_types.length * config.item_types.length + 1;
+	config.intensity_fn_arg_count = (unsigned int) config.item_types.length;
+	config.interaction_fn_arg_count = (unsigned int) (4 * config.item_types.length * config.item_types.length + 1);
 	config.intensity_fn = intensity;
 	config.interaction_fn = interaction;
 	config.intensity_fn_args = (float*) malloc(sizeof(float) * config.intensity_fn_arg_count);
 	config.interaction_fn_args = (float*) malloc(sizeof(float) * config.interaction_fn_arg_count);
 	config.intensity_fn_args[0] = -2.0f;
-	config.interaction_fn_args[0] = config.item_types.length;
-	set_interaction_args(config.interaction_fn_args, config.item_types.length, 0, 0, 40.0f, 200.0f, 0.0f, -40.0f);
+	config.interaction_fn_args[0] = (float) config.item_types.length;
+	set_interaction_args(config.interaction_fn_args, (unsigned int) config.item_types.length, 0, 0, 40.0f, 200.0f, 0.0f, -40.0f);
 
 	simulator sim(config, on_step);
 
@@ -229,7 +192,7 @@ int main(int argc, const char** argv)
 		agents[i] = sim.add_agent();
 		agent_direction[i] = (i <= agent_count / 2);
 		if (agents[i] == NULL) {
-			fprintf(stderr, "ERROR: Unable to add new agent.\n");
+			fprintf(out, "ERROR: Unable to add new agent.\n");
 			return EXIT_FAILURE;
 		}
 
@@ -250,7 +213,7 @@ int main(int argc, const char** argv)
 	while (sim_time < max_time) {
 		std::this_thread::sleep_for(std::chrono::seconds(1));
 		elapsed += stopwatch.milliseconds();
-		fprintf(stderr, "Completed %u moves: %lf simulation steps per second.\n", move_count.load(), ((double) sim_time / elapsed) * 1000);
+		fprintf(out, "Completed %u moves: %lf simulation steps per second.\n", move_count.load(), ((double) sim_time / elapsed) * 1000);
 		stopwatch.start();
 	}
 	simulation_running = false;
@@ -269,10 +232,10 @@ int main(int argc, const char** argv)
 			check_collisions(agents, j);
 		if (stopwatch.milliseconds() >= 1000) {
 			elapsed += stopwatch.milliseconds();
-			fprintf(stderr, "Completed %u moves: %lf simulation steps per second.\n", move_count.load(), ((double) sim_time / elapsed) * 1000);
+			fprintf(out, "Completed %u moves: %lf simulation steps per second.\n", move_count.load(), ((double) sim_time / elapsed) * 1000);
 			stopwatch.start();
 		}
 	}
 #endif
-	fprintf(stderr, "Completed %u moves: %lf simulation steps per second.\n", move_count.load(), ((double) sim_time / elapsed) * 1000);
+	fprintf(out, "Completed %u moves: %lf simulation steps per second.\n", move_count.load(), ((double) sim_time / elapsed) * 1000);
 }

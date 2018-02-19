@@ -314,12 +314,12 @@ struct agent_state {
                     if (item.creation_time > 0)
                         creation_t = min(creation_t, (unsigned int) (current_time - item.creation_time));
                     add_scent(config.item_types[item.item_type].scent, config.scent_dimension,
-                            scent_model.get_value(creation_t, relative_position.x, relative_position.y));
+                            (float) scent_model.get_value(creation_t, (int) relative_position.x, (int) relative_position.y));
 
                     if (item.deletion_time > 0) {
-                        unsigned int deletion_t = current_time - item.deletion_time;
+                        unsigned int deletion_t = (unsigned int) (current_time - item.deletion_time);
                         add_scent(config.item_types[item.item_type].scent, config.scent_dimension,
-                            -scent_model.get_value(deletion_t, relative_position.x, relative_position.y));
+                            (float) -scent_model.get_value(deletion_t, (int) relative_position.x, (int) relative_position.y));
                     }
                 }
             }
@@ -399,8 +399,9 @@ inline bool init(
             if (agent.current_position == neighbor->current_position)
             {
                 /* there is already an agent at this position */
-                core::print("init ERROR: An agent already occupies position ", stderr);
-                print(agent.current_position, stderr); core::print(".\n", stderr);
+				FILE* out = stderr;
+                core::print("init ERROR: An agent already occupies position ", out);
+                print(agent.current_position, out); core::print(".\n", out);
                 free(agent.current_scent); free(agent.current_vision);
                 free(agent.collected_items); agent.lock.~mutex();
                 neighborhood[index]->data.patch_lock.unlock();
@@ -587,7 +588,7 @@ private:
         if (config.collision_policy == movement_conflict_policy::RANDOM) {
             for (auto entry : requested_moves) {
                 array<agent_state*>& conflicts = entry.value;
-                unsigned int result = sample_uniform(conflicts.length);
+                unsigned int result = sample_uniform((unsigned int) conflicts.length);
                 core::swap(conflicts[0], conflicts[result]);
             }
         }
@@ -655,12 +656,15 @@ private:
             agent->agent_acted = false;
         }
 
-if (config.collision_policy != movement_conflict_policy::NO_COLLISION) {
-for (unsigned int i = 0; i < agents.length; i++)
-    for (unsigned int j = i + 1; j < agents.length; j++)
-        if (agents[i]->current_position == agents[j]->current_position)
-            fprintf(stderr, "simulator.step WARNING: Agents %u and %u are at the same position.\n", i, j);
-}
+#if !defined(NDEBUG)
+		/* check for collisions, if there aren't supposed to be any */
+		if (config.collision_policy != movement_conflict_policy::NO_COLLISION) {
+			for (unsigned int i = 0; i < agents.length; i++)
+				for (unsigned int j = i + 1; j < agents.length; j++)
+					if (agents[i]->current_position == agents[j]->current_position)
+						fprintf(stderr, "simulator.step WARNING: Agents %u and %u are at the same position.\n", i, j);
+		}
+#endif
 
         /* reset the requested moves */
         for (auto entry : requested_moves)
