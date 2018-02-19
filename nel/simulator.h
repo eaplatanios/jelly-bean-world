@@ -16,7 +16,7 @@ class simulator;
 struct agent_state;
 
 /** Represents all possible directions of motion in the environment. */
-enum class direction { UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3 };
+enum class direction : uint8_t { UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3 };
 
 template<typename Stream>
 inline bool read(direction& dir, Stream& in) {
@@ -534,8 +534,7 @@ public:
      * \returns `true` if the move was successful, and `false` otherwise.
      */
     inline bool move(agent_state& agent, direction dir, unsigned int num_steps) {
-        if (num_steps > config.max_steps_per_movement)
-            return false;
+        if (num_steps > config.max_steps_per_movement) return false;
 
         agent.lock.lock();
         if (agent.agent_acted) {

@@ -1,6 +1,7 @@
 
 #define _USE_MATH_DEFINES
 #include "simulator.h"
+#include "mpi.h"
 
 #include <core/timer.h>
 #include <cmath>
@@ -53,12 +54,15 @@ constexpr movement_conflict_policy collision_policy = movement_conflict_policy::
 constexpr movement_pattern move_pattern = movement_pattern::BACK_AND_FORTH;
 unsigned int sim_time = 0;
 bool agent_direction[agent_count];
+bool waiting_for_server[agent_count];
 std::condition_variable conditions[agent_count];
 std::mutex locks[agent_count];
 std::mutex print_lock;
 FILE* out = stderr;
+async_server server;
 
 #define MULTITHREADED
+#define USE_MPI
 
 inline direction next_direction(position agent_position, double theta) {
 	if (theta == M_PI) {
@@ -96,8 +100,9 @@ inline direction next_direction(position agent_position,
 	}
 }
 
-inline bool try_move(simulator& sim, agent_state** agents,
-		unsigned int i, unsigned int agent_count, bool& reverse)
+inline bool try_move(simulator& sim,
+		agent_state** agents,
+		unsigned int i, bool& reverse)
 {
 	direction dir;
 	switch (move_pattern) {
@@ -125,7 +130,7 @@ void run_agent(simulator& sim, agent_state** agents,
 		bool& simulation_running)
 {
 	while (simulation_running) {
-		if (try_move(sim, agents, id, agent_count, agent_direction[id])) {
+		if (try_move(sim, agents, id, agent_direction[id])) {
 			move_count++;
 
 			std::unique_lock<std::mutex> lck(locks[id]);
@@ -140,10 +145,275 @@ void on_step(const simulator* sim, unsigned int id,
 		const agent_state& agent, const simulator_config& config)
 {
 	if (id == 0) sim_time++;
-#if defined(MULTITHREADED)
+#if defined(USE_MPI)
+	if (!send_step_response(server, agent)) {
+		print_lock.lock();
+		fprintf(out, "on_step ERROR: send_step_response failed.\n");
+		print_lock.unlock();
+	}
+#elif defined(MULTITHREADED)
 	std::unique_lock<std::mutex> lck(locks[id]);
 	conditions[id].notify_one();
 #endif
+}
+
+bool add_agents(simulator& sim, agent_state* agents[agent_count])
+{
+	for (unsigned int i = 0; i < agent_count; i++) {
+		agents[i] = sim.add_agent();
+		if (agents[i] == NULL) {
+			fprintf(out, "add_agents ERROR: Unable to add new agent.\n");
+			return false;
+		}
+		agent_direction[i] = (i <= agent_count / 2);
+
+		/* advance time by one to avoid collision at (0,0) */
+		for (unsigned int j = 0; j <= i; j++)
+			try_move(sim, agents, j, agent_direction[j]);
+	}
+	return true;
+}
+
+bool test_singlethreaded(simulator& sim)
+{
+	agent_state* agents[agent_count];
+	if (!add_agents(sim, agents))
+		return false;
+
+	timer stopwatch;
+	std::atomic_uint move_count(0);
+	unsigned long long elapsed = 0;
+	for (unsigned int t = 0; t < max_time; t++) {
+		for (unsigned int j = 0; j < agent_count; j++)
+			try_move(sim, agents, j, agent_direction[j]);
+		move_count += 10;
+		if (stopwatch.milliseconds() >= 1000) {
+			elapsed += stopwatch.milliseconds();
+			fprintf(out, "Completed %u moves: %lf simulation steps per second.\n", move_count.load(), ((double) sim_time / elapsed) * 1000);
+			stopwatch.start();
+		}
+	}
+	elapsed += stopwatch.milliseconds();
+	fprintf(out, "Completed %u moves: %lf simulation steps per second.\n", move_count.load(), ((double) sim_time / elapsed) * 1000);
+	return true;
+}
+
+bool test_multithreaded(simulator& sim) {
+	agent_state* agents[agent_count];
+	if (!add_agents(sim, agents))
+		return false;
+
+	std::atomic_uint move_count(0);
+	bool simulation_running = true;
+	std::thread clients[agent_count];
+	for (unsigned int i = 0; i < agent_count; i++)
+		clients[i] = std::thread([&,i]() { run_agent(sim, agents, i, move_count, simulation_running); });
+
+	timer stopwatch;
+	unsigned long long elapsed = 0;
+	while (sim_time < max_time) {
+		std::this_thread::sleep_for(std::chrono::seconds(1));
+		elapsed += stopwatch.milliseconds();
+		fprintf(out, "Completed %u moves: %lf simulation steps per second.\n", move_count.load(), ((double) sim_time / elapsed) * 1000);
+		stopwatch.start();
+	}
+	elapsed += stopwatch.milliseconds();
+	fprintf(out, "Completed %u moves: %lf simulation steps per second.\n", move_count.load(), ((double) sim_time / elapsed) * 1000);
+	simulation_running = false;
+	for (unsigned int i = 0; i < agent_count; i++) {
+		conditions[i].notify_one();
+		clients[i].join();
+	}
+	return true;
+}
+
+struct client_data {
+	unsigned int index;
+	uint64_t agent_handle;
+
+	bool move_result, waiting_for_step;
+	position pos;
+};
+
+void add_agent_callback(client<client_data>& c, uint64_t new_agent) {
+	unsigned int id = c.data.index;
+	std::unique_lock<std::mutex> lck(locks[id]);
+	waiting_for_server[id] = false;
+	c.data.agent_handle = new_agent;
+	conditions[id].notify_one();
+}
+
+void move_callback(client<client_data>& c, uint64_t agent, bool request_success) {
+	unsigned int id = c.data.index;
+	std::unique_lock<std::mutex> lck(locks[id]);
+	waiting_for_server[id] = false;
+	c.data.move_result = request_success;
+	conditions[id].notify_one();
+}
+
+void get_position_callback(client<client_data>& c, uint64_t agent, const position& pos) {
+	unsigned int id = c.data.index;
+	std::unique_lock<std::mutex> lck(locks[id]);
+	waiting_for_server[id] = false;
+	c.data.pos = pos;
+	conditions[id].notify_one();
+}
+
+void step_done_callback(client<client_data>& c, uint64_t agent) {
+	unsigned int id = c.data.index;
+	std::unique_lock<std::mutex> lck(locks[id]);
+	c.data.waiting_for_step = false;
+	conditions[id].notify_one();
+}
+
+void lost_connection_callback(client<client_data>& c) {
+	print_lock.lock();
+	fprintf(out, "Client %u lost connection to server.\n", c.data.index);
+	print_lock.unlock();
+	c.client_running = false;
+	conditions[c.data.index].notify_one();
+}
+
+inline void wait_for_server(std::condition_variable& cv,
+		std::mutex& lock, bool& waiting_for_server, bool& client_running)
+{
+	std::unique_lock<std::mutex> lck(lock);
+	while (waiting_for_server && client_running) cv.wait(lck);
+}
+
+inline bool mpi_try_move(
+		client<client_data>& c, unsigned int i, bool& reverse)
+{
+	/* get current position */
+	waiting_for_server[i] = true;
+	if (!send_get_position(c, c.data.agent_handle)) {
+		print_lock.lock();
+		fprintf(out, "ERROR: Unable to send get_position request.\n");
+		print_lock.unlock();
+		return false;
+	}
+	wait_for_server(conditions[i], locks[i], waiting_for_server[i], c.client_running);
+	if (!c.client_running) return true;
+
+	direction dir;
+	switch (move_pattern) {
+	case movement_pattern::RADIAL:
+		dir = next_direction(c.data.pos, (2 * M_PI * i) / agent_count);
+	case movement_pattern::BACK_AND_FORTH:
+		dir = next_direction(c.data.pos, -10 * (int64_t) agent_count, 10 * agent_count, reverse);
+	}
+
+	/* send move request */
+	waiting_for_server[i] = true;
+	if (!send_move(c, c.data.agent_handle, dir, 1)) {
+		print_lock.lock();
+		fprintf(out, "ERROR: Unable to send move request.\n");
+		print_lock.unlock();
+		return false;
+	}
+	wait_for_server(conditions[i], locks[i], waiting_for_server[i], c.client_running);
+	if (!c.client_running) return true;
+
+	if (!c.data.move_result) {
+		print_lock.lock();
+		print("ERROR: Unable to move agent ", out);
+		print(i, out); print(" in direction ", out);
+		print(dir, out); print(".\n", out);
+		print_lock.unlock();
+		return false;
+	}
+	return true;
+}
+
+void run_mpi_agent(unsigned int id,
+		client<client_data>* clients,
+		std::atomic_uint& move_count)
+{
+	while (clients[id].client_running) {
+		clients[id].data.waiting_for_step = true;
+		if (mpi_try_move(clients[id], id, agent_direction[id])) {
+			move_count++;
+			wait_for_server(conditions[id], locks[id], clients[id].data.waiting_for_step, clients[id].client_running);
+		}
+	}
+}
+
+void cleanup_mpi(client<client_data>* clients,
+		unsigned int length = agent_count)
+{
+	for (unsigned int i = 0; i < length; i++)
+		stop_client(clients[i]);
+	stop_server(server);
+}
+
+bool test_mpi(simulator& sim)
+{
+	if (!init_server(server, sim, 54353, 16, 4)) {
+		fprintf(out, "ERROR: init_server returned false.\n");
+		return false;
+	}
+
+	/* below is client-side code */
+	client<client_data> clients[agent_count];
+	client_callbacks<client<client_data>> callbacks = {
+			add_agent_callback, move_callback,
+			get_position_callback,
+			step_done_callback,
+			lost_connection_callback};
+	for (unsigned int i = 0; i < agent_count; i++) {
+		clients[i].data.index = i;
+		if (!init_client(clients[i], callbacks, "localhost", "54353")) {
+			fprintf(out, "ERROR: Unable to initialize client %u.\n", i);
+			cleanup_mpi(clients, i); return false;
+		}
+
+		/* each client adds one agent to the simulation */
+		waiting_for_server[i] = true;
+		if (!send_add_agent(clients[i])) {
+			fprintf(out, "ERROR: Unable to send add_agent request.\n");
+			cleanup_mpi(clients, i); return false;
+		}
+		/* wait for response from server */
+		wait_for_server(conditions[i], locks[i], waiting_for_server[i], clients[i].client_running);
+
+		if (clients[i].data.agent_handle == 0) {
+			fprintf(out, "ERROR: Server returned failure for add_agent request.\n");
+			cleanup_mpi(clients, i); return false;
+		}
+
+		/* advance time by one to avoid collision at (0,0) */
+		for (unsigned int j = 0; j <= i; j++) {
+			clients[j].data.waiting_for_step = true;
+			if (!mpi_try_move(clients[j], j, agent_direction[j])) {
+				cleanup_mpi(clients, i); return false;
+			}
+		}
+		for (unsigned int j = 0; j <= i; j++)
+			wait_for_server(conditions[j], locks[j], clients[j].data.waiting_for_step, clients[j].client_running);
+	}
+
+	std::atomic_uint move_count(0);
+	std::thread client_threads[agent_count];
+	for (unsigned int i = 0; i < agent_count; i++)
+		client_threads[i] = std::thread([&,i]() { run_mpi_agent(i, clients, move_count); });
+
+	timer stopwatch;
+	unsigned long long elapsed = 0;
+	while (sim_time < max_time) {
+		std::this_thread::sleep_for(std::chrono::seconds(1));
+		elapsed += stopwatch.milliseconds();
+		fprintf(out, "Completed %u moves: %lf simulation steps per second.\n", move_count.load(), ((double) sim_time / elapsed) * 1000);
+		stopwatch.start();
+	}
+	elapsed += stopwatch.milliseconds();
+	fprintf(out, "Completed %u moves: %lf simulation steps per second.\n", move_count.load(), ((double) sim_time / elapsed) * 1000);
+	for (unsigned int i = 0; i < agent_count; i++) {
+		clients[i].client_running = false;
+		conditions[i].notify_one();
+		client_threads[i].join();
+	}
+	cleanup_mpi(clients);
+	return true;
 }
 
 int main(int argc, const char** argv)
@@ -186,56 +456,11 @@ int main(int argc, const char** argv)
 
 	simulator sim(config, on_step);
 
-	/* add the agents */
-	agent_state* agents[agent_count];
-	for (unsigned int i = 0; i < agent_count; i++) {
-		agents[i] = sim.add_agent();
-		agent_direction[i] = (i <= agent_count / 2);
-		if (agents[i] == NULL) {
-			fprintf(out, "ERROR: Unable to add new agent.\n");
-			return EXIT_FAILURE;
-		}
-
-		/* advance time by one to avoid collision at (0,0) */
-		for (unsigned int j = 0; j <= i; j++)
-			try_move(sim, agents, j, agent_count, agent_direction[j]);
-	}
-
-	std::atomic_uint move_count(0);
-#if defined(MULTITHREADED)
-	bool simulation_running = true;
-	std::thread clients[agent_count];
-	for (unsigned int i = 0; i < agent_count; i++)
-		clients[i] = std::thread([&,i]() { run_agent(sim, agents, i, move_count, simulation_running); });
-
-	timer stopwatch;
-	unsigned long long elapsed = 0;
-	while (sim_time < max_time) {
-		std::this_thread::sleep_for(std::chrono::seconds(1));
-		elapsed += stopwatch.milliseconds();
-		fprintf(out, "Completed %u moves: %lf simulation steps per second.\n", move_count.load(), ((double) sim_time / elapsed) * 1000);
-		stopwatch.start();
-	}
-	simulation_running = false;
-	for (unsigned int i = 0; i < agent_count; i++) {
-		conditions[i].notify_one();
-		clients[i].join();
-	}
+#if defined(USE_MPI)
+	test_mpi(sim);
+#elif defined(MULTITHREADED)
+	test_multithreaded(sim);
 #else
-	timer stopwatch;
-	unsigned long long elapsed = 0;
-	for (unsigned int t = 0; t < max_time; t++) {
-		for (unsigned int j = 0; j < agent_count; j++)
-			try_move(sim, agents, j, agent_count, agent_direction[j]);
-		move_count += 10;
-		for (unsigned int j = 0; j < agent_count; j++)
-			check_collisions(agents, j);
-		if (stopwatch.milliseconds() >= 1000) {
-			elapsed += stopwatch.milliseconds();
-			fprintf(out, "Completed %u moves: %lf simulation steps per second.\n", move_count.load(), ((double) sim_time / elapsed) * 1000);
-			stopwatch.start();
-		}
-	}
+	test_singlethreaded(sim);
 #endif
-	fprintf(out, "Completed %u moves: %lf simulation steps per second.\n", move_count.load(), ((double) sim_time / elapsed) * 1000);
 }

@@ -523,6 +523,7 @@ template<typename ProcessMessageCallback, typename... CallbackArgs>
 bool run_server(socket_type& sock, uint16_t server_port,
 		unsigned int connection_queue_capacity, unsigned int worker_count,
 		server_state& state, std::condition_variable& init_cv, std::mutex& init_lock,
+		hash_set<socket_type>& connections, std::mutex& connection_set_lock,
 		ProcessMessageCallback process_message, CallbackArgs&&... callback_args)
 {
 #if defined(_WIN32)
@@ -576,8 +577,6 @@ bool run_server(socket_type& sock, uint16_t server_port,
 	}
 
 	/* make the thread pool */
-	std::mutex connection_set_lock;
-	hash_set<socket_type> connections(1024, alloc_socket_keys);
 	std::thread* workers = new std::thread[worker_count];
 	auto start_worker = [&]() {
 		run_worker(listener, connections, connection_set_lock, state,

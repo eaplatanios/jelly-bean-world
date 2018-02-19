@@ -13,6 +13,10 @@ struct test_server {
 	std::thread server_thread;
 	socket_type server_socket;
 	server_state state;
+	hash_set<socket_type> client_connections;
+	std::mutex connection_set_lock;
+
+	test_server() : client_connections(1024, alloc_socket_keys) { }
 };
 
 void process_test_server_message(socket_type& server) {
@@ -46,8 +50,9 @@ bool init_server(test_server& new_server, uint16_t server_port,
 {
 	std::condition_variable cv; std::mutex lock;
 	auto dispatch = [&]() {
-		run_server(new_server.server_socket, server_port, connection_queue_capacity,
-			worker_count, new_server.state, cv, lock, process_test_server_message);
+		run_server(new_server.server_socket,
+			server_port, connection_queue_capacity, worker_count, new_server.state, cv, lock,
+			new_server.client_connections, new_server.connection_set_lock, process_test_server_message);
 	};
 	new_server.state = server_state::STARTING;
 	new_server.server_thread = std::thread(dispatch);
