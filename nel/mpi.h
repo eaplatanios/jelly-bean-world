@@ -34,7 +34,7 @@ inline bool write(const message_type& type, Stream& out) {
 struct async_server {
 	std::thread server_thread;
 	socket_type server_socket;
-	bool server_running;
+	server_state state;
 };
 
 inline bool receive_add_agent(socket_type& connection, simulator& sim) {
@@ -90,14 +90,16 @@ bool init_server(
 	std::condition_variable cv; std::mutex lock;
 	auto dispatch = [&]() {
 		run_server(new_server.server_socket, server_port, connection_queue_capacity,
-				worker_count, new_server.server_running, cv, server_process_message, sim);
+				worker_count, new_server.state, cv, lock, server_process_message, sim);
 	};
-	new_server.server_running = true;
+	new_server.state = server_state::STARTING;
 	new_server.server_thread = std::thread(dispatch);
 
 	std::unique_lock<std::mutex> lck(lock);
-	cv.wait(lck);
-	if (!new_server.server_running) {
+	while (new_server.state == server_state::STARTING)
+		cv.wait(lck);
+	lck.unlock();
+	if (new_server.state == server_state::STOPPING) {
 		new_server.server_thread.join();
 		return false;
 	}
@@ -108,13 +110,14 @@ inline bool init_server(simulator& sim, uint16_t server_port,
 		unsigned int connection_queue_capacity, unsigned int worker_count)
 {
 	socket_type server_socket;
-	bool dummy = true; std::condition_variable cv;
+	server_state dummy = server_state::STARTING;
+	std::condition_variable cv; std::mutex lock;
 	return run_server(server_socket, server_port, connection_queue_capacity,
-			worker_count, dummy, cv, server_process_message, sim);
+			worker_count, dummy, cv, lock, server_process_message, sim);
 }
 
 void stop_server(async_server& server) {
-	server.server_running = false;
+	server.state = server_state::STOPPING;
 	write(0, server.server_socket);
 	server.server_thread.join();
 }
@@ -198,7 +201,9 @@ void run_response_listener(client& c) {
 	while (c.client_running) {
 		message_type type;
 		bool success = read(type, c.connection);
-		if (!success) {
+		if (!c.client_running) {
+			return; /* stop_client was called */
+		} else if (!success) {
 			c.callbacks.on_lost_connection();
 			return;
 		}

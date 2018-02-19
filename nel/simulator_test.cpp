@@ -1,5 +1,9 @@
 #include "simulator.h"
 
+#include <core/timer.h>
+#include <thread>
+#include <condition_variable>
+
 using namespace core;
 using namespace nel;
 
@@ -35,11 +39,75 @@ inline void set_interaction_args(float* args, unsigned int item_type_count,
 	args[4 * (first_item_type * item_type_count + second_item_type) + 4] = second_value;
 }
 
+inline direction next_direction(position agent_position, double theta) {
+	if (theta == M_PI) {
+		return direction::UP;
+	} else if (theta == 3 * M_PI / 2) {
+		return direction::DOWN;
+	} else if ((theta >= 0 && theta < M_PI)
+			|| (theta > 3 * M_PI / 2 && theta < 2 * M_PI))
+	{
+		double slope = tan(theta);
+		if (slope > 1.0) return direction::UP;
+		else if (slope < -1.0) return direction::DOWN;
+		else return direction::RIGHT;
+	} else {
+		double slope = tan(theta);
+		if (slope > 1.0) return direction::DOWN;
+		else if (slope < -1.0) return direction::UP;
+		else return direction::LEFT;
+	}
+}
+
+constexpr unsigned int agent_count = 10;
+constexpr unsigned int max_time = 100;
+unsigned int sim_time = 0;
+std::condition_variable conditions[agent_count];
+std::mutex locks[agent_count];
+std::mutex print_lock;
+
+//#define MULTITHREADED
+
+inline bool try_move(simulator& sim, agent_state** agents,
+		unsigned int i, unsigned int agent_count)
+{
+	direction dir = next_direction(agents[i]->current_position, (2 * M_PI * i) / agent_count);
+	if (!sim.move(*agents[i], dir, 1)) {
+		print_lock.lock();
+		print("ERROR: Unable to move agent ", stderr);
+		print(i, stderr); print(" from ", stderr);
+		print(agents[i]->current_position, stderr);
+		print(" in direction ", stderr);
+		print(dir, stderr); print(".\n", stderr);
+		print_lock.unlock();
+		return false;
+	}
+	return true;
+}
+
+void run_agent(simulator& sim, agent_state** agents,
+		unsigned int id, std::atomic_uint& move_count,
+		bool& simulation_running)
+{
+	while (simulation_running) {
+		if (try_move(sim, agents, id, agent_count)) {
+			move_count++;
+
+			std::unique_lock<std::mutex> lck(locks[id]);
+			while (agents[id]->agent_acted)
+				conditions[id].wait(lck);
+			lck.unlock();
+		}
+	}
+}
+
 void on_step(const simulator* sim, unsigned int id,
 		const agent_state& agent, const simulator_config& config)
 {
-	print("on_step: agent position is ", stderr);
-	print(agent.current_position, stderr); print('\n', stderr);
+	if (id == 0) sim_time++;
+#if defined(MULTITHREADED)
+	conditions[id].notify_one();
+#endif
 }
 
 int main(int argc, const char** argv)
@@ -80,10 +148,49 @@ int main(int argc, const char** argv)
 
 	simulator sim(config, on_step);
 
-	agent_state* agent = sim.add_agent();
-	for (unsigned int t = 0; t < 100000; t++) {
-		fprintf(stderr, "time = %u\n", t);
-		bool status = sim.move(*agent, direction::RIGHT, 1);
-		fprintf(stderr, "move returned %s.\n", status ? "true" : "false");
+	/* add the agents */
+	agent_state* agents[agent_count];
+	for (unsigned int i = 0; i < agent_count; i++) {
+		agents[i] = sim.add_agent();
+		if (agents[i] == NULL) {
+			fprintf(stderr, "ERROR: Unable to add new agent.\n");
+			return EXIT_FAILURE;
+		}
+
+		/* advance time by one to avoid collision at (0,0) */
+		for (unsigned int j = 0; j <= i; j++)
+			try_move(sim, agents, j, agent_count);
 	}
+
+#if defined(MULTITHREADED)
+	bool simulation_running = true;
+	std::atomic_uint move_count(0);
+	std::thread clients[agent_count];
+	for (unsigned int i = 0; i < agent_count; i++)
+		clients[i] = std::thread([&,i]() { run_agent(sim, agents, i, move_count, simulation_running); });
+
+	timer stopwatch;
+	unsigned long long elapsed = 0;
+	while (sim_time < max_time) {
+		std::this_thread::sleep_for(std::chrono::seconds(2));
+		elapsed += stopwatch.milliseconds();
+		fprintf(stderr, "Completed %u moves: %lf simulation steps per second.\n", move_count.load(), ((double) sim_time / elapsed) * 1000);
+		stopwatch.start();
+	}
+	simulation_running = false;
+	for (unsigned int i = 0; i < agent_count; i++)
+		clients[i].join();
+#else
+	timer stopwatch;
+	unsigned long long elapsed = 0;
+	for (unsigned int t = 0; t < max_time; t++) {
+		for (unsigned int j = 0; j < agent_count; j++)
+			try_move(sim, agents, j, agent_count);
+		if (stopwatch.milliseconds() >= 1000) {
+			elapsed += stopwatch.milliseconds();
+			fprintf(stderr, "Completed %u moves: %lf simulation steps per second.\n", t * agent_count, ((double) sim_time / elapsed) * 1000);
+			stopwatch.start();
+		}
+	}
+#endif
 }

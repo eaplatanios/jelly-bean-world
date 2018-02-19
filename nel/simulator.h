@@ -31,6 +31,18 @@ inline bool write(const direction& dir, Stream& out) {
     return write((uint8_t) dir, out);
 }
 
+template<typename Stream>
+inline bool print(const direction& dir, Stream& out) {
+    switch (dir) {
+    case direction::UP:    return core::print("UP", out);
+    case direction::DOWN:  return core::print("DOWN", out);
+    case direction::LEFT:  return core::print("LEFT", out);
+    case direction::RIGHT: return core::print("RIGHT", out);
+    }
+    fprintf(stderr, "print ERROR: Unrecognized direction.\n");
+    return false;
+}
+
 enum class movement_conflict_policy {
     NO_COLLISION = 0,
     FIRST_COME_FIRST_SERVED = 1,
@@ -236,9 +248,6 @@ struct agent_state {
      */
     position requested_position;
 
-    /* Number of steps for the agent's next move. */
-    unsigned int num_steps;
-
     /** Number of items of each type in the agent's storage. */
     unsigned int* collected_items;
 
@@ -390,6 +399,8 @@ inline bool init(
             if (agent.current_position == neighbor->current_position)
             {
                 /* there is already an agent at this position */
+                core::print("init ERROR: An agent already occupies position ", stderr);
+                print(agent.current_position, stderr); core::print(".\n", stderr);
                 free(agent.current_scent); free(agent.current_vision);
                 free(agent.collected_items); agent.lock.~mutex();
                 neighborhood[index]->data.patch_lock.unlock();
@@ -443,11 +454,11 @@ class simulator {
     std::mutex requested_move_lock;
 
     /** 
-     * Atomic counter for how many agents have acted during each time step.
-     * This counter is used to force the simulator to wait until all agents
-     * have acted, before advancing the simulation time step.
+     * Counter for how many agents have acted during each time step. This
+     * counter is used to force the simulator to wait until all agents have
+     * acted, before advancing the simulation time step.
      */
-    std::atomic<unsigned int> acted_agent_count;
+    unsigned int acted_agent_count;
 
     /* Configuration for this simulator. */
     simulator_config config;
@@ -528,15 +539,14 @@ public:
         if (agent.agent_acted) {
             agent.lock.unlock(); return false;
         }
-        agent.num_steps = num_steps;
         agent.agent_acted = true;
 
         agent.requested_position = agent.current_position;
         switch (dir) {
-            case direction::UP   : agent.requested_position.y += agent.num_steps; break;
-            case direction::DOWN : agent.requested_position.y -= agent.num_steps; break;
-            case direction::LEFT : agent.requested_position.x -= agent.num_steps; break;
-            case direction::RIGHT: agent.requested_position.x += agent.num_steps; break;
+            case direction::UP   : agent.requested_position.y += num_steps; break;
+            case direction::DOWN : agent.requested_position.y -= num_steps; break;
+            case direction::LEFT : agent.requested_position.x -= num_steps; break;
+            case direction::RIGHT: agent.requested_position.x += num_steps; break;
         }
         agent.lock.unlock();
 
@@ -566,7 +576,6 @@ public:
         core::free(s.world);
         s.agent_array_lock.~mutex();
         s.requested_move_lock.~mutex();
-        s.acted_agent_count.~atomic<unsigned int>();
     }
 
 private:
@@ -638,7 +647,7 @@ private:
 
         /* Invoke the step callback function for each agent. */
         for (unsigned int id = 0; id < agents.length; id++)
-            step_callback_fn(this, id, *agents[id], config);            
+            step_callback_fn(this, id, *agents[id], config);
     }
 
     inline void request_new_position(agent_state& agent)
@@ -677,6 +686,7 @@ bool init(simulator& sim,
 {
     sim.step_callback_fn = step_callback;
     sim.time = 0;
+    sim.acted_agent_count = 0;
     if (!array_init(sim.agents, 16)) {
         return false;
     } else if (!hash_map_init(sim.requested_moves, 32, alloc_position_keys)) {
@@ -699,7 +709,6 @@ bool init(simulator& sim,
     }
     new (&sim.agent_array_lock) std::mutex();
     new (&sim.requested_move_lock) std::mutex();
-    new (&sim.acted_agent_count) std::atomic<unsigned int>(0);
     return true;
 }
 

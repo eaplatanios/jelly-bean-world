@@ -3,6 +3,7 @@
 using namespace nel;
 
 struct empty_data {
+	static inline void move(const empty_data& src, empty_data& dst) { }
 	static inline void free(empty_data& data) { }
 };
 

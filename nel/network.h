@@ -85,7 +85,7 @@ inline void close(socket_type& socket) {
 #if defined(_WIN32)
 	closesocket(socket.handle);
 #else
-	::close(socket.handle);
+	shutdown(socket.handle, 2);
 #endif
 }
 
@@ -178,18 +178,19 @@ struct socket_listener {
 		return true;
 	}
 
-	inline bool listen(socket_type& connection) {
+	template<typename IsRunningFunction>
+	inline bool listen(socket_type& connection, IsRunningFunction is_running) {
 		ULONG_PTR completion_key = NULL;
 		DWORD bytes_transferred;
 		OVERLAPPED* overlapped;
 		bool result = GetQueuedCompletionStatus(listener,
 			&bytes_transferred, &completion_key, &overlapped, INFINITE);
 		core::free(overlapped);
-		if (!result) {
+		if (!is_running()) {
+			return true;
+		} else if (!result || completion_key == NULL) {
 			listener_error("run_worker ERROR: Error waiting for IO completion packet");
 			return false;
-		} if (completion_key == NULL) {
-			return true;
 		}
 		connection = (SOCKET) completion_key;
 		return true;
@@ -264,22 +265,26 @@ struct socket_listener {
 				callback(connection);
 			} else {
 				/* there is an event on a client connection */
-				event_queue_lock.lock();
+				std::unique_lock<std::mutex> lck(event_queue_lock);
 				event_queue.add(socket);
-				event_queue_lock.unlock(); cv.notify_one();
+				cv.notify_one();
 			}
 		}
 		return true;
 	}
 
-	inline bool listen(socket_type& connection) {
+	template<typename IsRunningFunction>
+	inline bool listen(socket_type& connection, IsRunningFunction is_running) {
 		std::unique_lock<std::mutex> lck(event_queue_lock);
-		cv.wait(lck);
-		connection = event_queue.pop();
+		while (event_queue.length == 0 && is_running())
+			cv.wait(lck);
+		if (is_running())
+			connection = event_queue.pop();
 		return true;
 	}
 
 	static inline void free(socket_listener& listener, unsigned int thread_count) {
+		listener.cv.notify_all();
 		::close(listener.listener);
 	}
 
@@ -295,7 +300,7 @@ struct socket_listener {
 	template<bool ServerSocket>
 	inline bool add_socket(socket_type& socket) {
 		epoll_event new_event = {0};
-		new_event.events = EPOLLIN | EPOLLERR | (!ServerSocket ? EPOLLONESHOT : 0);
+		new_event.events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP | (!ServerSocket ? EPOLLONESHOT : 0);
 		new_event.data.fd = socket.handle;
 		if (epoll_ctl(listener, EPOLL_CTL_ADD, socket.handle, &new_event) == -1) {
 			listener_error("socket_listener.add_socket ERROR: Failed to listen to socket");
@@ -309,7 +314,7 @@ struct socket_listener {
 
 	inline bool update_socket(socket_type& socket) {
 		epoll_event new_event = {0};
-		new_event.events = EPOLLIN | EPOLLERR | EPOLLONESHOT;
+		new_event.events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP | EPOLLONESHOT;
 		new_event.data.fd = socket.handle;
 		if (epoll_ctl(listener, EPOLL_CTL_MOD, socket.handle, &new_event) == -1) {
 			listener_error("socket_listener.update_socket ERROR: Failed to modify listen event");
@@ -343,6 +348,8 @@ struct socket_listener {
 				socklen_t address_size = sizeof(client_address);
 				socket_type connection = ::accept(server_socket.handle, (sockaddr*) &client_address, &address_size);
 				if (!connection.is_valid()) {
+					if (errno == EINVAL)
+						return true; /* the server is shutting down */
 					perror("socket_listener.accept ERROR: Error establishing connection with client");
 					return false;
 				}
@@ -353,22 +360,26 @@ struct socket_listener {
 				callback(connection);
 			} else {
 				/* there is an event on a client connection */
-				event_queue_lock.lock();
+				std::unique_lock<std::mutex> lck(event_queue_lock);
 				event_queue.add(socket);
-				event_queue_lock.unlock(); cv.notify_one();
+				cv.notify_one();
 			}
 		}
 		return true;
 	}
 
-	inline bool listen(socket_type& connection) {
+	template<typename IsRunningFunction>
+	inline bool listen(socket_type& connection, IsRunningFunction is_running) {
 		std::unique_lock<std::mutex> lck(event_queue_lock);
-		cv.wait(lck);
-		connection = event_queue.pop();
+		while (event_queue.length == 0 && is_running())
+			cv.wait(lck);
+		if (is_running())
+			connection = event_queue.pop();
 		return true;
 	}
 
 	static inline void free(socket_listener& listener, unsigned int thread_count) {
+		listener.cv.notify_all();
 		::close(listener.listener);
 	}
 #endif
@@ -445,16 +456,22 @@ inline void network_error(const char* message) {
 	perror(message);
 }
 
+enum class server_state {
+	STOPPING = 0,
+	STARTING = 1,
+	STARTED = 2
+};
+
 template<typename ProcessMessageCallback, typename... CallbackArgs>
 void run_worker(socket_listener& listener, hash_set<socket_type>& connections,
-		std::mutex& connection_set_lock, bool& server_running,
+		std::mutex& connection_set_lock, server_state& state,
 		ProcessMessageCallback process_message, CallbackArgs&&... callback_args)
 {
-	while (server_running) {
+	while (state != server_state::STOPPING) {
 		socket_type connection;
-		if (!listener.listen(connection))
+		if (!listener.listen(connection, [&]() { return state != server_state::STOPPING; }))
 			continue;
-		if (!server_running) return;
+		if (state == server_state::STOPPING) return;
 
 		uint8_t next;
 		if (recv(connection.handle, (char*) &next, sizeof(next), MSG_PEEK) == 0) {
@@ -480,37 +497,40 @@ void run_worker(socket_listener& listener, hash_set<socket_type>& connections,
 }
 
 template<bool Success>
-inline void cleanup_server(
-		bool& server_running, std::condition_variable& init_cv)
+inline void cleanup_server(server_state& state,
+		std::condition_variable& init_cv, std::mutex& init_lock)
 {
 #if defined(_WIN32)
 	WSACleanup();
 #endif
 	if (!Success) {
-		server_running = false;
+		std::unique_lock<std::mutex> lock(init_lock);
+		state = server_state::STOPPING;
 		init_cv.notify_all();
 	}
 }
 
 template<bool Success>
-inline void cleanup_server(bool& server_running,
-		std::condition_variable& init_cv, socket_type& sock)
+inline void cleanup_server(server_state& state,
+		std::condition_variable& init_cv,
+		std::mutex& init_lock, socket_type& sock)
 {
 	shutdown(sock.handle, 2);
-	cleanup_server<Success>(server_running, init_cv);
+	cleanup_server<Success>(state, init_cv, init_lock);
 }
 
 template<typename ProcessMessageCallback, typename... CallbackArgs>
 bool run_server(socket_type& sock, uint16_t server_port,
 		unsigned int connection_queue_capacity, unsigned int worker_count,
-		bool& server_running, std::condition_variable& init_cv,
+		server_state& state, std::condition_variable& init_cv, std::mutex& init_lock,
 		ProcessMessageCallback process_message, CallbackArgs&&... callback_args)
 {
 #if defined(_WIN32)
 	WSADATA wsa_state;
 	if (WSAStartup(MAKEWORD(2,2), &wsa_state) != NO_ERROR) {
 		fprintf(stderr, "run_server ERROR: Unable to initialize WinSock.\n");
-		server_running = false; init_cv.notify_all(); return false;
+		std::unique_lock<std::mutex> lock(init_lock);
+		state = server_state::STOPPING; init_cv.notify_all(); return false;
 	}
 	sock = WSASocket(AF_INET6, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
 #else
@@ -519,13 +539,13 @@ bool run_server(socket_type& sock, uint16_t server_port,
 
 	if (!sock.is_valid()) {
 		network_error("run_server ERROR: Unable to open socket");
-		cleanup_server<false>(server_running, init_cv); return false;
+		cleanup_server<false>(state, init_cv, init_lock); return false;
 	}
 
 	int yes = 1;
 	if (setsockopt(sock.handle, SOL_SOCKET, SO_REUSEADDR, (const char*) &yes, sizeof(yes)) != 0) {
 		network_error("run_server ERROR: Unable to set socket option");
-		cleanup_server<false>(server_running, init_cv, sock); return false;
+		cleanup_server<false>(state, init_cv, init_lock, sock); return false;
 	}
 
 	sockaddr_in6 server_addr;
@@ -535,23 +555,23 @@ bool run_server(socket_type& sock, uint16_t server_port,
 	server_addr.sin6_addr = in6addr_any;
 	if (bind(sock.handle, (sockaddr*) &server_addr, sizeof(server_addr)) != 0) {
 		network_error("run_server ERROR: Unable to bind to socket");
-		cleanup_server<false>(server_running, init_cv, sock); return false;
+		cleanup_server<false>(state, init_cv, init_lock, sock); return false;
 	}
 
 	if (listen(sock.handle, connection_queue_capacity) != 0) {
 		network_error("run_server ERROR: Unable to listen to socket");
-		cleanup_server<false>(server_running, init_cv, sock); return false;
+		cleanup_server<false>(state, init_cv, init_lock, sock); return false;
 	}
 
 	socket_listener listener;
 	if (!init(listener)) {
 		network_error("run_server ERROR: Failed to initialize socket listener");
-		cleanup_server<false>(server_running, init_cv, sock); return false;
+		cleanup_server<false>(state, init_cv, init_lock, sock); return false;
 	}
 
 	if (!listener.add_server_socket(sock)) {
 		core::free(listener, worker_count);
-		cleanup_server<false>(server_running, init_cv, sock);
+		cleanup_server<false>(state, init_cv, init_lock, sock);
 		return false;
 	}
 
@@ -560,17 +580,20 @@ bool run_server(socket_type& sock, uint16_t server_port,
 	hash_set<socket_type> connections(1024, alloc_socket_keys);
 	std::thread* workers = new std::thread[worker_count];
 	auto start_worker = [&]() {
-		run_worker(listener, connections, connection_set_lock, server_running,
+		run_worker(listener, connections, connection_set_lock, state,
 				process_message, std::forward<CallbackArgs>(callback_args)...);
 	};
 	for (unsigned int i = 0; i < worker_count; i++)
 		workers[i] = std::thread(start_worker);
 
 	/* notify that the server has successfully started */
+	std::unique_lock<std::mutex> lock(init_lock);
+	state = server_state::STARTED;
 	init_cv.notify_all();
+	lock.unlock();
 
 	/* the main loop */
-	while (server_running) {
+	while (state != server_state::STOPPING) {
 		listener.accept(sock, [&](socket_type& connection) {
 			connection_set_lock.lock();
 			connections.add(connection, alloc_socket_keys);
@@ -583,7 +606,7 @@ bool run_server(socket_type& sock, uint16_t server_port,
 		workers[i].join();
 	for (socket_type& connection : connections)
 		shutdown(connection.handle, 2);
-	cleanup_server<true>(server_running, init_cv, sock);
+	cleanup_server<true>(state, init_cv, init_lock, sock);
 	delete[] workers;
 	return true;
 }

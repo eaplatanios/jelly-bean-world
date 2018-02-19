@@ -12,7 +12,7 @@ FILE* out = stderr;
 struct test_server {
 	std::thread server_thread;
 	socket_type server_socket;
-	bool server_running;
+	server_state state;
 };
 
 void process_test_server_message(socket_type& server) {
@@ -47,14 +47,16 @@ bool init_server(test_server& new_server, uint16_t server_port,
 	std::condition_variable cv; std::mutex lock;
 	auto dispatch = [&]() {
 		run_server(new_server.server_socket, server_port, connection_queue_capacity,
-			worker_count, new_server.server_running, cv, process_test_server_message);
+			worker_count, new_server.state, cv, lock, process_test_server_message);
 	};
-	new_server.server_running = true;
+	new_server.state = server_state::STARTING;
 	new_server.server_thread = std::thread(dispatch);
 
 	std::unique_lock<std::mutex> lck(lock);
-	cv.wait(lck);
-	if (!new_server.server_running) {
+	while (new_server.state == server_state::STARTING)
+		cv.wait(lck);
+	lck.unlock();
+	if (new_server.state == server_state::STOPPING) {
 		new_server.server_thread.join();
 		return false;
 	}
@@ -62,8 +64,7 @@ bool init_server(test_server& new_server, uint16_t server_port,
 }
 
 void stop_server(test_server& server) {
-	server.server_running = false;
-	write(0, server.server_socket);
+	server.state = server_state::STOPPING;
 	close(server.server_socket);
 	server.server_thread.join();
 }
@@ -75,12 +76,6 @@ bool init_client(socket_type& new_client,
 		new_client = connection;
 	};
 	return run_client(server_address, server_port, process_connection);
-}
-
-void stop_client(client& c) {
-	shutdown(c.connection.handle, 2);
-	c.client_running = false;
-	c.response_listener.join();
 }
 
 void test_client_send(socket_type& client, int64_t i) {
