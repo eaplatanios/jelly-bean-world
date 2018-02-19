@@ -92,7 +92,7 @@ void test_client_send(socket_type& client, const string& s) {
 
 void test_network() {
 	test_server new_server;
-	bool success = init_server(new_server, 52342, 16, 8);
+	bool success = init_server(new_server, 54353, 16, 8);
 	fprintf(out, "init_server returned %s.\n", success ? "true" : "false");
 	if (!success) return;
 
@@ -102,7 +102,7 @@ void test_network() {
 	auto dispatch = [&counter]() {
 		unsigned int thread_id = counter++;
 		socket_type client;
-		bool success = init_client(client, "localhost", "52342");
+		bool success = init_client(client, "localhost", "54353");
 		lock.lock();
 		fprintf(out, "[client %u] init_client returned %s.\n", thread_id, success ? "true" : "false");
 		lock.unlock();

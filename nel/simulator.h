@@ -515,6 +515,7 @@ public:
             agents.remove(agents.index_of(new_agent));
             core::free(new_agent);
             agent_array_lock.unlock();
+            return NULL;
         }
         return new_agent;
     }
@@ -591,6 +592,28 @@ private:
             }
         }
 
+        /* need to ensure agents don't move into positions where other agents failed to move */
+        if (config.collision_policy != movement_conflict_policy::NO_COLLISION) {
+            array<position> occupied_positions(16);
+            for (auto entry : requested_moves) {
+                array<agent_state*>& conflicts = entry.value;
+                for (unsigned int i = 1; i < conflicts.length; i++)
+                    occupied_positions.add(conflicts[i]->current_position);
+            }
+
+            bool contains;
+            while (occupied_positions.length > 0) {
+                array<agent_state*>& conflicts = requested_moves.get(occupied_positions.pop(), contains);
+                if (!contains || conflicts[0] == NULL) {
+                    continue;
+                } else if (contains) {
+                    for (unsigned int i = 0; i < conflicts.length; i++)
+                        occupied_positions.add(conflicts[i]->current_position);
+                    conflicts[0] = NULL; /* prevent any agent from moving here */
+                }
+            }
+        }
+
         time++;
         acted_agent_count = 0;
         for (agent_state* agent : agents) {
@@ -631,6 +654,13 @@ private:
             }
             agent->agent_acted = false;
         }
+
+if (config.collision_policy != movement_conflict_policy::NO_COLLISION) {
+for (unsigned int i = 0; i < agents.length; i++)
+    for (unsigned int j = i + 1; j < agents.length; j++)
+        if (agents[i]->current_position == agents[j]->current_position)
+            fprintf(stderr, "simulator.step WARNING: Agents %u and %u are at the same position.\n", i, j);
+}
 
         /* reset the requested moves */
         for (auto entry : requested_moves)
