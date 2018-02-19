@@ -144,3 +144,8 @@ The typical workflow for this library is as follows:
   3. Create agent instances in that simulator.
   4. *Optionally:* Allow for some way to monitor the agent's performance in its 
      `on_step()` method.
+
+## Troubleshooting
+
+### Repository initialization, publickey
+If you get the message `Permission denied (publickey).` when initializing the repository by calling `git submodule update --init --recursive` make sure you have your public key set correctly in https://github.com/settings/keys. You can see this example http://zeeelog.blogspot.com/2017/08/the-authenticity-of-host-githubcom.html to generate a new one.
