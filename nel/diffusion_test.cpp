@@ -9,7 +9,7 @@ template<typename T>
 void test_diffusion(T alpha, T lambda,
 		unsigned int patch_size, unsigned int max_time)
 {
-	diffusion<T> model;
+	diffusion<T>& model = *((diffusion<T>*) alloca(sizeof(diffusion<T>)));
 	bool result = init(model, alpha, lambda, patch_size, max_time);
 	if (!result) return;
 
@@ -19,9 +19,10 @@ void test_diffusion(T alpha, T lambda,
 				model.get_value(t, 0, 0), model.get_value(t, radius - 1, 0), radius - 1,
 				model.get_value(t, radius - 1, radius - 1), radius - 1, radius - 1);
 	}
+	free(model);
 }
 
 int main(int argc, const char** argv) {
-	test_diffusion<double>(0.12, 0.5, 64, 2000 + 1);
+	test_diffusion<double>(0.13, 0.47, 64, 2000 + 1);
 	return EXIT_SUCCESS;
 }

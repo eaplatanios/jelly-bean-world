@@ -43,11 +43,24 @@ inline bool print(const direction& dir, Stream& out) {
     return false;
 }
 
-enum class movement_conflict_policy {
+enum class movement_conflict_policy : uint8_t {
     NO_COLLISION = 0,
     FIRST_COME_FIRST_SERVED = 1,
     RANDOM = 2
 };
+
+template<typename Stream>
+inline bool read(movement_conflict_policy& policy, Stream& in) {
+    uint8_t c;
+    if (!read(c, in)) return false;
+    policy = (movement_conflict_policy) c;
+    return true;
+}
+
+template<typename Stream>
+inline bool write(const movement_conflict_policy& policy, Stream& out) {
+    return write((uint8_t) policy, out);
+}
 
 struct item_properties {
 	string name;
@@ -86,6 +99,42 @@ inline bool init(
 		properties.color[i] = src.color[i];
     properties.automatically_collected = src.automatically_collected;
 	return true;
+}
+
+template<typename Stream>
+inline bool read(item_properties& properties, Stream& in,
+        unsigned int scent_dimension, unsigned int color_dimension)
+{
+    if (!read(properties.name, in)) return false;
+
+	properties.scent = (float*) malloc(sizeof(float) * scent_dimension);
+	if (properties.scent == NULL) {
+		fprintf(stderr, "read ERROR: Insufficient memory for item_properties.scent.\n");
+		free(properties.name); return false;
+	}
+	properties.color = (float*) malloc(sizeof(float) * color_dimension);
+	if (properties.color == NULL) {
+		fprintf(stderr, "read ERROR: Insufficient memory for item_properties.scent.\n");
+		free(properties.name); free(properties.scent); return false;
+	}
+
+    if (!read(properties.scent, in, scent_dimension)
+     || !read(properties.color, in, color_dimension)
+     || !read(properties.automatically_collected, in)) {
+        free(properties.name); free(properties.scent);
+        free(properties.color); return false;
+    }
+    return true;
+}
+
+template<typename Stream>
+inline bool write(const item_properties& properties, Stream& out,
+        unsigned int scent_dimension, unsigned int color_dimension)
+{
+    return write(properties.name, out)
+        && write(properties.scent, out, scent_dimension)
+        && write(properties.color, out, color_dimension)
+        && write(properties.automatically_collected, out);
 }
 
 struct simulator_config {
@@ -425,6 +474,50 @@ inline bool init(
     return true;
 }
 
+template<typename Stream>
+inline bool read(agent_state& agent, Stream& in, const simulator_config& config)
+{
+    agent.current_scent = (float*) malloc(sizeof(float) * config.scent_dimension);
+    if (agent.current_scent == NULL) {
+        fprintf(stderr, "read ERROR: Insufficient memory for agent_state.current_scent.\n");
+        return false;
+    }
+    agent.current_vision = (float*) malloc(sizeof(float)
+        * (2*config.vision_range + 1) * (2*config.vision_range + 1) * config.color_dimension);
+    if (agent.current_vision == NULL) {
+        fprintf(stderr, "read ERROR: Insufficient memory for agent_state.current_vision.\n");
+        free(agent.current_scent); return false;
+    }
+    agent.collected_items = (unsigned int*) malloc(sizeof(unsigned int) * config.item_types.length);
+    if (agent.collected_items == NULL) {
+        fprintf(stderr, "read ERROR: Insufficient memory for agent_state.collected_items.\n");
+        free(agent.current_scent); free(agent.current_vision); return false;
+    }
+    new (&agent.lock) std::mutex();
+
+    if (!read(agent.current_position, in)
+     || !read(agent.current_scent, in, config.scent_dimension)
+     || !read(agent.current_vision, in, (2*config.vision_range + 1) * (2*config.vision_range + 1) * config.color_dimension)
+     || !read(agent.agent_acted, in)
+     || !read(agent.requested_position, in)
+     || !read(agent.collected_items, in, config.item_types.length)) {
+         free(agent.current_scent); free(agent.current_vision);
+         free(agent.collected_items); return false;
+     }
+     return true;
+}
+
+template<typename Stream>
+inline bool write(const agent_state& agent, Stream& out, const simulator_config& config)
+{
+    return write(agent.current_position, out)
+        && write(agent.current_scent, out, config.scent_dimension)
+        && write(agent.current_vision, out, (2*config.vision_range + 1) * (2*config.vision_range + 1) * config.color_dimension)
+        && write(agent.agent_acted, out)
+        && write(agent.requested_position, out)
+        && write(agent.collected_items, out, config.item_types.length);
+}
+
 typedef void (*step_callback)(const simulator* sim,
         const array<agent_state*>&,const simulator_config&);
 
@@ -671,14 +764,18 @@ private:
         requested_move_lock.unlock();
 
         /* compute new scent and vision for each agent */
+        update_agent_scent_and_vision();
+
+        /* Invoke the step callback function for each agent. */
+        step_callback_fn(this, agents, config);
+    }
+
+    inline void update_agent_scent_and_vision() {
         for (agent_state* agent : agents) {
             patch_type* neighborhood[4]; position patch_positions[4];
             world.get_fixed_neighborhood(agent->current_position, neighborhood, patch_positions);
             agent->update_state(neighborhood, scent_model, config, time);
         }
-
-        /* Invoke the step callback function for each agent. */
-        step_callback_fn(this, agents, config);
     }
 
     inline void request_new_position(agent_state& agent)
@@ -709,6 +806,8 @@ private:
     }
 
     friend bool init(simulator&, const simulator_config&, const step_callback);
+    template<typename A> friend bool read(simulator&, A&);
+    template<typename A> friend bool write(const simulator&, A&);
 };
 
 bool init(simulator& sim, 
@@ -741,6 +840,106 @@ bool init(simulator& sim,
     new (&sim.agent_array_lock) std::mutex();
     new (&sim.requested_move_lock) std::mutex();
     return true;
+}
+
+struct requested_move_scribe {
+    hash_map<const agent_state*, unsigned int> agent_indices;
+    agent_state** agents;
+
+    requested_move_scribe(unsigned int capacity, agent_state** agents) : agent_indices(capacity), agents(agents) { }
+};
+
+template<typename Stream>
+inline bool read(agent_state*& agent,
+        Stream& in, requested_move_scribe& scribe)
+{
+    unsigned int index;
+    if (!read(index, in)) return false;
+    agent = scribe.agents[index];
+    return true;
+}
+
+template<typename Stream>
+inline bool write(const agent_state* agent,
+        Stream& out, requested_move_scribe& scribe)
+{
+    return write(scribe.agent_indices.get(agent), out);
+}
+
+/* NOTE: this function assumes the variables in the simulator are not modified during reading */
+/* TODO: how to read step_callback_fn? */
+template<typename Stream>
+bool read(simulator& sim, Stream& in) {
+    if (!read(sim.world, in)) {
+        return false;
+    } else if (!read(sim.config, in)) {
+        free(sim.world); return false;
+    }
+
+    size_t agent_count;
+    if (!read(agent_count, in)
+     || !array_init(sim.agents, 1 << (core::log2(agent_count) + 2))) {
+        free(sim.world); free(sim.config); return false;
+    }
+    for (unsigned int i = 0; i < agent_count; i++) {
+        sim.agents[i] = (agent_state*) malloc(sizeof(agent_state));
+        if (sim.agents[i] == NULL || !read(*sim.agents[i], in, sim.config)) {
+            fprintf(stderr, "read ERROR: Insufficient memory for agent_state in simulator.\n");
+            for (unsigned int j = 0; j < i; j++) {
+                free(*sim.agents[j]); free(sim.agents[j]);
+            }
+            if (sim.agents[i] != NULL) free(sim.agents[i]);
+            free(sim.world); free(sim.agents);
+            free(sim.config); return false;
+        }
+    }
+
+    requested_move_scribe scribe(4, sim.agents.data);
+    if (!read(sim.requested_moves, in, default_scribe(), scribe)) {
+        for (unsigned int j = 0; j < agent_count; j++) {
+            free(*sim.agents[j]); free(sim.agents[j]);
+        }
+        free(sim.world); free(sim.agents);
+        free(sim.config); return false;
+    }
+
+    /* reinitialize the scent model */
+    if (!read(sim.time, in) || !read(sim.acted_agent_count, in)
+     || !init(sim.scent_model, (double) sim.config.diffusion_param,
+            (double) sim.config.decay_param, sim.config.patch_size,
+            sim.config.deleted_item_lifetime))
+    {
+        for (unsigned int j = 0; j < agent_count; j++) {
+            free(*sim.agents[j]); free(sim.agents[j]);
+        }
+        for (auto entry : sim.requested_moves)
+            free(entry.value);
+        free(sim.world); free(sim.agents);
+        free(sim.requested_moves); free(sim.config);
+        return false;
+    }
+    new (&sim.agent_array_lock) std::mutex();
+    new (&sim.requested_move_lock) std::mutex();
+    return true;
+}
+
+/* NOTE: this function assumes the variables in the simulator are not modified during writing */
+/* TODO: how to write step_callback_fn? */
+template<typename Stream>
+bool write(const simulator& sim, Stream& out) {
+    if (!write(sim.world, out) || !write(sim.config, out))
+        return false;
+
+    requested_move_scribe scribe(sim.agents.length * RESIZE_THRESHOLD_INVERSE, NULL);
+    if (!write(sim.agents.length, out)) return false;
+    for (unsigned int i = 0; i < sim.agents.length; i++) {
+        scribe.agent_indices.put(sim.agents[i], i);
+        if (!write(*sim.agents[i], out, sim.config)) return false;
+    }
+
+    return write(sim.requested_moves, out, default_scribe(), scribe)
+        && write(sim.time, out)
+        && write(sim.acted_agent_count, out);
 }
 
 } /* namespace nel */

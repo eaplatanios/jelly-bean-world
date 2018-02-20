@@ -52,12 +52,9 @@ Under the current design:
   - All items in the world are automatically collected by the agents and are 
     available in their *current state* information. <!-- TODO: !!! -->
 
-**NOTE:** Note that the agent is not moved until the simulator advances the  
+**NOTE:** Note that the agent is not moved until the simulator advances the
 time step and issues a notification about that event. The simulator only 
 advances the time step once all agents have requested to move.
-
-**NOTE:** Contention is not currently being handled and thus there may be issues 
-with multi-agent systems. We plan to fix this very soon.
 
 Simulators currently support two modes of operation:
 
@@ -148,4 +145,8 @@ The typical workflow for this library is as follows:
 ## Troubleshooting
 
 ### Repository initialization, publickey
-If you get the message `Permission denied (publickey).` when initializing the repository by calling `git submodule update --init --recursive` make sure you have your public key set correctly in https://github.com/settings/keys. You can see this example http://zeeelog.blogspot.com/2017/08/the-authenticity-of-host-githubcom.html to generate a new one.
+If you get the message `Permission denied (publickey).` when initializing the
+repository by calling `git submodule update --init --recursive` make sure you
+have your public key set correctly in https://github.com/settings/keys. You can
+see this example http://zeeelog.blogspot.com/2017/08/the-authenticity-of-host-githubcom.html
+to generate a new one.
