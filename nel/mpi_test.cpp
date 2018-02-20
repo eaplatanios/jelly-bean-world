@@ -61,8 +61,10 @@ bool init_server(test_server& new_server, uint16_t server_port,
 	while (new_server.state == server_state::STARTING)
 		cv.wait(lck);
 	lck.unlock();
-	if (new_server.state == server_state::STOPPING) {
-		new_server.server_thread.join();
+	if (new_server.state == server_state::STOPPING && new_server.server_thread.joinable()) {
+		try {
+			new_server.server_thread.join();
+		} catch (...) { }
 		return false;
 	}
 	return true;
@@ -71,7 +73,11 @@ bool init_server(test_server& new_server, uint16_t server_port,
 void stop_server(test_server& server) {
 	server.state = server_state::STOPPING;
 	close(server.server_socket);
-	server.server_thread.join();
+	if (server.server_thread.joinable()) {
+		try {
+			server.server_thread.join();
+		} catch (...) { }
+	}
 }
 
 bool init_client(socket_type& new_client,
@@ -125,8 +131,12 @@ void test_network() {
 	};
 	for (unsigned int i = 0; i < client_count; i++)
 		client_threads[i] = std::thread(dispatch);
-	for (unsigned int i = 0; i < client_count; i++)
-		client_threads[i].join();
+	for (unsigned int i = 0; i < client_count; i++) {
+		if (!client_threads[i].joinable()) continue;
+		try {
+			client_threads[i].join();
+		} catch (...) { }
+	}
 	delete[] client_threads;
 
 	std::this_thread::sleep_for(std::chrono::milliseconds(100));

@@ -57,10 +57,16 @@ struct async_server {
 	async_server() : client_connections(1024, alloc_socket_keys) { }
 };
 
+inline bool send_message(socket_type& socket, const void* data, unsigned int length) {
+	return send(socket.handle, (const char*) data, length, 0) != 0;
+}
+
 inline bool receive_add_agent(socket_type& connection, simulator& sim) {
 	agent_state* new_agent = sim.add_agent();
-	return write(message_type::ADD_AGENT_RESPONSE, connection)
-		&& write((uint64_t) new_agent, connection);
+	memory_stream out = memory_stream(sizeof(message_type) + sizeof(new_agent));
+	return write(message_type::ADD_AGENT_RESPONSE, out)
+		&& write((uint64_t) new_agent, out)
+		&& send_message(connection, out.buffer, out.length);
 }
 
 inline bool receive_move(socket_type& connection, simulator& sim) {
@@ -70,8 +76,10 @@ inline bool receive_move(socket_type& connection, simulator& sim) {
 	if (!read(agent_handle, connection) || !read(dir, connection) || !read(num_steps, connection))
 		return false;
 	bool result = sim.move(*((agent_state*) agent_handle), dir, num_steps);
-	return write(message_type::MOVE_RESPONSE, connection)
-		&& write(agent_handle, connection) && write(result, connection);
+	memory_stream out = memory_stream(sizeof(message_type) + sizeof(agent_handle) + sizeof(result));
+	return write(message_type::MOVE_RESPONSE, out)
+		&& write(agent_handle, out) && write(result, out)
+		&& send_message(connection, out.buffer, out.length);
 }
 
 inline bool receive_get_position(socket_type& connection, simulator& sim) {
@@ -79,8 +87,10 @@ inline bool receive_get_position(socket_type& connection, simulator& sim) {
 	if (!read(agent_handle, connection))
 		return false;
 	position location = sim.get_position(*((agent_state*) agent_handle));
-	return write(message_type::GET_POSITION_RESPONSE, connection)
-		&& write(agent_handle, connection) && write(location, connection);
+	memory_stream out = memory_stream(sizeof(message_type) + sizeof(agent_handle) + sizeof(location));
+	return write(message_type::GET_POSITION_RESPONSE, out)
+		&& write(agent_handle, out) && write(location, out)
+		&& send_message(connection, out.buffer, out.length);
 }
 
 void server_process_message(socket_type& connection, simulator& sim) {
@@ -103,12 +113,11 @@ void server_process_message(socket_type& connection, simulator& sim) {
 	fprintf(stderr, "server_process_message WARNING: Received message with unsupported type.\n");
 }
 
-inline bool send_step_response(async_server& server, const agent_state& agent) {
+inline bool send_step_response(async_server& server) {
 	std::unique_lock<std::mutex> lock(server.connection_set_lock);
 	bool success = true;
 	for (socket_type& client_connection : server.client_connections)
-		success &= write(message_type::STEP_RESPONSE, client_connection)
-				&& write((uint64_t) &agent, client_connection);
+		success &= write(message_type::STEP_RESPONSE, client_connection);
 	return success;
 }
 
@@ -130,8 +139,10 @@ bool init_server(
 	while (new_server.state == server_state::STARTING)
 		cv.wait(lck);
 	lck.unlock();
-	if (new_server.state == server_state::STOPPING) {
-		new_server.server_thread.join();
+	if (new_server.state == server_state::STOPPING && new_server.server_thread.joinable()) {
+		try {
+			new_server.server_thread.join();
+		} catch (...) { }
 		return false;
 	}
 	return true;
@@ -152,7 +163,11 @@ inline bool init_server(simulator& sim, uint16_t server_port,
 void stop_server(async_server& server) {
 	server.state = server_state::STOPPING;
 	close(server.server_socket);
-	server.server_thread.join();
+	if (server.server_thread.joinable()) {
+		try {
+			server.server_thread.join();
+		} catch (...) { }
+	}
 }
 
 
@@ -161,7 +176,7 @@ struct client_callbacks {
 	void (*on_add_agent)(ClientType&, uint64_t);
 	void (*on_move)(ClientType&, uint64_t, bool);
 	void (*on_get_position)(ClientType&, uint64_t, const position&);
-	void (*on_step)(ClientType&, uint64_t);
+	void (*on_step)(ClientType&);
 	void (*on_lost_connection)(ClientType&);
 };
 
@@ -175,14 +190,9 @@ struct client {
 };
 
 template<typename ClientType>
-inline bool send_message(ClientType& c, const void* data, unsigned int length) {
-	return send(c.connection.handle, (const char*) data, length, 0) != 0;
-}
-
-template<typename ClientType>
 bool send_add_agent(ClientType& c) {
 	message_type message = message_type::ADD_AGENT;
-	return send_message(c, &message, sizeof(message));
+	return send_message(c.connection, &message, sizeof(message));
 }
 
 template<typename ClientType>
@@ -192,7 +202,7 @@ bool send_move(ClientType& c, uint64_t agent_handle, direction dir, unsigned int
 		&& write(agent_handle, out)
 		&& write(dir, out)
 		&& write(num_steps, out)
-		&& send_message(c, out.buffer, out.length);
+		&& send_message(c.connection, out.buffer, out.length);
 }
 
 template<typename ClientType>
@@ -200,7 +210,7 @@ bool send_get_position(ClientType& c, uint64_t agent_handle) {
 	memory_stream out = memory_stream(sizeof(message_type) + sizeof(uint64_t));
 	return write(message_type::GET_POSITION, out)
 		&& write(agent_handle, out)
-		&& send_message(c, out.buffer, out.length);
+		&& send_message(c.connection, out.buffer, out.length);
 }
 
 template<typename ClientType>
@@ -234,10 +244,7 @@ inline bool receive_get_position_response(ClientType& c) {
 
 template<typename ClientType>
 inline bool receive_step_response(ClientType& c) {
-	uint64_t agent_handle;
-	if (!read(agent_handle, c.connection))
-		return false;
-	c.callbacks.on_step(c, agent_handle);
+	c.callbacks.on_step(c);
 	return true;
 }
 
@@ -267,7 +274,7 @@ void run_response_listener(ClientType& c) {
 			case message_type::GET_POSITION:
 				break;
 		}
-		fprintf(stderr, "run_response_listener ERROR: Received invalid message type from server.\n");
+		fprintf(stderr, "run_response_listener ERROR: Received invalid message type from server %" PRId64 ".\n", (uint64_t) type);
 	}
 }
 
@@ -293,7 +300,11 @@ template<typename ClientData>
 void stop_client(client<ClientData>& c) {
 	c.client_running = false;
 	shutdown(c.connection.handle, 2);
-	c.response_listener.join();
+	if (c.response_listener.joinable()) {
+		try {
+			c.response_listener.join();
+		} catch (...) { }
+	}
 }
 
 } /* namespace nel */

@@ -292,8 +292,8 @@ struct agent_state {
                 const item& item = neighborhood[i]->items[j];
 
                 /* check if the item is too old; if so, delete it */
-                if (item.deletion_time > 0 && current_time > item.deletion_time + config.deleted_item_lifetime) {
-                    neighborhood[i]->items.remove(j); j--;
+                if (item.deletion_time > 0 && current_time >= item.deletion_time + config.deleted_item_lifetime) {
+                    neighborhood[i]->items.remove(j); j--; continue;
                 }
 
                 /* compute item position in agent coordinates */
@@ -425,9 +425,8 @@ inline bool init(
     return true;
 }
 
-typedef void (*step_callback)(
-    const simulator* sim, unsigned int id, 
-    const agent_state&, const simulator_config&);
+typedef void (*step_callback)(const simulator* sim,
+        const array<agent_state*>&,const simulator_config&);
 
 /**
  * Simulator that forms the core of our experimentation framework.
@@ -679,8 +678,7 @@ private:
         }
 
         /* Invoke the step callback function for each agent. */
-        for (unsigned int id = 0; id < agents.length; id++)
-            step_callback_fn(this, id, *agents[id], config);
+        step_callback_fn(this, agents, config);
     }
 
     inline void request_new_position(agent_state& agent)

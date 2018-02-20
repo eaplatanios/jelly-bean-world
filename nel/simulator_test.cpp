@@ -7,6 +7,7 @@
 #include <cmath>
 #include <thread>
 #include <condition_variable>
+#include <signal.h>
 
 using namespace core;
 using namespace nel;
@@ -50,7 +51,7 @@ enum class movement_pattern {
 
 constexpr unsigned int agent_count = 8;
 constexpr unsigned int max_time = 1000000;
-constexpr movement_conflict_policy collision_policy = movement_conflict_policy::RANDOM;
+constexpr movement_conflict_policy collision_policy = movement_conflict_policy::FIRST_COME_FIRST_SERVED;
 constexpr movement_pattern move_pattern = movement_pattern::BACK_AND_FORTH;
 unsigned int sim_time = 0;
 bool agent_direction[agent_count];
@@ -141,19 +142,22 @@ void run_agent(simulator& sim, agent_state** agents,
 	}
 }
 
-void on_step(const simulator* sim, unsigned int id,
-		const agent_state& agent, const simulator_config& config)
+void on_step(const simulator* sim,
+		const array<agent_state*>& agents,
+		const simulator_config& config)
 {
-	if (id == 0) sim_time++;
+	sim_time++;
 #if defined(USE_MPI)
-	if (!send_step_response(server, agent)) {
+	if (!send_step_response(server)) {
 		print_lock.lock();
 		fprintf(out, "on_step ERROR: send_step_response failed.\n");
 		print_lock.unlock();
 	}
 #elif defined(MULTITHREADED)
-	std::unique_lock<std::mutex> lck(locks[id]);
-	conditions[id].notify_one();
+	for (unsigned int i = 0; i < agents.length; i++) {
+		std::unique_lock<std::mutex> lck(locks[i]);
+		conditions[i].notify_one();
+	}
 #endif
 }
 
@@ -217,12 +221,13 @@ bool test_multithreaded(simulator& sim) {
 		fprintf(out, "Completed %u moves: %lf simulation steps per second.\n", move_count.load(), ((double) sim_time / elapsed) * 1000);
 		stopwatch.start();
 	}
-	elapsed += stopwatch.milliseconds();
-	fprintf(out, "Completed %u moves: %lf simulation steps per second.\n", move_count.load(), ((double) sim_time / elapsed) * 1000);
 	simulation_running = false;
 	for (unsigned int i = 0; i < agent_count; i++) {
 		conditions[i].notify_one();
-		clients[i].join();
+		if (!clients[i].joinable()) continue;
+		try {
+			clients[i].join();
+		} catch (...) { }
 	}
 	return true;
 }
@@ -259,7 +264,7 @@ void get_position_callback(client<client_data>& c, uint64_t agent, const positio
 	conditions[id].notify_one();
 }
 
-void step_done_callback(client<client_data>& c, uint64_t agent) {
+void step_done_callback(client<client_data>& c) {
 	unsigned int id = c.data.index;
 	std::unique_lock<std::mutex> lck(locks[id]);
 	c.data.waiting_for_step = false;
@@ -399,18 +404,18 @@ bool test_mpi(simulator& sim)
 
 	timer stopwatch;
 	unsigned long long elapsed = 0;
-	while (sim_time < max_time) {
+	while (server.state != server_state::STOPPING && sim_time < max_time) {
 		std::this_thread::sleep_for(std::chrono::seconds(1));
 		elapsed += stopwatch.milliseconds();
 		fprintf(out, "Completed %u moves: %lf simulation steps per second.\n", move_count.load(), ((double) sim_time / elapsed) * 1000);
 		stopwatch.start();
 	}
-	elapsed += stopwatch.milliseconds();
-	fprintf(out, "Completed %u moves: %lf simulation steps per second.\n", move_count.load(), ((double) sim_time / elapsed) * 1000);
 	for (unsigned int i = 0; i < agent_count; i++) {
 		clients[i].client_running = false;
 		conditions[i].notify_one();
-		client_threads[i].join();
+		try {
+			client_threads[i].join();
+		} catch (...) { }
 	}
 	cleanup_mpi(clients);
 	return true;
@@ -418,8 +423,9 @@ bool test_mpi(simulator& sim)
 
 int main(int argc, const char** argv)
 {
-	//set_seed(2890104773);
-	fprintf(out, "random seed: %u\n", get_seed());
+#if !defined(_WIN32)
+	signal(SIGPIPE, SIG_IGN);
+#endif
 	simulator_config config;
 	config.max_steps_per_movement = 1;
 	config.scent_dimension = 3;

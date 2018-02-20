@@ -1,8 +1,6 @@
 #ifndef NEL_NETWORK_H_
 #define NEL_NETWORK_H_
 
-/* BIG TODO: test this on Windows */
-
 #include <core/array.h>
 #include <core/map.h>
 #include <stdio.h>
@@ -601,8 +599,12 @@ bool run_server(socket_type& sock, uint16_t server_port,
 	}
 
 	core::free(listener, worker_count);
-	for (unsigned int i = 0; i < worker_count; i++)
-		workers[i].join();
+	for (unsigned int i = 0; i < worker_count; i++) {
+		if (!workers[i].joinable()) continue;
+		try {
+			workers[i].join();
+		} catch (...) { }
+	}
 	for (socket_type& connection : connections)
 		shutdown(connection.handle, 2);
 	cleanup_server<true>(state, init_cv, init_lock, sock);

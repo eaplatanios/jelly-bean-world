@@ -32,8 +32,8 @@ struct diffusion
 			fprintf(stderr, "diffusion.get_value WARNING: Requested position "
 					"is beyond the radius of this diffusion simulation.\n");
 		if (t >= max_time)
-			fprintf(stderr, "diffusion.get_value WARNING: Requested time "
-					"is beyond the bounds of this diffusion simulation.\n");
+			fprintf(stderr, "diffusion.get_value WARNING: Requested time (%u) "
+					"is beyond the bounds of this diffusion simulation.\n", t);
 #endif
 		return cache[t][(x * (x + 1)) / 2 + y];
 	}
