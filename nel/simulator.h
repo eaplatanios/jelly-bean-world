@@ -632,7 +632,7 @@ inline bool write(const agent_state& agent, Stream& out, const simulator_config&
 }
 
 typedef void (*step_callback)(const simulator* sim,
-        const array<agent_state*>&,const simulator_config&);
+        const array<agent_state*>&, const simulator_config&);
 
 /**
  * Simulator that forms the core of our experimentation framework.

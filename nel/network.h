@@ -218,6 +218,8 @@ struct socket_listener {
 		struct kevent new_event;
 		EV_SET(&new_event, socket.handle, EVFILT_READ, EV_ADD | (!ServerSocket ? EV_ONESHOT : 0), 0, 0, NULL);
 		if (kevent(listener, &new_event, 1, NULL, 0, NULL) == -1) {
+			if (errno == EBADF)
+				return true; /* server is shutting down */
 			listener_error(error_message);
 			return false;
 		}

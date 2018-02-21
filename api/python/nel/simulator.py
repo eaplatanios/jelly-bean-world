@@ -99,25 +99,53 @@ class Simulator(object):
   agent's constructor.
   """
   
-  def __init__(self, config, sim_type=SimulatorType.C):
+  def __init__(
+      self, sim_config=None, is_server=False, server_address=None,
+      port=54353, conn_queue_capacity=256, num_workers=8,
+      save_frequency=1000, save_filepath=None, load_filepath=None):
     """Creates a new simulator.
     
     Arguments:
-      config:   Configuration for the new simulator.
-      sim_type: Simulator type. If intending to use this simulator as a server, 
-                the `MPI` type should be used. The default is to use the `C` 
-                simulator.
+      sim_config      Configuration for the new simulator.
     """
-    self._handle = simulator_c.new(
-      config.max_steps_per_movement, config.scent_num_dims, 
-      config.color_num_dims, config.vision_range, config.patch_size, 
-      config.gibbs_num_iter, 
-      [(i.name, i.scent, i.color, i.intensity) for i in config.items], 
-      config.intensity_fn, config.intensity_fn_args, 
-      config.interaction_fn, config.interaction_fn_args, sim_type)
-    self.sim_type = sim_type
+    if sim_config != None:
+      # create a local server or simulator
+      if load_filepath != None:
+        raise ValueError('"load_filepath" must be None if "sim_config" is specified.')
+      elif server_address != None:
+        raise ValueError('"server_address" must be None if "sim_config" is specified.')
+      self._handle = simulator_c.new(
+        sim_config.max_steps_per_movement, sim_config.scent_num_dims,
+        sim_config.color_num_dims, sim_config.vision_range, sim_config.patch_size,
+        sim_config.gibbs_num_iter,
+        [(i.name, i.scent, i.color, i.intensity) for i in sim_config.items],
+        sim_config.intensity_fn, sim_config.intensity_fn_args,
+        sim_config.interaction_fn, sim_config.interaction_fn_args,
+        save_frequency, save_filepath)
+      if is_server:
+        self._server_handle = simulator_c.start_server(
+          self._handle, port, conn_queue_capacity, num_workers)
+      else:
+        self._server_handle = None
+      self._client_handle = None
+    elif server_address != None:
+      # connect to a remote server
+      if load_filepath != None:
+        raise ValueError('"load_filepath" must be None if "server_address" is specified.')
+      self._handle, self._client_handle = simulator_c.start_client(server_address, port)
+      self._server_handle = None
+    else:
+      # load local server or simulator from file
+      if load_filepath == None:
+        raise ValueError('"load_filepath" must be non-None if "sim_config" and "server_address" are None.')
+      self._handle = simulator_c.load(load_filepath, save_frequency, save_filepath)
+      if is_server:
+        self._server_handle = simulator_c.start_server(
+          self._handle, port, conn_queue_capacity, num_workers)
+      else:
+        self._server_handle = None
+      self._client_handle = None
     self.agents = dict()
-    self._server_handle = None
     __SIM_HANDLE_TO_SIM__[self._handle] = self
   
   def start_server(self, port=54353, conn_queue_capacity=256, num_workers=8):
@@ -161,6 +189,10 @@ class Simulator(object):
     """Deletes this simulator and deallocates all 
     associated memory. This simulator cannot be used 
     again after it's been deleted."""
+    if self._client_handle != None:
+      simulator_c.stop_client(self._client_handle)
+    if self._server_handle != None:
+      simulator_c.stop_server(self._server_handle)
     simulator_c.delete(self._handle)
   
   def _add_agent(self, py_agent):

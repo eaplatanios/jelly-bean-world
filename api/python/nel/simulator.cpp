@@ -1,13 +1,24 @@
 #include <Python.h>
 
 #include <thread>
-#include <nel/gibbs_field.h>
-#include <nel/mpi.h>
-#include <nel/simulator.h>
+#include "nel/gibbs_field.h"
+#include "nel/mpi.h"
+#include "nel/simulator.h"
 
 namespace nel {
 
 using namespace core;
+
+enum class simulator_type {
+    C = 0, MPI = 1
+};
+
+struct python_simulator {
+    simulator_type type;
+    union {
+        async_server server;
+    };
+};
 
 static pair<float*, Py_ssize_t> PyArg_ParseFloatList(PyObject* arg) {
     if (!PyList_Check(arg)) {
@@ -15,7 +26,7 @@ static pair<float*, Py_ssize_t> PyArg_ParseFloatList(PyObject* arg) {
         exit(EXIT_FAILURE);
     }
     Py_ssize_t len = PyList_Size(arg);
-    float* items = new float[len];
+    float* items = (float*) malloc(sizeof(float) * len);
     for (unsigned int i = 0; i < len; i++)
         items[i] = PyFloat_AsDouble(PyList_GetItem(arg, (Py_ssize_t) i));
     return make_pair(items, len);
@@ -62,13 +73,11 @@ static PyObject* simulator_set_step_callback(PyObject *self, PyObject *args) {
     return result;
 }
 
-enum class simulator_type {
-    C = 0, MPI = 1
-};
-
 void c_step_callback_fn(
-        const simulator* sim, const unsigned int id, 
-        const agent_state& agent, const simulator_config& sim_config) {
+        const simulator* sim,
+        const array<agent_state*>&,
+        const simulator_config& config)
+{
     PyObject* py_agent = Py_BuildAgentState(agent);
     PyObject* args = Py_BuildValue("OIO", py_sim_handle, id, py_agent);
     PyObject_CallObject(py_step_callback, arglist);
@@ -76,8 +85,10 @@ void c_step_callback_fn(
 }
 
 void mpi_step_callback_fn(
-        const simulator* sim, const unsigned int id, 
-        const agent_state& agent, const simulator_config& sim_config) {
+        const simulator* sim,
+        const array<agent_state*>&,
+        const simulator_config& config)
+{
     // TODO !!!
     // TODO: Does this need to be different than the C one? Who handles messages in this case?
     fprintf(stderr, "The MPI simulator step callback function has not been implemented yet.");
@@ -98,7 +109,9 @@ step_callback get_step_callback_fn(simulator_type type) {
  * \param   args    
  * \returns Pointer to the new simulator.
  */
-static PyObject* simulator_new(PyObject *self, PyObject *args) {
+static PyObject* simulator_new(PyObject *self, PyObject *args)
+{
+    simulator_config config;
     unsigned int* max_steps_per_movement;
     unsigned int* scent_num_dims;
     unsigned int* color_num_dims;
@@ -106,58 +119,71 @@ static PyObject* simulator_new(PyObject *self, PyObject *args) {
     unsigned int* patch_size;
     unsigned int* gibbs_iterations;
     PyObject* py_items;
+    PyObject* py_agent_color;
+    unsigned int* collision_policy;
+    float* decay_param; float* diffusion_param;
+    unsigned int* deleted_item_lifetime;
     unsigned int* py_intensity_fn;
     PyObject* py_intensity_fn_args;
     unsigned int* py_interaction_fn;
     PyObject* py_interaction_fn_args;
-    unsigned int* py_sim_type;
+    unsigned int* save_frequency;
+    char* save_filepath;
     if (!PyArg_ParseTuple(
-      args, "IIIIIIOIOIOI", &max_steps_per_movement, &scent_num_dims, &color_num_dims, 
-      &vision_range, &patch_size, &gibbs_iterations, &py_items, 
-      &py_intensity_fn, &py_intensity_fn_args, 
-      &py_interaction_fn, &py_interaction_fn_args, 
-      &py_sim_type)) {
+      args, "IIIIIIOOIffIIOIOIIz", &max_steps_per_movement, &scent_num_dims, &color_num_dims, 
+      &vision_range, &patch_size, &gibbs_iterations, &py_items, &py_agent_color, &collision_policy,
+      &decay_param, &diffusion_param, &deleted_item_lifetime, &py_intensity_fn,
+      &py_intensity_fn_args, &py_interaction_fn, &py_interaction_fn_args, &safe_frequency, &save_filepath)) {
         fprintf(stderr, "Invalid argument types in the call to 'simulator_c.new'.");
         exit(EXIT_FAILURE);
     }
+
+    simulator_config config;
     PyObject *py_items_iter = PyObject_GetIter(py_items);
     if (!py_items_iter) {
         fprintf(stderr, "Invalid argument types in the call to 'simulator_c.new'.");
         exit(EXIT_FAILURE);
     }
-    array<item_properties> item_types(8);
     while (true) {
         PyObject *next_py_item = PyIter_Next(py_items_iter);
         if (!next_py_item) break;
         char* name;
         PyObject* py_scent;
         PyObject* py_color;
-        float* intensity;
-        if (!PyArg_ParseTuple(args, "sOOf", &name, &py_scent, &py_color, &intensity))
+        int* automatically_collected;
+        if (!PyArg_ParseTuple(args, "sOOi", &name, &py_scent, &py_color, &automatically_collected))
             return NULL;
-        float* scent = PyArg_ParseFloatList(py_scent).key;
-        float* color = PyArg_ParseFloatList(py_color).key;
-        item_properties& new_item = item_types[item_types.length];
+        item_properties& new_item = config.item_types[config.item_types.length];
         init(new_item.name, name);
-        new_item.scent = scent;
-        new_item.color = color;
-        new_item.intensity = *intensity;
-        item_types.length += 1;
+        new_item.scent = PyArg_ParseFloatList(py_scent).key;
+        new_item.color = PyArg_ParseFloatList(py_color).key;
+        new_item.automatically_collected = (*automatically_collected != 0);
+        config.item_types.length += 1;
     }
-    simulator_config config;
+
     config.max_steps_per_movement = *max_steps_per_movement;
     config.scent_dimension = *scent_num_dims;
     config.color_dimension = *color_num_dims;
     config.vision_range = *vision_range;
     config.patch_size = *patch_size;
     config.gibbs_iterations = *gibbs_iterations;
-    config.item_types = item_types;
+    config.agent_color = PyArg_ParseFloatList(py_agent_color).key;
+    config.collision_policy = (movement_conflict_policy) *collision_policy;
+    config.decay_param = *decay_param;
+    config.diffusion_param = *diffusion_param;
+    config.deleted_item_lifetime = *deleted_item_lifetime;
     pair<float*, Py_ssize_t> intensity_fn_args = PyArg_ParseFloatList(py_intensity_fn_args);
-    config.intensity_fn = get_intensity_fn((intensity_fns) *py_intensity_fn, intensity_fn_args.key, (unsigned int) intensity_fn_args.value);
     pair<float*, Py_ssize_t> interaction_fn_args = PyArg_ParseFloatList(py_interaction_fn_args);
+    config.intensity_fn = get_intensity_fn((intensity_fns) *py_intensity_fn, intensity_fn_args.key, (unsigned int) intensity_fn_args.value);
     config.interaction_fn = get_interaction_fn((interaction_fns) *py_interaction_fn, interaction_fn_args.key, (unsigned int) interaction_fn_args.value);
+    config.intensity_fn_arg_count = intensity_fn_args.value;
+    config.interaction_fn_arg_count = interaction_fn_args.value;
     simulator_type step_callback_fn = get_step_callback_fn((simulator_type) *py_sim_type);
-    return PyLong_FromVoidPtr(new simulator(config, step_callback_fn));
+
+    simulator* sim = (simulator*) malloc(sizeof(simulator));
+    if (!init(sim, config, step_callback_fn))
+        return NULL;
+    return PyLong_FromVoidPtr(sim);
 }
 
 /** 

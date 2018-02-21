@@ -43,7 +43,8 @@ async_server server;
 //#define MULTITHREADED
 //#define USE_MPI
 #define TEST_SERIALIZATION
-//#define TEST_CONNECTION_LOSS
+//#define TEST_SERVER_CONNECTION_LOSS
+//#define TEST_CLIENT_CONNECTION_LOSS
 
 inline direction next_direction(position agent_position, double theta) {
 	if (theta == M_PI) {
@@ -421,22 +422,23 @@ bool test_mpi(const simulator_config& config)
 	unsigned long long elapsed = 0;
 	while (server.state != server_state::STOPPING && sim_time < max_time)
 	{
-#if defined(TEST_CONNECTION_LOSS)
 		if (sim_time > max_time / 2) {
+#if defined(TEST_SERVER_CONNECTION_LOSS)
 			/* try closing all TCP sockets */
 			close(server.server_socket);
 			for (socket_type& client : server.client_connections)
 				close(client);
-			
-			for (unsigned int i = 0; i < agent_count; i++) {
-				try {
-					client_threads[i].join();
-				} catch (...) { }
+#elif defined(TEST_CLIENT_CONNECTION_LOSS)
+			if (server.client_connections.size == agent_count) {
+				/* try closing half of the client TCP sockets */
+				unsigned int index = 0;
+				for (socket_type& client : server.client_connections) {
+					close(client); index++;
+					if (index > agent_count / 2) break;
+				}
 			}
-			cleanup_mpi(clients);
-			return true;
-		}
 #endif
+		}
 
 		std::this_thread::sleep_for(std::chrono::seconds(1));
 		elapsed += stopwatch.milliseconds();
