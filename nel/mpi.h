@@ -62,35 +62,38 @@ inline bool send_message(socket_type& socket, const void* data, unsigned int len
 }
 
 inline bool receive_add_agent(socket_type& connection, simulator& sim) {
-	agent_state* new_agent = sim.add_agent();
-	memory_stream out = memory_stream(sizeof(message_type) + sizeof(new_agent));
+	uint64_t new_agent = sim.add_agent();
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(new_agent));
+	fixed_width_stream<memory_stream> out(mem_stream);
 	return write(message_type::ADD_AGENT_RESPONSE, out)
-		&& write((uint64_t) new_agent, out)
-		&& send_message(connection, out.buffer, out.length);
+		&& write(new_agent, out)
+		&& send_message(connection, mem_stream.buffer, mem_stream.length);
 }
 
 inline bool receive_move(socket_type& connection, simulator& sim) {
-	uint64_t agent_handle;
+	uint64_t agent_id;
 	direction dir;
 	unsigned int num_steps;
-	if (!read(agent_handle, connection) || !read(dir, connection) || !read(num_steps, connection))
+	if (!read(agent_id, connection) || !read(dir, connection) || !read(num_steps, connection))
 		return false;
-	bool result = sim.move(*((agent_state*) agent_handle), dir, num_steps);
-	memory_stream out = memory_stream(sizeof(message_type) + sizeof(agent_handle) + sizeof(result));
+	bool result = sim.move(agent_id, dir, num_steps);
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(result));
+	fixed_width_stream<memory_stream> out(mem_stream);
 	return write(message_type::MOVE_RESPONSE, out)
-		&& write(agent_handle, out) && write(result, out)
-		&& send_message(connection, out.buffer, out.length);
+		&& write(agent_id, out) && write(result, out)
+		&& send_message(connection, mem_stream.buffer, mem_stream.length);
 }
 
 inline bool receive_get_position(socket_type& connection, simulator& sim) {
-	uint64_t agent_handle;
-	if (!read(agent_handle, connection))
+	uint64_t agent_id;
+	if (!read(agent_id, connection))
 		return false;
-	position location = sim.get_position(*((agent_state*) agent_handle));
-	memory_stream out = memory_stream(sizeof(message_type) + sizeof(agent_handle) + sizeof(location));
+	position location = sim.get_position(agent_id);
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(location));
+	fixed_width_stream<memory_stream> out(mem_stream);
 	return write(message_type::GET_POSITION_RESPONSE, out)
-		&& write(agent_handle, out) && write(location, out)
-		&& send_message(connection, out.buffer, out.length);
+		&& write(agent_id, out) && write(location, out)
+		&& send_message(connection, mem_stream.buffer, mem_stream.length);
 }
 
 void server_process_message(socket_type& connection, simulator& sim) {
@@ -196,49 +199,54 @@ bool send_add_agent(ClientType& c) {
 }
 
 template<typename ClientType>
-bool send_move(ClientType& c, uint64_t agent_handle, direction dir, unsigned int num_steps) {
-	memory_stream out = memory_stream(sizeof(message_type) + sizeof(agent_handle) + sizeof(dir) + sizeof(num_steps));
+bool send_move(ClientType& c, uint64_t agent_id, direction dir, unsigned int num_steps) {
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(dir) + sizeof(num_steps));
+	fixed_width_stream<memory_stream> out(mem_stream);
 	return write(message_type::MOVE, out)
-		&& write(agent_handle, out)
+		&& write(agent_id, out)
 		&& write(dir, out)
 		&& write(num_steps, out)
-		&& send_message(c.connection, out.buffer, out.length);
+		&& send_message(c.connection, mem_stream.buffer, mem_stream.length);
 }
 
 template<typename ClientType>
-bool send_get_position(ClientType& c, uint64_t agent_handle) {
-	memory_stream out = memory_stream(sizeof(message_type) + sizeof(uint64_t));
+bool send_get_position(ClientType& c, uint64_t agent_id) {
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(uint64_t));
+	fixed_width_stream<memory_stream> out(mem_stream);
 	return write(message_type::GET_POSITION, out)
-		&& write(agent_handle, out)
-		&& send_message(c.connection, out.buffer, out.length);
+		&& write(agent_id, out)
+		&& send_message(c.connection, mem_stream.buffer, mem_stream.length);
 }
 
 template<typename ClientType>
 inline bool receive_add_agent_response(ClientType& c) {
-	uint64_t agent_handle;
-	if (!read(agent_handle, c.connection))
+	uint64_t agent_id;
+	fixed_width_stream<socket_type> in(c.connection);
+	if (!read(agent_id, in))
 		return false;
-	c.callbacks.on_add_agent(c, agent_handle);
+	c.callbacks.on_add_agent(c, agent_id);
 	return true;
 }
 
 template<typename ClientType>
 inline bool receive_move_response(ClientType& c) {
 	bool move_success;
-	uint64_t agent_handle;
-	if (!read(agent_handle, c.connection) || !read(move_success, c.connection))
+	uint64_t agent_id;
+	fixed_width_stream<socket_type> in(c.connection);
+	if (!read(agent_id, in) || !read(move_success, in))
 		return false;
-	c.callbacks.on_move(c, agent_handle, move_success);
+	c.callbacks.on_move(c, agent_id, move_success);
 	return true;
 }
 
 template<typename ClientType>
 inline bool receive_get_position_response(ClientType& c) {
 	position location;
-	uint64_t agent_handle;
-	if (!read(agent_handle, c.connection) || !read(location, c.connection))
+	uint64_t agent_id;
+	fixed_width_stream<socket_type> in(c.connection);
+	if (!read(agent_id, in) || !read(location, in))
 		return false;
-	c.callbacks.on_get_position(c, agent_handle, location);
+	c.callbacks.on_get_position(c, agent_id, location);
 	return true;
 }
 

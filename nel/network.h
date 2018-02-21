@@ -17,12 +17,14 @@ typedef int socklen_t;
 #include <sys/socket.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <netinet/tcp.h>
 
 #else /* on Linux */
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <netinet/tcp.h>
 #endif
 
 
@@ -315,6 +317,8 @@ struct socket_listener {
 		new_event.events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP | EPOLLONESHOT;
 		new_event.data.fd = socket.handle;
 		if (epoll_ctl(listener, EPOLL_CTL_MOD, socket.handle, &new_event) == -1) {
+			if (errno == EBADF)
+				return true; /* server is shutting down */
 			listener_error("socket_listener.update_socket ERROR: Failed to modify listen event");
 			shutdown(socket.handle, 2); return false;
 		}
@@ -542,8 +546,9 @@ bool run_server(socket_type& sock, uint16_t server_port,
 	}
 
 	int yes = 1;
-	if (setsockopt(sock.handle, SOL_SOCKET, SO_REUSEADDR, (const char*) &yes, sizeof(yes)) != 0) {
-		network_error("run_server ERROR: Unable to set socket option");
+	if (setsockopt(sock.handle, SOL_SOCKET, SO_REUSEADDR, (const char*) &yes, sizeof(yes)) != 0
+	 || setsockopt(sock.handle, IPPROTO_TCP, TCP_NODELAY, (const char*) &yes, sizeof(yes)) != 0) {
+		network_error("run_server ERROR: Unable to set socket options");
 		cleanup_server<false>(state, init_cv, init_lock, sock); return false;
 	}
 
@@ -635,11 +640,18 @@ bool run_client(
 	}
 
 	socket_type sock;
-	for (addrinfo* entry = addresses; entry != NULL; entry++) {
+	addrinfo* entry = addresses;
+	for (; entry != NULL; entry++) {
 		sock = socket(entry->ai_family, entry->ai_socktype, entry->ai_protocol);
 		if (!sock.is_valid()) {
 			network_error("run_client ERROR: Unable to open socket");
 			continue;
+		}
+
+		int yes = 1;
+		if (setsockopt(sock.handle, IPPROTO_TCP, TCP_NODELAY, (const char*) &yes, sizeof(yes)) != 0) {
+			network_error("run_client ERROR: Unable to set socket options");
+			shutdown(sock.handle, 2); continue;
 		}
 
 		if (connect(sock.handle, entry->ai_addr, (socklen_t) entry->ai_addrlen) != 0) {
@@ -649,6 +661,9 @@ bool run_client(
 		break;
 	}
 	freeaddrinfo(addresses);
+
+	if (entry == NULL)
+		return false;
 
 	process_connection(sock);
 	return true;

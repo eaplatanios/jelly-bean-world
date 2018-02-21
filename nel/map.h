@@ -26,6 +26,22 @@ struct item {
 	}
 };
 
+template<typename Stream>
+bool read(item& i, Stream& in) {
+	return read(i.item_type, in)
+		&& read(i.location, in)
+		&& read(i.creation_time, in)
+		&& read(i.deletion_time, in);
+}
+
+template<typename Stream>
+bool write(const item& i, Stream& out) {
+	return write(i.item_type, out)
+		&& write(i.location, out)
+		&& write(i.creation_time, out)
+		&& write(i.deletion_time, out);
+}
+
 template<typename Data>
 struct patch
 {
@@ -61,6 +77,24 @@ inline bool init(patch<Data>& new_patch) {
 		free(new_patch.data); return false;
 	}
 	return true;
+}
+
+template<typename Data, typename Stream, typename... DataReader>
+bool read(patch<Data>& p, Stream& in, DataReader&&... reader) {
+	if (!read(p.fixed, in) || !read(p.items, in)) {
+		return false;
+	} else if (!read(p.data, in, std::forward<DataReader>(reader)...)) {
+		free(p.items);
+		return false;
+	}
+	return true;
+}
+
+template<typename Data, typename Stream, typename... DataWriter>
+bool write(const patch<Data>& p, Stream& out, DataWriter&&... writer) {
+	return write(p.fixed, out)
+		&& write(p.items, out)
+		&& write(p.data, out, std::forward<DataWriter>(writer)...);
 }
 
 void* alloc_position_keys(size_t n, size_t element_size) {
@@ -374,6 +408,38 @@ inline bool init(map<PerPatchData>& world, unsigned int n,
 	world.item_type_count = item_type_count;
 	world.gibbs_iterations = gibbs_iterations;
 	return true;
+}
+
+template<typename PerPatchData, typename Stream, typename PatchReader>
+bool read(map<PerPatchData>& world, Stream& in,
+		intensity_function intensity_fn,
+		interaction_function interaction_fn,
+		float* intensity_fn_args,
+		float* interaction_fn_args,
+		PatchReader& patch_reader = default_scribe())
+{
+	default_scribe scribe;
+	world.intensity_fn = intensity_fn;
+	world.interaction_fn = interaction_fn;
+	world.intensity_fn_args = intensity_fn_args;
+	world.interaction_fn_args = interaction_fn_args;
+	return read(world.patches, in, alloc_position_keys, scribe, patch_reader)
+		&& read(world.n, in)
+		&& read(world.item_type_count, in)
+		&& read(world.gibbs_iterations, in);
+}
+
+/* NOTE: this function assumes the variables in the map are not modified during writing */
+template<typename PerPatchData, typename Stream, typename PatchWriter>
+bool write(const map<PerPatchData>& world, Stream& out,
+		PatchWriter& patch_writer = default_scribe())
+{
+	default_scribe scribe;
+fprintf(stderr, "2: %u %u\n", world.patches.table.size, world.patches.table.capacity);
+	return write(world.patches, out, scribe, patch_writer)
+		&& write(world.n, out)
+		&& write(world.item_type_count, out)
+		&& write(world.gibbs_iterations, out);
 }
 
 } /* namespace nel */

@@ -42,7 +42,7 @@ int main(int argc, const char** argv) {
 	static constexpr int n = 32;
 	float intensity_per_item[] = { -2.0f };
 	float interaction_args[] = { 1, 40.0f, 200.0f, 0.0f, -40.0f };
-	auto m = map<empty_data>(n, 1, 10, intensity, intensity_per_item, interaction, interaction_args);
+	auto m = map<empty_data>(n, 1, 10, constant_intensity_fn, intensity_per_item, piecewise_box_interaction_fn, interaction_args);
 
 	patch<empty_data>* neighborhood[4];
 	position neighbor_positions[4];
