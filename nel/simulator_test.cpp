@@ -46,6 +46,12 @@ async_server server;
 //#define TEST_SERVER_CONNECTION_LOSS
 //#define TEST_CLIENT_CONNECTION_LOSS
 
+struct empty_data {
+	static inline void free(empty_data& data) { }
+};
+
+constexpr bool init(empty_data& data, const empty_data& src) { return true; }
+
 inline direction next_direction(position agent_position, double theta) {
 	if (theta == M_PI) {
 		return direction::UP;
@@ -82,7 +88,8 @@ inline direction next_direction(position agent_position,
 	}
 }
 
-inline bool try_move(simulator& sim,
+inline bool try_move(
+		simulator<empty_data>& sim,
 		unsigned int i, bool& reverse)
 {
 	position current_position = sim.get_position((uint64_t) i);
@@ -108,7 +115,7 @@ inline bool try_move(simulator& sim,
 	return true;
 }
 
-void run_agent(simulator& sim, unsigned int id,
+void run_agent(simulator<empty_data>& sim, unsigned int id,
 		std::atomic_uint& move_count, bool& simulation_running)
 {
 	while (simulation_running) {
@@ -124,9 +131,7 @@ void run_agent(simulator& sim, unsigned int id,
 	}
 }
 
-void on_step(const simulator* sim,
-		const array<agent_state*>& agents,
-		const simulator_config& config)
+void on_step(const simulator<empty_data>* sim, empty_data& data, uint64_t time)
 {
 	sim_time++;
 #if defined(USE_MPI)
@@ -136,7 +141,7 @@ void on_step(const simulator* sim,
 		print_lock.unlock();
 	}
 #elif defined(MULTITHREADED)
-	for (unsigned int i = 0; i < agents.length; i++) {
+	for (unsigned int i = 0; i < agent_count; i++) {
 		std::unique_lock<std::mutex> lck(locks[i]);
 		waiting_for_server[i] = false;
 		conditions[i].notify_one();
@@ -144,7 +149,7 @@ void on_step(const simulator* sim,
 #endif
 }
 
-bool add_agents(simulator& sim)
+bool add_agents(simulator<empty_data>& sim)
 {
 	for (unsigned int i = 0; i < agent_count; i++) {
 		uint64_t agent_id = sim.add_agent();
@@ -163,14 +168,15 @@ bool add_agents(simulator& sim)
 
 bool test_singlethreaded(const simulator_config& config)
 {
-	simulator& sim = *((simulator*) alloca(sizeof(simulator)));
-	if (!init(sim, config, on_step)) {
+	simulator<empty_data>& sim = *((simulator<empty_data>*) alloca(sizeof(simulator<empty_data>)));
+	if (!init(sim, config, empty_data())) {
 		fprintf(stderr, "ERROR: Unable to initialize simulator.\n");
 		return false;
 	}
 
-	if (!add_agents(sim))
-		return false;
+	if (!add_agents(sim)) {
+		free(sim); return false;
+	}
 
 	timer stopwatch;
 	std::atomic_uint move_count(0);
@@ -190,9 +196,9 @@ bool test_singlethreaded(const simulator_config& config)
 			free(sim);
 			file = fopen(filename, "rb");
 			fixed_width_stream<FILE*> in(file);
-			if (!read(sim, in, on_step)) {
+			if (!read(sim, in, empty_data())) {
 				fprintf(stderr, "ERROR: read failed.\n");
-				return false;
+				free(sim); return false;
 			}
 			fclose(file);
 		}
@@ -215,7 +221,7 @@ bool test_singlethreaded(const simulator_config& config)
 
 bool test_multithreaded(const simulator_config& config)
 {
-	simulator sim(config, on_step);
+	simulator<empty_data> sim(config, empty_data());
 
 	if (!add_agents(sim))
 		return false;
@@ -253,7 +259,7 @@ struct client_data {
 	position pos;
 };
 
-void add_agent_callback(client<client_data>& c, uint64_t agent_id) {
+void on_add_agent(client<client_data>& c, uint64_t agent_id) {
 	unsigned int id = c.data.index;
 	std::unique_lock<std::mutex> lck(locks[id]);
 	waiting_for_server[id] = false;
@@ -261,7 +267,7 @@ void add_agent_callback(client<client_data>& c, uint64_t agent_id) {
 	conditions[id].notify_one();
 }
 
-void move_callback(client<client_data>& c, uint64_t agent_id, bool request_success) {
+void on_move(client<client_data>& c, uint64_t agent_id, bool request_success) {
 	unsigned int id = c.data.index;
 	std::unique_lock<std::mutex> lck(locks[id]);
 	waiting_for_server[id] = false;
@@ -269,7 +275,7 @@ void move_callback(client<client_data>& c, uint64_t agent_id, bool request_succe
 	conditions[id].notify_one();
 }
 
-void get_position_callback(client<client_data>& c, uint64_t agent_id, const position& pos) {
+void on_get_position(client<client_data>& c, uint64_t agent_id, const position& pos) {
 	unsigned int id = c.data.index;
 	std::unique_lock<std::mutex> lck(locks[id]);
 	waiting_for_server[id] = false;
@@ -277,14 +283,14 @@ void get_position_callback(client<client_data>& c, uint64_t agent_id, const posi
 	conditions[id].notify_one();
 }
 
-void step_done_callback(client<client_data>& c) {
+void on_step(client<client_data>& c) {
 	unsigned int id = c.data.index;
 	std::unique_lock<std::mutex> lck(locks[id]);
 	c.data.waiting_for_step = false;
 	conditions[id].notify_one();
 }
 
-void lost_connection_callback(client<client_data>& c) {
+void on_lost_connection(client<client_data>& c) {
 	print_lock.lock();
 	fprintf(out, "Client %u lost connection to server.\n", c.data.index);
 	print_lock.unlock();
@@ -368,7 +374,7 @@ void cleanup_mpi(client<client_data>* clients,
 
 bool test_mpi(const simulator_config& config)
 {
-	simulator sim(config, on_step);
+	simulator<empty_data> sim(config, empty_data());
 	if (!init_server(server, sim, 54353, 16, 4)) {
 		fprintf(out, "ERROR: init_server returned false.\n");
 		return false;
@@ -376,14 +382,9 @@ bool test_mpi(const simulator_config& config)
 
 	/* below is client-side code */
 	client<client_data> clients[agent_count];
-	client_callbacks<client<client_data>> callbacks = {
-			add_agent_callback, move_callback,
-			get_position_callback,
-			step_done_callback,
-			lost_connection_callback};
 	for (unsigned int i = 0; i < agent_count; i++) {
 		clients[i].data.index = i;
-		if (!init_client(clients[i], callbacks, "localhost", "54353")) {
+		if (!init_client(clients[i], "localhost", "54353")) {
 			fprintf(out, "ERROR: Unable to initialize client %u.\n", i);
 			cleanup_mpi(clients, i); return false;
 		}

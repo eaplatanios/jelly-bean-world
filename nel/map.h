@@ -435,7 +435,6 @@ bool write(const map<PerPatchData>& world, Stream& out,
 		PatchWriter& patch_writer = default_scribe())
 {
 	default_scribe scribe;
-fprintf(stderr, "2: %u %u\n", world.patches.table.size, world.patches.table.capacity);
 	return write(world.patches, out, scribe, patch_writer)
 		&& write(world.n, out)
 		&& write(world.item_type_count, out)

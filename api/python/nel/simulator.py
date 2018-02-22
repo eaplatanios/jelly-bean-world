@@ -108,6 +108,9 @@ class Simulator(object):
     Arguments:
       sim_config      Configuration for the new simulator.
     """
+    self._handle = None
+    self._server_handle = None
+    self._client_handle = None
     if sim_config != None:
       # create a local server or simulator
       if load_filepath != None:
@@ -125,15 +128,11 @@ class Simulator(object):
       if is_server:
         self._server_handle = simulator_c.start_server(
           self._handle, port, conn_queue_capacity, num_workers)
-      else:
-        self._server_handle = None
-      self._client_handle = None
     elif server_address != None:
       # connect to a remote server
       if load_filepath != None:
         raise ValueError('"load_filepath" must be None if "server_address" is specified.')
-      self._handle, self._client_handle = simulator_c.start_client(server_address, port)
-      self._server_handle = None
+      self._client_handle = simulator_c.start_client(server_address, port)
     else:
       # load local server or simulator from file
       if load_filepath == None:
@@ -142,48 +141,8 @@ class Simulator(object):
       if is_server:
         self._server_handle = simulator_c.start_server(
           self._handle, port, conn_queue_capacity, num_workers)
-      else:
-        self._server_handle = None
-      self._client_handle = None
     self.agents = dict()
     __SIM_HANDLE_TO_SIM__[self._handle] = self
-  
-  def start_server(self, port=54353, conn_queue_capacity=256, num_workers=8):
-    """Starts the simulator server.
-    
-    Note that the simulator can only be started as a server if the MPI 
-    step callback is used. A call to this function will be ignored if the 
-    C step callback is being used.
-
-    Arguments:
-      port:                Server port.
-      conn_queue_capacity: Connection queue capacity for the server.
-      num_workers:         Number of worker threads for the server.
-    """
-    if self.sim_type is not SimulatorType.MPI:
-      raise ValueError(
-        'Using the simulator as a server is only supported when the '
-        'MPI simulator type is used.')
-    if self._server_handle is not None:
-      print(
-        'Ignoring request to start the simulation server, because one '
-        'is already running.')
-    self._server_handle = simulator_c.start_server(
-      self._handle, port, conn_queue_capacity, num_workers)
-
-  def stop_server(self):
-    """Stops the simulator server.
-    
-    A call to this function is ignored if no simulator server is currently 
-    running.
-    """
-    if self._server_handle is not None:
-      simulator_c.stop_server(self._server_handle)
-      self._server_handle = None
-    else:
-      print(
-        'Ignoring request to stop the simulation server, because it '
-        'is not currently running.')
 
   def __del__(self):
     """Deletes this simulator and deallocates all 
@@ -193,7 +152,8 @@ class Simulator(object):
       simulator_c.stop_client(self._client_handle)
     if self._server_handle != None:
       simulator_c.stop_server(self._server_handle)
-    simulator_c.delete(self._handle)
+    if self._handle != None:
+      simulator_c.delete(self._handle)
   
   def _add_agent(self, py_agent):
     """Adds a new agent to this simulator.
@@ -204,7 +164,7 @@ class Simulator(object):
     Returns:
       The new agent's ID.
     """
-    agent_id, agent_state = simulator_c.add_agent(self._handle, self.sim_type)
+    agent_id, agent_state = simulator_c.add_agent(self._handle, self._client_handle)
     state = AgentState(
       Position(agent_state[0][0], agent_state[0][1]), 
       agent_state[1], agent_state[2])

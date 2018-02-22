@@ -61,7 +61,8 @@ inline bool send_message(socket_type& socket, const void* data, unsigned int len
 	return send(socket.handle, (const char*) data, length, 0) != 0;
 }
 
-inline bool receive_add_agent(socket_type& connection, simulator& sim) {
+template<typename SimulatorData>
+inline bool receive_add_agent(socket_type& connection, simulator<SimulatorData>& sim) {
 	uint64_t new_agent = sim.add_agent();
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(new_agent));
 	fixed_width_stream<memory_stream> out(mem_stream);
@@ -70,7 +71,8 @@ inline bool receive_add_agent(socket_type& connection, simulator& sim) {
 		&& send_message(connection, mem_stream.buffer, mem_stream.length);
 }
 
-inline bool receive_move(socket_type& connection, simulator& sim) {
+template<typename SimulatorData>
+inline bool receive_move(socket_type& connection, simulator<SimulatorData>& sim) {
 	uint64_t agent_id;
 	direction dir;
 	unsigned int num_steps;
@@ -84,7 +86,8 @@ inline bool receive_move(socket_type& connection, simulator& sim) {
 		&& send_message(connection, mem_stream.buffer, mem_stream.length);
 }
 
-inline bool receive_get_position(socket_type& connection, simulator& sim) {
+template<typename SimulatorData>
+inline bool receive_get_position(socket_type& connection, simulator<SimulatorData>& sim) {
 	uint64_t agent_id;
 	if (!read(agent_id, connection))
 		return false;
@@ -96,7 +99,8 @@ inline bool receive_get_position(socket_type& connection, simulator& sim) {
 		&& send_message(connection, mem_stream.buffer, mem_stream.length);
 }
 
-void server_process_message(socket_type& connection, simulator& sim) {
+template<typename SimulatorData>
+void server_process_message(socket_type& connection, simulator<SimulatorData>& sim) {
 	message_type type;
 	if (!read(type, connection)) return;
 	switch (type) {
@@ -124,8 +128,9 @@ inline bool send_step_response(async_server& server) {
 	return success;
 }
 
+template<typename SimulatorData>
 bool init_server(
-		async_server& new_server, simulator& sim, uint16_t server_port,
+		async_server& new_server, simulator<SimulatorData>& sim, uint16_t server_port,
 		unsigned int connection_queue_capacity, unsigned int worker_count)
 {
 	std::condition_variable cv; std::mutex lock;
@@ -133,7 +138,7 @@ bool init_server(
 		run_server(new_server.server_socket, server_port,
 				connection_queue_capacity, worker_count, new_server.state, cv, lock,
 				new_server.client_connections, new_server.connection_set_lock,
-				server_process_message, sim);
+				server_process_message<SimulatorData>, sim);
 	};
 	new_server.state = server_state::STARTING;
 	new_server.server_thread = std::thread(dispatch);
@@ -151,7 +156,8 @@ bool init_server(
 	return true;
 }
 
-inline bool init_server(simulator& sim, uint16_t server_port,
+template<typename SimulatorData>
+inline bool init_server(simulator<SimulatorData>& sim, uint16_t server_port,
 		unsigned int connection_queue_capacity, unsigned int worker_count)
 {
 	socket_type server_socket;
@@ -174,20 +180,10 @@ void stop_server(async_server& server) {
 }
 
 
-template<typename ClientType>
-struct client_callbacks {
-	void (*on_add_agent)(ClientType&, uint64_t);
-	void (*on_move)(ClientType&, uint64_t, bool);
-	void (*on_get_position)(ClientType&, uint64_t, const position&);
-	void (*on_step)(ClientType&);
-	void (*on_lost_connection)(ClientType&);
-};
-
 template<typename ClientData>
 struct client {
 	socket_type connection;
 	std::thread response_listener;
-	client_callbacks<client<ClientData>> callbacks;
 	bool client_running;
 	ClientData data;
 };
@@ -224,7 +220,7 @@ inline bool receive_add_agent_response(ClientType& c) {
 	fixed_width_stream<socket_type> in(c.connection);
 	if (!read(agent_id, in))
 		return false;
-	c.callbacks.on_add_agent(c, agent_id);
+	on_add_agent(c, agent_id);
 	return true;
 }
 
@@ -235,7 +231,7 @@ inline bool receive_move_response(ClientType& c) {
 	fixed_width_stream<socket_type> in(c.connection);
 	if (!read(agent_id, in) || !read(move_success, in))
 		return false;
-	c.callbacks.on_move(c, agent_id, move_success);
+	on_move(c, agent_id, move_success);
 	return true;
 }
 
@@ -246,13 +242,13 @@ inline bool receive_get_position_response(ClientType& c) {
 	fixed_width_stream<socket_type> in(c.connection);
 	if (!read(agent_id, in) || !read(location, in))
 		return false;
-	c.callbacks.on_get_position(c, agent_id, location);
+	on_get_position(c, agent_id, location);
 	return true;
 }
 
 template<typename ClientType>
 inline bool receive_step_response(ClientType& c) {
-	c.callbacks.on_step(c);
+	on_step(c);
 	return true;
 }
 
@@ -264,7 +260,7 @@ void run_response_listener(ClientType& c) {
 		if (!c.client_running) {
 			return; /* stop_client was called */
 		} else if (!success) {
-			c.callbacks.on_lost_connection(c);
+			on_lost_connection(c);
 			return;
 		}
 		switch (type) {
@@ -288,7 +284,6 @@ void run_response_listener(ClientType& c) {
 
 template<typename ClientData>
 bool init_client(client<ClientData>& new_client,
-		client_callbacks<client<ClientData>> callbacks,
 		const char* server_address, const char* server_port)
 {
 	auto process_connection = [&](socket_type& connection) {
@@ -300,7 +295,6 @@ bool init_client(client<ClientData>& new_client,
 	};
 
 	new_client.client_running = true;
-	new_client.callbacks = callbacks;
 	return run_client(server_address, server_port, process_connection);
 }
 

@@ -12,7 +12,7 @@ namespace nel {
 using namespace core;
 
 /* forward declarations */
-class simulator;
+template<typename SimulatorData> class simulator;
 struct agent_state;
 
 /** Represents all possible directions of motion in the environment. */
@@ -163,7 +163,8 @@ struct simulator_config {
     unsigned int intensity_fn_arg_count;
     unsigned int interaction_fn_arg_count;
 
-	simulator_config() : item_types(8) { }
+	simulator_config() : item_types(8), agent_color(NULL),
+        intensity_fn_args(NULL), interaction_fn_args(NULL) { }
 
     simulator_config(const simulator_config& src) : item_types(src.item_types.length) {
         if (!init_helper(src))
@@ -232,9 +233,12 @@ private:
     inline void free_helper() {
         for (item_properties& properties : item_types)
 			core::free(properties);
-        core::free(agent_color);
-        core::free(intensity_fn_args);
-        core::free(interaction_fn_args);
+        if (agent_color != NULL)
+            core::free(agent_color);
+        if (intensity_fn_args != NULL)
+            core::free(intensity_fn_args);
+        if (interaction_fn_args != NULL)
+            core::free(interaction_fn_args);
     }
 
     friend bool init(simulator_config&, const simulator_config&);
@@ -631,15 +635,12 @@ inline bool write(const agent_state& agent, Stream& out, const simulator_config&
         && write(agent.collected_items, out, config.item_types.length);
 }
 
-typedef void (*step_callback)(const simulator* sim,
-        const array<agent_state*>&, const simulator_config&);
-
 /**
  * Simulator that forms the core of our experimentation framework.
  * 
- * \tparam  StepCallback    Callback function type for when the simulator
- *                          advances a time step.
+ * \tparam  SimulatorData   Type to store additional state in the simulation.
  */
+template<typename SimulatorData>
 class simulator {
     /* Map of the world managed by this simulator. */
     map<patch_data> world;
@@ -669,14 +670,14 @@ class simulator {
     /* Configuration for this simulator. */
     simulator_config config;
 
-    /* Callback function for when the simulator advances a time step. */
-    step_callback step_callback_fn;
+    /* For storing additional state in the simulation. */
+    SimulatorData data;
 
     typedef patch<patch_data> patch_type;
 
 public:
     simulator(const simulator_config& config,
-            const step_callback step_callback) :
+            const SimulatorData& data) :
         world(config.patch_size,
             (unsigned int) config.item_types.length,
             config.gibbs_iterations,
@@ -684,7 +685,7 @@ public:
             config.interaction_fn, config.interaction_fn_args),
         agents(16), requested_moves(32, alloc_position_keys),
         acted_agent_count(0), config(config),
-        step_callback_fn(step_callback), time(0)
+        data(data), time(0)
     {
         if (!init(scent_model, (double) config.diffusion_param,
                 (double) config.decay_param, config.patch_size, config.deleted_item_lifetime)) {
@@ -778,6 +779,10 @@ public:
         return agent.current_position;
     }
 
+    inline SimulatorData& get_data() {
+        return data;
+    }
+
     static inline void free(simulator& s) {
         s.free_helper();
         core::free(s.agents);
@@ -785,6 +790,7 @@ public:
         core::free(s.config);
         core::free(s.scent_model);
         core::free(s.world);
+        core::free(s.data);
         s.agent_array_lock.~mutex();
         s.requested_move_lock.~mutex();
     }
@@ -885,7 +891,7 @@ private:
         update_agent_scent_and_vision();
 
         /* Invoke the step callback function for each agent. */
-        step_callback_fn(this, agents, config);
+        on_step(this, data, time);
     }
 
     inline void update_agent_scent_and_vision() {
@@ -923,36 +929,38 @@ private:
         }
     }
 
-    friend bool init(simulator&, const simulator_config&, const step_callback);
-    template<typename A> friend bool read(simulator&, A&, const step_callback);
-    template<typename A> friend bool write(const simulator&, A&);
+    template<typename A> friend bool init(simulator<A>&, const simulator_config&, const A&);
+    template<typename A, typename B> friend bool read(simulator<A>&, B&, const A&);
+    template<typename A, typename B> friend bool write(const simulator<A>&, B&);
 };
 
-bool init(simulator& sim, 
+template<typename SimulatorData>
+bool init(simulator<SimulatorData>& sim, 
         const simulator_config& config,
-        const step_callback step_callback)
+        const SimulatorData& data)
 {
-    sim.step_callback_fn = step_callback;
     sim.time = 0;
     sim.acted_agent_count = 0;
-    if (!array_init(sim.agents, 16)) {
+    if (!init(sim.data, data)) {
         return false;
+    } else if (!array_init(sim.agents, 16)) {
+        free(sim.data); return false;
     } else if (!hash_map_init(sim.requested_moves, 32, alloc_position_keys)) {
-        free(sim.agents); return false;
+        free(sim.data); free(sim.agents); return false;
     } else if (!init(sim.config, config)) {
-        free(sim.agents); free(sim.requested_moves);
-        return false;
+        free(sim.data); free(sim.agents);
+        free(sim.requested_moves); return false;
     } else if (!init(sim.scent_model, (double) config.diffusion_param,
             (double) config.decay_param, config.patch_size, config.deleted_item_lifetime)) {
-        free(sim.config); free(sim.agents);
+        free(sim.data); free(sim.config); free(sim.agents);
         free(sim.requested_moves); return false;
     } else if (!init(sim.world, config.patch_size,
             (unsigned int) config.item_types.length,
             config.gibbs_iterations,
             config.intensity_fn, config.intensity_fn_args,
             config.interaction_fn, config.interaction_fn_args)) {
-        free(sim.config); free(sim.agents);
-        free(sim.requested_moves);
+        free(sim.config); free(sim.data);
+        free(sim.agents); free(sim.requested_moves);
         free(sim.scent_model); return false;
     }
     new (&sim.agent_array_lock) std::mutex();
@@ -977,18 +985,19 @@ inline bool write(const agent_state* agent, Stream& out,
     return write(agent_indices.get(agent), out);
 }
 
-template<typename Stream>
-bool read(simulator& sim, Stream& in, const step_callback step_callback_fn)
+template<typename SimulatorData, typename Stream>
+bool read(simulator<SimulatorData>& sim, Stream& in, const SimulatorData& data)
 {
-    sim.step_callback_fn = step_callback_fn;
-    if (!read(sim.config, in)) {
+    if (!init(sim.data, data)) {
         return false;
+    } if (!read(sim.config, in)) {
+        free(sim.data); return false;
     }
 
     size_t agent_count;
     if (!read(agent_count, in)
      || !array_init(sim.agents, 1 << (core::log2(agent_count) + 2))) {
-        free(sim.config); return false;
+        free(sim.data); free(sim.config); return false;
     }
     for (unsigned int i = 0; i < agent_count; i++) {
         sim.agents[i] = (agent_state*) malloc(sizeof(agent_state));
@@ -998,7 +1007,8 @@ bool read(simulator& sim, Stream& in, const step_callback step_callback_fn)
                 free(*sim.agents[j]); free(sim.agents[j]);
             }
             if (sim.agents[i] != NULL) free(sim.agents[i]);
-            free(sim.agents); free(sim.config); return false;
+            free(sim.data); free(sim.agents);
+            free(sim.config); return false;
         }
     }
     sim.agents.length = agent_count;
@@ -1009,7 +1019,8 @@ bool read(simulator& sim, Stream& in, const step_callback step_callback_fn)
         for (unsigned int j = 0; j < agent_count; j++) {
             free(*sim.agents[j]); free(sim.agents[j]);
         }
-        free(sim.agents); free(sim.config); return false;
+        free(sim.data); free(sim.agents);
+        free(sim.config); return false;
     }
 
     default_scribe scribe;
@@ -1017,8 +1028,8 @@ bool read(simulator& sim, Stream& in, const step_callback step_callback_fn)
         for (unsigned int j = 0; j < agent_count; j++) {
             free(*sim.agents[j]); free(sim.agents[j]);
         }
-        free(sim.agents); free(sim.config);
-        free(sim.world); return false;
+        free(sim.data); free(sim.agents);
+        free(sim.config); free(sim.world); return false;
     }
 
     /* reinitialize the scent model */
@@ -1032,7 +1043,7 @@ bool read(simulator& sim, Stream& in, const step_callback step_callback_fn)
         }
         for (auto entry : sim.requested_moves)
             free(entry.value);
-        free(sim.world); free(sim.agents);
+        free(sim.data); free(sim.world); free(sim.agents);
         free(sim.requested_moves); free(sim.config);
         return false;
     }
@@ -1042,8 +1053,9 @@ bool read(simulator& sim, Stream& in, const step_callback step_callback_fn)
 }
 
 /* NOTE: this function assumes the variables in the simulator are not modified during writing */
-template<typename Stream>
-bool write(const simulator& sim, Stream& out) {
+template<typename SimulatorData, typename Stream>
+bool write(const simulator<SimulatorData>& sim, Stream& out)
+{
     if (!write(sim.config, out))
         return false;
 
@@ -1055,7 +1067,6 @@ bool write(const simulator& sim, Stream& out) {
     }
 
     default_scribe scribe;
-fprintf(stderr, "%u %u\n", sim.requested_moves.table.size, sim.requested_moves.table.capacity);
     return write(sim.world, out, agent_indices)
         && write(sim.requested_moves, out, scribe, agent_indices)
         && write(sim.time, out)
