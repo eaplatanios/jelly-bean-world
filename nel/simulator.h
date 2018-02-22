@@ -44,7 +44,7 @@ inline bool print(const direction& dir, Stream& out) {
 }
 
 enum class movement_conflict_policy : uint8_t {
-    NO_COLLISION = 0,
+    NO_COLLISIONS = 0,
     FIRST_COME_FIRST_SERVED = 1,
     RANDOM = 2
 };
@@ -560,7 +560,7 @@ inline bool init(
     agent.update_state(neighborhood, scent_model, config, current_time);
 
     neighborhood[index]->data.patch_lock.lock();
-    if (config.collision_policy != movement_conflict_policy::NO_COLLISION) {
+    if (config.collision_policy != movement_conflict_policy::NO_COLLISIONS) {
         for (const agent_state* neighbor : neighborhood[index]->data.agents) {
             if (agent.current_position == neighbor->current_position)
             {
@@ -809,7 +809,7 @@ private:
         }
 
         /* need to ensure agents don't move into positions where other agents failed to move */
-        if (config.collision_policy != movement_conflict_policy::NO_COLLISION) {
+        if (config.collision_policy != movement_conflict_policy::NO_COLLISIONS) {
             array<position> occupied_positions(16);
             for (auto entry : requested_moves) {
                 array<agent_state*>& conflicts = entry.value;
@@ -838,7 +838,7 @@ private:
             /* check if this agent moved, in accordance with the collision policy */
             position old_patch_position;
             world.world_to_patch_coordinates(agent->current_position, old_patch_position);
-            if (config.collision_policy == movement_conflict_policy::NO_COLLISION
+            if (config.collision_policy == movement_conflict_policy::NO_COLLISIONS
              || (agent == requested_moves.get(agent->requested_position)[0]))
             {
                 agent->current_position = agent->requested_position;
@@ -873,7 +873,7 @@ private:
 
 #if !defined(NDEBUG)
 		/* check for collisions, if there aren't supposed to be any */
-		if (config.collision_policy != movement_conflict_policy::NO_COLLISION) {
+		if (config.collision_policy != movement_conflict_policy::NO_COLLISIONS) {
 			for (unsigned int i = 0; i < agents.length; i++)
 				for (unsigned int j = i + 1; j < agents.length; j++)
 					if (agents[i]->current_position == agents[j]->current_position)
@@ -904,7 +904,7 @@ private:
 
     inline void request_new_position(agent_state& agent)
     {
-        if (config.collision_policy == movement_conflict_policy::NO_COLLISION)
+        if (config.collision_policy == movement_conflict_policy::NO_COLLISIONS)
             return;
 
         bool contains; unsigned int bucket;

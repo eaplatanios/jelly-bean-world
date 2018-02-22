@@ -1,7 +1,7 @@
 from distutils.core import setup, Extension
 
 simulator_c = Extension(
-  'nel_c.simulator_c',
+  'nel.simulator_c',
   define_macros = [('MAJOR_VERSION', '1'),
                    ('MINOR_VERSION', '0')],
   include_dirs = ['../..', '../../deps'],

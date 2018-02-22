@@ -299,6 +299,19 @@ bool init_client(client<ClientData>& new_client,
 }
 
 template<typename ClientData>
+inline bool init_client(client<ClientData>& new_client,
+		const char* server_address, uint16_t server_port)
+{
+    int length = snprintf(NULL, 0, "%u", server_port);
+    if (length < 0) return false;
+    char* port_str = (char*) alloca(sizeof(char) * (length + 1));
+    if (snprintf(port_str, length + 1, "%u", server_port) < 0)
+		return false;
+
+	return init_client(new_client, server_address, port_str);
+}
+
+template<typename ClientData>
 void stop_client(client<ClientData>& c) {
 	c.client_running = false;
 	shutdown(c.connection.handle, 2);
