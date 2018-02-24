@@ -301,7 +301,7 @@ struct socket_listener {
 
 	template<bool ServerSocket>
 	inline bool add_socket(socket_type& socket) {
-		epoll_event new_event = {0};
+		epoll_event new_event = {};
 		new_event.events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP | (!ServerSocket ? EPOLLONESHOT : 0);
 		new_event.data.fd = socket.handle;
 		if (epoll_ctl(listener, EPOLL_CTL_ADD, socket.handle, &new_event) == -1) {
@@ -315,7 +315,7 @@ struct socket_listener {
 	inline bool add_client_socket(socket_type& socket) { return add_socket<false>(socket); }
 
 	inline bool update_socket(socket_type& socket) {
-		epoll_event new_event = {0};
+		epoll_event new_event = {};
 		new_event.events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP | EPOLLONESHOT;
 		new_event.data.fd = socket.handle;
 		if (epoll_ctl(listener, EPOLL_CTL_MOD, socket.handle, &new_event) == -1) {

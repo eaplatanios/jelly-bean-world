@@ -71,19 +71,22 @@ class Simulator(object):
   agents, users must always first create a simulator and provide it to the 
   agent's constructor.
   """
-  
+
   def __init__(
       self, sim_config=None, is_server=False, server_address=None,
       port=54353, conn_queue_capacity=256, num_workers=8,
       save_frequency=1000, save_filepath=None, load_filepath=None):
     """Creates a new simulator.
-    
+
     Arguments:
       sim_config      Configuration for the new simulator.
     """
     self._handle = None
     self._server_handle = None
     self._client_handle = None
+    self._time = 0
+    if save_frequency <= 0:
+      raise ValueError('"save_frequency" must be strictly greater than zero.')
     if sim_config != None:
       # create a local server or simulator
       if load_filepath != None:
@@ -155,12 +158,28 @@ class Simulator(object):
       direction: Direction along which to move.
       num_steps: Number of steps to take in the specified direction.
     """
-    simulator_c.move(self._handle, self._client_hande,
-      self.sim_type, agent_id, direction, num_steps)
+    return simulator_c.move(self._handle,
+      self._client_handle, agent_id, direction.value, num_steps)
 
-  def _step_callback(self, time):
+  def _position(self, agent_id):
+    return simulator_c.position(self._handle, self._client_handle, agent_id)
+
+  def _scent(self, agent_id):
+    return simulator_c.scent(self._handle, self._client_handle, agent_id)
+
+  def _vision(self, agent_id):
+    return simulator_c.vision(self._handle, self._client_handle, agent_id)
+
+  def _collected_items(self, agent_id):
+    return simulator_c.collected_items(self._handle, self._client_handle, agent_id)
+
+  def _step_callback(self):
+    self._time += 1
     for (id, agent) in self.agents.items():
       agent.on_step()
+
+  def time(self):
+    return self._time
 
 if __name__ == '__main__':
   # TODO: Parse command line arguments and construct a simulator config.

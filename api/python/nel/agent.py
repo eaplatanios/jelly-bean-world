@@ -17,13 +17,22 @@ class AgentState(object):
 class Agent(six.with_metaclass(abc.ABCMeta, object)):
   def __init__(self, simulator):
     self._simulator = simulator
-    self._id, self._current_state = simulator._add_agent(self)
+    self._id = simulator._add_agent(self)
   
   def move(self, direction, num_steps=1):
-    self._simulator._move(self._id, direction, num_steps)
+    return self._simulator._move(self._id, direction, num_steps)
 
-  def _update_state(self, state):
-    self._current_state = state
+  def position(self):
+    return self._simulator._position(self._id)
+
+  def scent(self):
+    return self._simulator._scent(self._id)
+
+  def vision(self):
+    return self._simulator._vision(self._id)
+
+  def collected_items(self):
+    return self._simulator._collected_items(self._id)
 
   @abc.abstractmethod
   def on_step(self):

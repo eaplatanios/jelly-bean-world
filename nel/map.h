@@ -120,6 +120,8 @@ struct map {
 	unsigned int item_type_count;
 	unsigned int gibbs_iterations;
 
+	std::minstd_rand rng;
+
 	typedef patch<PerPatchData> patch_type;
 	typedef item item_type;
 
@@ -130,9 +132,19 @@ public:
 		patches(1024, alloc_position_keys), 
 		intensity_fn(intensity_fn), interaction_fn(interaction_fn), 
 		intensity_fn_args(intensity_fn_args), interaction_fn_args(interaction_fn_args), 
-		n(n), item_type_count(item_type_count), gibbs_iterations(gibbs_iterations) { }
+		n(n), item_type_count(item_type_count), gibbs_iterations(gibbs_iterations) {
+#if !defined(NDEBUG)
+			rng.seed(0);
+#else
+			rng.seed(time(NULL));
+#endif
+		}
 
 	~map() { free_helper(); }
+
+	inline void set_seed(uint_fast32_t new_seed) {
+		rng.seed(new_seed);
+	}
 
 	inline float intensity(const position& pos, unsigned int item_type) {
 		return intensity_fn(pos, item_type, intensity_fn_args);
@@ -154,11 +166,10 @@ public:
 #endif
 	}
 
-	inline patch_type* get_patch_if_exists(const position& patch_position)
+	inline patch_type* get_patch_if_exists(const position& patch_position) const
 	{
-		bool contains; unsigned int bucket;
-		patches.check_size(alloc_position_keys);
-		patch_type& p = patches.get(patch_position, contains, bucket);
+		bool contains;
+		patch_type& p = patches.get(patch_position, contains);
 		if (!contains) return NULL;
 		else return &p;
 	}
@@ -227,10 +238,11 @@ public:
 		return index;
 	}
 
-	void get_items(
+	template<typename ProcessPatchFunction>
+	bool get_state(
 			position bottom_left_corner,
 			position top_right_corner,
-			array<item>& items)
+			ProcessPatchFunction process_patch) const
 	{
 		position bottom_left_patch_position, top_right_patch_position;
 		world_to_patch_coordinates(bottom_left_corner, bottom_left_patch_position);
@@ -241,19 +253,32 @@ public:
 		for (int64_t x = bottom_left_patch_position.x; x <= top_right_patch_position.x; x++) {
 			for (int64_t y = bottom_left_patch_position.y; y <= top_right_patch_position.y; y++) {
 				patch_type* p = get_patch_if_exists({x, y});
-				if (p == NULL) continue;
-
-				for (const item& i : p->items)
-					if (i.location.x >= bottom_left_corner.x && i.location.x <= top_right_corner.x
-						&& i.location.y >= bottom_left_corner.y && i.location.y <= top_right_corner.y)
-						items.add(i);
+				if (p != NULL && !process_patch(*p, position(x, y)))
+					return false;
 			}
 		}
+		return true;
+	}
+
+	bool get_items(
+			position bottom_left_corner,
+			position top_right_corner,
+			array<item>& items) const
+	{
+		auto process_patch = [&](const patch_type& p, position patch_position) {
+			for (const item& i : p.items)
+				if (i.location.x >= bottom_left_corner.x && i.location.x <= top_right_corner.x
+				 && i.location.y >= bottom_left_corner.y && i.location.y <= top_right_corner.y
+				 && !items.add(i))
+					return false;
+			return true;
+		};
+		return get_state(bottom_left_corner, top_right_corner, process_patch);
 	}
 
 	inline void world_to_patch_coordinates(
 			position world_position,
-			position& patch_position)
+			position& patch_position) const
 	{
 		int64_t x_quotient = floored_div(world_position.x, n);
 		int64_t y_quotient = floored_div(world_position.y, n);
@@ -263,7 +288,7 @@ public:
 	inline void world_to_patch_coordinates(
 			position world_position,
 			position& patch_position,
-			position& position_within_patch)
+			position& position_within_patch) const
 	{
 		lldiv_t x_quotient = floored_div_with_remainder(world_position.x, n);
 		lldiv_t y_quotient = floored_div_with_remainder(world_position.y, n);
@@ -274,17 +299,18 @@ public:
 	static inline void free(map& world) {
 		world.free_helper();
 		core::free(world.patches);
+		world.rng.~linear_congruential_engine();
 	}
 
 private:
-	inline int64_t floored_div(int64_t a, unsigned int b) {
+	inline int64_t floored_div(int64_t a, unsigned int b) const {
 		lldiv_t result = lldiv(a, b);
 		if (a < 0 && result.rem != 0)
 			result.quot--;
 		return result.quot;
 	}
 
-	inline lldiv_t floored_div_with_remainder(int64_t a, unsigned int b) {
+	inline lldiv_t floored_div_with_remainder(int64_t a, unsigned int b) const {
 		lldiv_t result = lldiv(a, b);
 		if (a < 0 && result.rem != 0) {
 			result.quot--;
@@ -380,7 +406,7 @@ private:
 				(unsigned int) positions_to_sample.length,
 				n, item_type_count);
 		for (unsigned int i = 0; i < gibbs_iterations; i++)
-			field.sample();
+			field.sample(rng);
 
 		for (unsigned int i = 0; i < patch_count; i++)
 			patches[i]->fixed = true;
@@ -407,6 +433,11 @@ inline bool init(map<PerPatchData>& world, unsigned int n,
 	world.n = n;
 	world.item_type_count = item_type_count;
 	world.gibbs_iterations = gibbs_iterations;
+#if !defined(NDEBUG)
+	new (&world.rng) std::minstd_rand(0);
+#else
+	new (&world.rng) std::minstd_rand(time(NULL));
+#endif
 	return true;
 }
 
@@ -418,6 +449,16 @@ bool read(map<PerPatchData>& world, Stream& in,
 		float* interaction_fn_args,
 		PatchReader& patch_reader = default_scribe())
 {
+	/* read PRNG state into a char* buffer */
+	size_t length;
+	if (!read(length, in)) return false;
+	char* state = (char*) alloca(sizeof(char) * length);
+	if (state == NULL || !read(state, in, (unsigned int) length))
+		return false;
+
+	std::stringstream buffer(std::string(state, length));
+	buffer >> world.rng;
+
 	default_scribe scribe;
 	world.intensity_fn = intensity_fn;
 	world.interaction_fn = interaction_fn;
@@ -434,6 +475,14 @@ template<typename PerPatchData, typename Stream, typename PatchWriter>
 bool write(const map<PerPatchData>& world, Stream& out,
 		PatchWriter& patch_writer = default_scribe())
 {
+	/* write the PRNG state into a stringstream buffer */
+	std::stringstream buffer;
+	buffer << engine;
+	std::string data = buffer.str();
+	if (!write(data.length(), out)
+	 || !write(data.c_str(), out, (unsigned int) data.length()))
+		return false;
+
 	default_scribe scribe;
 	return write(world.patches, out, scribe, patch_writer)
 		&& write(world.n, out)

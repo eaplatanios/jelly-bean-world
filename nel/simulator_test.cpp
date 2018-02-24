@@ -28,7 +28,7 @@ enum class movement_pattern {
 };
 
 constexpr unsigned int agent_count = 8;
-constexpr unsigned int max_time = 10000;
+constexpr unsigned int max_time = 100;
 constexpr movement_conflict_policy collision_policy = movement_conflict_policy::FIRST_COME_FIRST_SERVED;
 constexpr movement_pattern move_pattern = movement_pattern::BACK_AND_FORTH;
 unsigned int sim_time = 0;
@@ -40,9 +40,9 @@ std::mutex print_lock;
 FILE* out = stderr;
 async_server server;
 
-//#define MULTITHREADED
-//#define USE_MPI
-#define TEST_SERIALIZATION
+#define MULTITHREADED
+#define USE_MPI
+//#define TEST_SERIALIZATION
 //#define TEST_SERVER_CONNECTION_LOSS
 //#define TEST_CLIENT_CONNECTION_LOSS
 
@@ -254,6 +254,8 @@ bool test_multithreaded(const simulator_config& config)
 struct client_data {
 	unsigned int index;
 	uint64_t agent_id;
+	const float* perception;
+	const unsigned int* items;
 
 	bool move_result, waiting_for_step;
 	position pos;
@@ -280,6 +282,30 @@ void on_get_position(client<client_data>& c, uint64_t agent_id, const position& 
 	std::unique_lock<std::mutex> lck(locks[id]);
 	waiting_for_server[id] = false;
 	c.data.pos = pos;
+	conditions[id].notify_one();
+}
+
+void on_get_scent(client<client_data>& c, uint64_t agent_id, const float* scent) {
+	unsigned int id = c.data.index;
+	std::unique_lock<std::mutex> lck(locks[id]);
+	waiting_for_server[id] = false;
+	c.data.perception = scent;
+	conditions[id].notify_one();
+}
+
+void on_get_vision(client<client_data>& c, uint64_t agent_id, const float* vision) {
+	unsigned int id = c.data.index;
+	std::unique_lock<std::mutex> lck(locks[id]);
+	waiting_for_server[id] = false;
+	c.data.perception = vision;
+	conditions[id].notify_one();
+}
+
+void on_get_collected_items(client<client_data>& c, uint64_t agent_id, const unsigned int* items) {
+	unsigned int id = c.data.index;
+	std::unique_lock<std::mutex> lck(locks[id]);
+	waiting_for_server[id] = false;
+	c.data.items = items;
 	conditions[id].notify_one();
 }
 

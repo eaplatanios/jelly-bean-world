@@ -173,6 +173,27 @@ struct simulator_config {
 
     ~simulator_config() { free_helper(); }
 
+    static inline void swap(simulator_config& first, simulator_config& second) {
+        core::swap(first.max_steps_per_movement, second.max_steps_per_movement);
+        core::swap(first.scent_dimension, second.scent_dimension);
+        core::swap(first.color_dimension, second.color_dimension);
+        core::swap(first.vision_range, second.vision_range);
+        core::swap(first.patch_size, second.patch_size);
+        core::swap(first.gibbs_iterations, second.gibbs_iterations);
+        core::swap(first.item_types, second.item_types);
+        core::swap(first.agent_color, second.agent_color);
+        core::swap(first.collision_policy, second.collision_policy);
+        core::swap(first.decay_param, second.decay_param);
+        core::swap(first.diffusion_param, second.diffusion_param);
+        core::swap(first.deleted_item_lifetime, second.deleted_item_lifetime);
+        core::swap(first.intensity_fn, second.intensity_fn);
+        core::swap(first.interaction_fn, second.interaction_fn);
+        core::swap(first.intensity_fn_args, second.intensity_fn_args);
+        core::swap(first.interaction_fn_args, second.interaction_fn_args);
+        core::swap(first.intensity_fn_arg_count, second.intensity_fn_arg_count);
+        core::swap(first.interaction_fn_arg_count, second.interaction_fn_arg_count);
+    }
+
     static inline void free(simulator_config& config) {
 		config.free_helper();
         core::free(config.item_types);
@@ -243,6 +264,13 @@ private:
 
     friend bool init(simulator_config&, const simulator_config&);
 };
+
+inline bool init(simulator_config& config) {
+    config.agent_color = NULL;
+    config.intensity_fn_args = NULL;
+    config.interaction_fn_args = NULL;
+    return array_init(config.item_types, 8);
+}
 
 inline bool init(simulator_config& config, const simulator_config& src)
 {
@@ -428,7 +456,7 @@ struct agent_state {
             const float* color, unsigned int color_dimension)
     {
         unsigned int x = (unsigned int) (relative_position.x + vision_range);
-        unsigned int y = (unsigned int) (relative_position.x + vision_range);
+        unsigned int y = (unsigned int) (relative_position.y + vision_range);
         unsigned int offset = (x*(2*vision_range + 1) + y) * color_dimension;
         for (unsigned int i = 0; i < color_dimension; i++)
             current_vision[offset + i] += color[i];
@@ -466,7 +494,7 @@ struct agent_state {
                 position relative_position = item.location - current_position;
 
                 /* if the item is in the visual field, add its color to the appropriate pixel */
-                if (item.deletion_time != 0
+                if (item.deletion_time == 0
                  && abs(relative_position.x) <= config.vision_range
                  && abs(relative_position.y) <= config.vision_range) {
                     add_color(relative_position, config.vision_range,
@@ -642,6 +670,9 @@ inline bool write(const agent_state& agent, Stream& out, const simulator_config&
  */
 template<typename SimulatorData>
 class simulator {
+    /* Configuration for this simulator. */
+    simulator_config config;
+
     /* Map of the world managed by this simulator. */
     map<patch_data> world;
 
@@ -667,24 +698,22 @@ class simulator {
      */
     unsigned int acted_agent_count;
 
-    /* Configuration for this simulator. */
-    simulator_config config;
-
     /* For storing additional state in the simulation. */
     SimulatorData data;
 
     typedef patch<patch_data> patch_type;
 
 public:
-    simulator(const simulator_config& config,
+    simulator(const simulator_config& conf,
             const SimulatorData& data) :
+        config(conf),
         world(config.patch_size,
             (unsigned int) config.item_types.length,
             config.gibbs_iterations,
             config.intensity_fn, config.intensity_fn_args,
             config.interaction_fn, config.interaction_fn_args),
         agents(16), requested_moves(32, alloc_position_keys),
-        acted_agent_count(0), config(config),
+        acted_agent_count(0),
         data(data), time(0)
     {
         if (!init(scent_model, (double) config.diffusion_param,
@@ -779,8 +808,76 @@ public:
         return agent.current_position;
     }
 
+    inline const float* get_scent(uint64_t agent_id) {
+        agent_array_lock.lock();
+        agent_state& agent = *agents[agent_id];
+        agent_array_lock.unlock();
+        return agent.current_scent;
+    }
+
+    inline const float* get_vision(uint64_t agent_id) {
+        agent_array_lock.lock();
+        agent_state& agent = *agents[agent_id];
+        agent_array_lock.unlock();
+        return agent.current_vision;
+    }
+
+    inline const unsigned int* get_collected_items(uint64_t agent_id) {
+        agent_array_lock.lock();
+        agent_state& agent = *agents[agent_id];
+        agent_array_lock.unlock();
+        return agent.collected_items;
+    }
+
     inline SimulatorData& get_data() {
         return data;
+    }
+
+    inline const simulator_config& get_config() const {
+        return config;
+    }
+
+    bool get_state(
+			position bottom_left_corner,
+			position top_right_corner,
+            array<pair<position, bool>>& patches,
+            array<item>& items,
+            array<position>& agents,
+            float*& scent, float*& vision)
+    {
+        auto process_patch = [&](const patch_type& patch, position patch_position) {
+            if (!patches.add(make_pair(patch_position, patch.fixed)))
+                return false;
+			for (const item& i : patch.items)
+				if (i.location.x >= bottom_left_corner.x && i.location.x <= top_right_corner.x
+				 && i.location.y >= bottom_left_corner.y && i.location.y <= top_right_corner.y
+				 && !items.add(i))
+					return false;
+            for (const agent_state* agent : patch.data.agents)
+				if (agent->current_position.x >= bottom_left_corner.x
+                 && agent->current_position.x <= top_right_corner.x
+				 && agent->current_position.y >= bottom_left_corner.y
+                 && agent->current_position.y <= top_right_corner.y
+				 && !agents.add(agent->current_position))
+					return false;
+			return true;
+        };
+        if (!world.get_state(bottom_left_corner, top_right_corner, process_patch))
+            return false;
+
+        scent = NULL; vision = NULL;
+        unsigned int height = top_right_corner.y - bottom_left_corner.y + 1;
+        unsigned int width = top_right_corner.x - bottom_left_corner.x + 1;
+        scent = (float*) malloc(sizeof(float) * config.scent_dimension * height * width);
+        vision = (float*) malloc(sizeof(float) * config.color_dimension * height * width);
+        if (scent == NULL || vision == NULL) {
+            fprintf(stderr, "simulation.get_state ERROR: Insufficient memory for scent/vision arrays.\n");
+            if (scent != NULL) free(scent);
+            return false;
+        }
+
+        /* TODO: compute scent/vision for each cell in the bounding box */
+        return true;
     }
 
     static inline void free(simulator& s) {
@@ -950,15 +1047,15 @@ bool init(simulator<SimulatorData>& sim,
     } else if (!init(sim.config, config)) {
         free(sim.data); free(sim.agents);
         free(sim.requested_moves); return false;
-    } else if (!init(sim.scent_model, (double) config.diffusion_param,
-            (double) config.decay_param, config.patch_size, config.deleted_item_lifetime)) {
+    } else if (!init(sim.scent_model, (double) sim.config.diffusion_param,
+            (double) sim.config.decay_param, sim.config.patch_size, sim.config.deleted_item_lifetime)) {
         free(sim.data); free(sim.config); free(sim.agents);
         free(sim.requested_moves); return false;
-    } else if (!init(sim.world, config.patch_size,
-            (unsigned int) config.item_types.length,
-            config.gibbs_iterations,
-            config.intensity_fn, config.intensity_fn_args,
-            config.interaction_fn, config.interaction_fn_args)) {
+    } else if (!init(sim.world, sim.config.patch_size,
+            (unsigned int) sim.config.item_types.length,
+            sim.config.gibbs_iterations,
+            sim.config.intensity_fn, sim.config.intensity_fn_args,
+            sim.config.interaction_fn, sim.config.interaction_fn_args)) {
         free(sim.config); free(sim.data);
         free(sim.agents); free(sim.requested_moves);
         free(sim.scent_model); return false;

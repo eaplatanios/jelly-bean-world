@@ -32,13 +32,20 @@ public:
 
 	~gibbs_field() { }
 
-	void sample() {
+	template<typename RNGType>
+	void sample(RNGType& rng) {
 		for (unsigned int i = 0; i < patch_count * n * n; i++)
-			sample_cell(patch_positions[sample_uniform(patch_count)], {sample_uniform(n), sample_uniform(n)});
+			sample_cell(rng, patch_positions[sample_uniform(rng, patch_count)], {sample_uniform(rng, n), sample_uniform(rng, n)});
 	}
 
 private:
-	inline void sample_cell(
+	template<typename RNGType>
+	inline unsigned int sample_uniform(RNGType& rng, unsigned int n) {
+		return rng() % n;
+	}
+
+	template<typename RNGType>
+	inline void sample_cell(RNGType& rng,
 			const position& patch_position,
 			const position& position_within_patch)
 	{
@@ -70,7 +77,9 @@ private:
 
 		log_probabilities[item_type_count] = 0.0;
 		normalize_exp(log_probabilities, item_type_count + 1);
-		unsigned int sampled_item_type = sample_categorical(log_probabilities, item_type_count + 1);
+		float random = (float) rng() / engine.max();
+		unsigned int sampled_item_type = select_categorical(
+				log_probabilities, random, item_type_count + 1);
 		free(log_probabilities);
 
 		patch_type& current_patch = *neighborhood[patch_index];

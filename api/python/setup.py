@@ -7,8 +7,9 @@ simulator_c = Extension(
   include_dirs = ['../..', '../../deps'],
   # libraries = ['...'],
   # library_dirs = ['/usr/local/lib'],
-  sources = ['nel/simulator.cpp'], 
-  extra_compile_args = ['-std=c++11'])
+  sources = ['nel/simulator.cpp'],
+  # TODO: these arguments should be different with other compilers
+  extra_compile_args = ['-std=c++11', '-O3', '-DNDEBUG', '-fno-stack-protector', '-march=native'])
 
 setup(
   name = 'nel',

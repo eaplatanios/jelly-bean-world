@@ -26,7 +26,8 @@ struct py_simulator_data
 	static inline void free(py_simulator_data& data) {
         if (data.save_directory != NULL)
             core::free(data.save_directory);
-        Py_DECREF(data.callback);
+        if (data.callback != NULL)
+            Py_DECREF(data.callback);
     }
 };
 
@@ -40,6 +41,8 @@ inline bool init(py_simulator_data& data, const py_simulator_data& src) {
         for (unsigned int i = 0; i < src.save_directory_length; i++)
             data.save_directory[i] = src.save_directory[i];
         data.save_directory_length = src.save_directory_length;
+    } else {
+        data.save_directory = NULL;
     }
     data.save_frequency = src.save_frequency;
     data.server = src.server;
@@ -50,9 +53,14 @@ inline bool init(py_simulator_data& data, const py_simulator_data& src) {
 
 struct py_client_data {
     /* storing the server responses */
-    bool move_result;
-    uint64_t agent_id;
-    position pos;
+    union response {
+        bool move_result;
+        uint64_t agent_id;
+        position pos;
+        float* scent;
+        float* vision;
+        unsigned int* collected_items;
+    } response;
 
     /* for synchronization */
     bool waiting_for_step;
@@ -61,7 +69,21 @@ struct py_client_data {
     std::condition_variable cv;
 
     PyObject* callback;
+
+    static inline void free(py_client_data& data) {
+        if (data.callback != NULL)
+            Py_DECREF(data.callback);
+        data.lock.~mutex();
+        data.cv.~condition_variable();
+    }
 };
+
+inline bool init(py_client_data& data) {
+    data.callback = NULL;
+    new (&data.lock) std::mutex();
+    new (&data.cv) std::condition_variable();
+    return true;
+}
 
 static pair<float*, Py_ssize_t> PyArg_ParseFloatList(PyObject* arg) {
     if (!PyList_Check(arg)) {
@@ -79,6 +101,36 @@ static pair<float*, Py_ssize_t> PyArg_ParseFloatList(PyObject* arg) {
     return make_pair(items, len);
 }
 
+void save(const simulator<py_simulator_data>* sim,
+        const py_simulator_data& data, uint64_t time)
+{
+    int length = snprintf(NULL, 0, "%" PRIu64, time);
+    if (length < 0) {
+        fprintf(stderr, "on_step ERROR: Error computing filepath to save simulation.\n");
+        return;
+    }
+
+    char* filepath = (char*) malloc(sizeof(char) * (data.save_directory_length + length + 1));
+    if (filepath == NULL) {
+        fprintf(stderr, "on_step ERROR: Insufficient memory for filepath.\n");
+        return;
+    }
+
+    for (unsigned int i = 0; i < data.save_directory_length; i++)
+        filepath[i] = data.save_directory[i];
+    snprintf(filepath + data.save_directory_length, length + 1, "%" PRIu64, time);
+
+    FILE* file = fopen(filepath, "wb");
+    if (file == NULL) {
+        fprintf(stderr, "on_step: Unable to open '%s' for writing", filepath);
+        perror(""); return;
+    }
+
+    fixed_width_stream<FILE*> out(file);
+    write(*sim, out);
+    fclose(file);
+}
+
 void on_step(const simulator<py_simulator_data>* sim,
         py_simulator_data& data, uint64_t time)
 {
@@ -86,6 +138,9 @@ void on_step(const simulator<py_simulator_data>* sim,
         /* this simulator is a server, so send a step response to every client */
         if (!send_step_response(*data.server))
             fprintf(stderr, "on_step ERROR: send_step_response failed.\n");
+    } if (data.save_directory != NULL && time % data.save_frequency == 0) {
+        /* save the simulator to a local file */
+        save(sim, data, time);
     }
 
     /* call python callback */
@@ -103,22 +158,47 @@ void on_step(const simulator<py_simulator_data>* sim,
 void on_add_agent(client<py_client_data>& c, uint64_t agent_id) {
 	std::unique_lock<std::mutex> lck(c.data.lock);
 	c.data.waiting_for_server = false;
-	c.data.agent_id = agent_id;
+	c.data.response.agent_id = agent_id;
     c.data.cv.notify_one();
 }
 
 void on_move(client<py_client_data>& c, uint64_t agent_id, bool request_success) {
 	std::unique_lock<std::mutex> lck(c.data.lock);
 	c.data.waiting_for_server = false;
-	c.data.move_result = request_success;
+	c.data.response.move_result = request_success;
 	c.data.cv.notify_one();
 }
 
 void on_get_position(client<py_client_data>& c, uint64_t agent_id, const position& pos) {
 	std::unique_lock<std::mutex> lck(c.data.lock);
 	c.data.waiting_for_server = false;
-	c.data.pos = pos;
+	c.data.response.pos = pos;
 	c.data.cv.notify_one();
+}
+
+void on_get_scent(client<py_client_data>& c, uint64_t agent_id, float* scent)
+{
+	std::unique_lock<std::mutex> lck(c.data.lock);
+	c.data.waiting_for_server = false;
+    c.data.response.scent = scent;
+    c.data.cv.notify_one();
+}
+
+void on_get_vision(client<py_client_data>& c, uint64_t agent_id, float* vision)
+{
+	std::unique_lock<std::mutex> lck(c.data.lock);
+	c.data.waiting_for_server = false;
+    c.data.response.vision = vision;
+    c.data.cv.notify_one();
+}
+
+void on_get_collected_items(client<py_client_data>& c,
+        uint64_t agent_id, unsigned int* collected_items)
+{
+	std::unique_lock<std::mutex> lck(c.data.lock);
+	c.data.waiting_for_server = false;
+    c.data.response.collected_items = collected_items;
+    c.data.cv.notify_one();
 }
 
 void on_step(client<py_client_data>& c) {
@@ -345,9 +425,12 @@ static PyObject* simulator_start_server(PyObject *self, PyObject *args)
     if (server == NULL) {
         PyErr_NoMemory();
         return NULL;
+    } else if (!init(*server)) {
+        PyErr_NoMemory();
+        free(server); return NULL;
     } else if (!init_server(*server, *sim_handle, (uint16_t) port, connection_queue_capacity, num_workers)) {
         PyErr_SetString(PyExc_RuntimeError, "Unable to initialize MPI server.");
-        return NULL;
+        free(*server); free(server); return NULL;
     }
     sim_handle->get_data().server = server;
     return PyLong_FromVoidPtr(server);
@@ -370,7 +453,7 @@ static PyObject* simulator_stop_server(PyObject *self, PyObject *args)
     }
     async_server* server = (async_server*) PyLong_AsVoidPtr(py_server_handle);
     stop_server(*server);
-    free(server);
+    free(*server); free(server);
     Py_INCREF(Py_None);
     return Py_None;
 }
@@ -395,10 +478,14 @@ static PyObject* simulator_start_client(PyObject *self, PyObject *args)
     if (new_client == NULL) {
         PyErr_NoMemory();
         return NULL;
+    } else if (!init(*new_client)) {
+        PyErr_NoMemory();
+        free(new_client); return NULL;
     } else if (!init_client(*new_client, server_address, (uint16_t) port)) {
         PyErr_SetString(PyExc_RuntimeError, "Unable to initialize MPI client.");
-        return NULL;
+        free(*new_client); free(new_client); return NULL;
     }
+
     new_client->data.callback = py_callback;
     Py_INCREF(py_callback);
     return PyLong_FromVoidPtr(new_client);
@@ -414,7 +501,7 @@ static PyObject* simulator_stop_client(PyObject *self, PyObject *args)
     client<py_client_data>* client_handle =
             (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
     stop_client(*client_handle);
-    free(client_handle);
+    free(*client_handle); free(client_handle);
     Py_INCREF(Py_None);
     return Py_None;
 }
@@ -458,13 +545,13 @@ static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
 		/* wait for response from server */
 		wait_for_server(*client_handle);
 
-		if (client_handle->data.agent_id == UINT64_MAX) {
+		if (client_handle->data.response.agent_id == UINT64_MAX) {
             /* server returned failure */
             PyErr_SetString(PyExc_RuntimeError, "Failed to add new agent.");
             return NULL;
 		}
 
-        return PyLong_FromUnsignedLongLong(client_handle->data.agent_id);
+        return PyLong_FromUnsignedLongLong(client_handle->data.response.agent_id);
     }
 }
 
@@ -516,7 +603,7 @@ static PyObject* simulator_move(PyObject *self, PyObject *args) {
 		/* wait for response from server */
 		wait_for_server(*client_handle);
 
-        if (client_handle->data.move_result) {
+        if (client_handle->data.response.move_result) {
             Py_INCREF(Py_True);
             return Py_True;
         } else {
@@ -561,8 +648,133 @@ static PyObject* simulator_position(PyObject *self, PyObject *args) {
 		/* wait for response from server */
 		wait_for_server(*client_handle);
 
-        return Py_BuildValue("(LL)", client_handle->data.pos.x, client_handle->data.pos.y);
+        return Py_BuildValue("(LL)", client_handle->data.response.pos.x, client_handle->data.response.pos.y);
     }
+}
+
+static PyObject* simulator_scent(PyObject *self, PyObject *args) {
+    PyObject* py_sim_handle;
+    PyObject* py_client_handle;
+    unsigned long long agent_id;
+    if (!PyArg_ParseTuple(args, "OOK", &py_sim_handle, &py_client_handle, &agent_id))
+        return NULL;
+
+    const float* scent;
+    unsigned int scent_dimension;
+    if (py_client_handle == Py_None) {
+        /* the simulation is local, so call get_scent directly */
+        simulator<py_simulator_data>* sim_handle =
+                (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
+        scent = sim_handle->get_scent(agent_id);
+        scent_dimension = sim_handle->get_config().scent_dimension;
+    } else {
+        /* this is a client, so send a get_scent message to the server */
+        client<py_client_data>* client_handle =
+                (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
+        if (!send_get_scent(*client_handle, agent_id)) {
+            PyErr_SetString(PyExc_RuntimeError, "Unable to send get_scent request.");
+            return NULL;
+        }
+
+		/* wait for response from server */
+		wait_for_server(*client_handle);
+        scent = client_handle->data.response.scent;
+        scent_dimension = client_handle->config.scent_dimension;
+    }
+
+    PyObject* py_scent = PyTuple_New(scent_dimension);
+    for (unsigned int i = 0; i < scent_dimension; i++)
+        PyTuple_SetItem(py_scent, i, PyFloat_FromDouble(scent[i]));
+    if (py_client_handle != Py_None)
+        free((float*) scent);
+    return py_scent;
+}
+
+static PyObject* simulator_vision(PyObject *self, PyObject *args) {
+    PyObject* py_sim_handle;
+    PyObject* py_client_handle;
+    unsigned long long agent_id;
+    if (!PyArg_ParseTuple(args, "OOK", &py_sim_handle, &py_client_handle, &agent_id))
+        return NULL;
+
+    const float* vision;
+    unsigned int color_dimension, vision_range;
+    if (py_client_handle == Py_None) {
+        /* the simulation is local, so call get_vision directly */
+        simulator<py_simulator_data>* sim_handle =
+                (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
+        vision = sim_handle->get_vision(agent_id);
+        vision_range = sim_handle->get_config().vision_range;
+        color_dimension = sim_handle->get_config().color_dimension;
+    } else {
+        /* this is a client, so send a get_vision message to the server */
+        client<py_client_data>* client_handle =
+                (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
+        if (!send_get_vision(*client_handle, agent_id)) {
+            PyErr_SetString(PyExc_RuntimeError, "Unable to send get_vision request.");
+            return NULL;
+        }
+
+		/* wait for response from server */
+		wait_for_server(*client_handle);
+        vision = client_handle->data.response.vision;
+        color_dimension = client_handle->config.color_dimension;
+        vision_range = client_handle->config.vision_range;
+    }
+
+    PyObject* py_vision = PyList_New(2 * vision_range + 1);
+    for (unsigned int i = 0; i < 2 * vision_range + 1; i++) {
+        PyObject* row = PyList_New(2 * vision_range + 1);
+        PyList_SetItem(py_vision, i, row);
+        for (unsigned int j = 0; j < 2 * vision_range + 1; j++) {
+            PyObject* pixel = PyTuple_New(color_dimension);
+            PyList_SetItem(row, j, pixel);
+            unsigned int offset = (i*(2*vision_range + 1) + j) * color_dimension;
+            for (unsigned int k = 0; k < color_dimension; k++)
+                PyTuple_SetItem(pixel, k, PyFloat_FromDouble(vision[offset + k]));
+        }
+    }
+    if (py_client_handle != Py_None)
+        free((float*) vision);
+    return py_vision;
+}
+
+static PyObject* simulator_collected_items(PyObject *self, PyObject *args) {
+    PyObject* py_sim_handle;
+    PyObject* py_client_handle;
+    unsigned long long agent_id;
+    if (!PyArg_ParseTuple(args, "OOK", &py_sim_handle, &py_client_handle, &agent_id))
+        return NULL;
+
+    const unsigned int* items;
+    unsigned int item_type_count;
+    if (py_client_handle == Py_None) {
+        /* the simulation is local, so call get_scent directly */
+        simulator<py_simulator_data>* sim_handle =
+                (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
+        items = sim_handle->get_collected_items(agent_id);
+        item_type_count = sim_handle->get_config().item_types.length;
+    } else {
+        /* this is a client, so send a get_scent message to the server */
+        client<py_client_data>* client_handle =
+                (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
+        if (!send_get_scent(*client_handle, agent_id)) {
+            PyErr_SetString(PyExc_RuntimeError, "Unable to send get_scent request.");
+            return NULL;
+        }
+
+		/* wait for response from server */
+		wait_for_server(*client_handle);
+        items = client_handle->data.response.collected_items;
+        item_type_count = client_handle->config.item_types.length;
+    }
+
+    PyObject* py_items = PyTuple_New(item_type_count);
+    for (unsigned int i = 0; i < item_type_count; i++)
+        PyTuple_SetItem(py_items, i, PyLong_FromSize_t(items[i]));
+    if (py_client_handle != Py_None)
+        free((float*) items);
+    return py_items;
 }
 
 } /* namespace nel */
@@ -578,12 +790,15 @@ static PyMethodDef SimulatorMethods[] = {
     {"add_agent",  nel::simulator_add_agent, METH_VARARGS, "Adds an agent to the simulator and returns its ID."},
     {"move",  nel::simulator_move, METH_VARARGS, "Attempts to move the agent in the simulation environment."},
     {"position",  nel::simulator_position, METH_VARARGS, "Gets the current position of an agent in the simulation environment."},
+    {"scent",  nel::simulator_scent, METH_VARARGS, "Gets the current scent perception of the given agent."},
+    {"vision",  nel::simulator_vision, METH_VARARGS, "Gets the current vision perception of the given agent."},
+    {"collected_items",  nel::simulator_collected_items, METH_VARARGS, "Gets the counts of the items collected by the given agent."},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
 #if PY_MAJOR_VERSION >= 3
     static struct PyModuleDef simulator_module = {
-        PyModuleDef_HEAD_INIT, "simulator_c", "Simulator", -1, SimulatorMethods
+        PyModuleDef_HEAD_INIT, "simulator_c", "Simulator", -1, SimulatorMethods, NULL, NULL, NULL, NULL
     };
 
     PyMODINIT_FUNC PyInit_simulator_c(void) {
