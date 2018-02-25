@@ -4,8 +4,8 @@ from random import choice
 from time import sleep
 
 def try_move(agent):
-	#dir = choice(list(nel.Direction))
-	dir = nel.Direction.RIGHT
+	dir = choice(list(nel.Direction))
+	#dir = nel.Direction.RIGHT
 	return agent.move(dir)
 
 class RandomAgent(nel.Agent):

@@ -23,7 +23,9 @@ enum class message_type : uint64_t {
 	GET_VISION_RESPONSE = 11,
 	GET_COLLECTED_ITEMS = 12,
 	GET_COLLECTED_ITEMS_RESPONSE = 13,
-	STEP_RESPONSE = 14
+	GET_MAP = 14,
+	GET_MAP_RESPONSE = 15,
+	STEP_RESPONSE = 16
 };
 
 template<typename Stream>
@@ -49,6 +51,7 @@ inline bool print(const message_type& type, Stream& out) {
 	case message_type::GET_SCENT:           return core::print("GET_SCENT", out);
 	case message_type::GET_VISION:          return core::print("GET_VISION", out);
 	case message_type::GET_COLLECTED_ITEMS: return core::print("GET_COLLECTED_ITEMS", out);
+	case message_type::GET_MAP:             return core::print("GET_MAP", out);
 
 	case message_type::ADD_AGENT_RESPONSE:           return core::print("ADD_AGENT_RESPONSE", out);
 	case message_type::MOVE_RESPONSE:                return core::print("MOVE_RESPONSE", out);
@@ -57,6 +60,7 @@ inline bool print(const message_type& type, Stream& out) {
 	case message_type::GET_SCENT_RESPONSE:           return core::print("GET_SCENT_RESPONSE", out);
 	case message_type::GET_VISION_RESPONSE:          return core::print("GET_VISION_RESPONSE", out);
 	case message_type::GET_COLLECTED_ITEMS_RESPONSE: return core::print("GET_VISION_RESPONSE", out);
+	case message_type::GET_MAP_RESPONSE:             return core::print("GET_MAP_RESPONSE", out);
 	case message_type::STEP_RESPONSE:                return core::print("STEP_RESPONSE", out);
 	}
 	fprintf(stderr, "print ERROR: Unrecognized message_type.\n");
@@ -91,8 +95,8 @@ inline bool send_message(socket_type& socket, const void* data, unsigned int len
 	return send(socket.handle, (const char*) data, length, 0) != 0;
 }
 
-template<typename SimulatorData>
-inline bool receive_add_agent(socket_type& connection, simulator<SimulatorData>& sim) {
+template<typename Stream, typename SimulatorData>
+inline bool receive_add_agent(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
 	uint64_t new_agent = sim.add_agent();
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(new_agent));
 	fixed_width_stream<memory_stream> out(mem_stream);
@@ -101,12 +105,12 @@ inline bool receive_add_agent(socket_type& connection, simulator<SimulatorData>&
 		&& send_message(connection, mem_stream.buffer, mem_stream.position);
 }
 
-template<typename SimulatorData>
-inline bool receive_move(socket_type& connection, simulator<SimulatorData>& sim) {
+template<typename Stream, typename SimulatorData>
+inline bool receive_move(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
 	uint64_t agent_id;
 	direction dir;
 	unsigned int num_steps;
-	if (!read(agent_id, connection) || !read(dir, connection) || !read(num_steps, connection))
+	if (!read(agent_id, in) || !read(dir, in) || !read(num_steps, in))
 		return false;
 	bool result = sim.move(agent_id, dir, num_steps);
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(result));
@@ -116,10 +120,10 @@ inline bool receive_move(socket_type& connection, simulator<SimulatorData>& sim)
 		&& send_message(connection, mem_stream.buffer, mem_stream.position);
 }
 
-template<typename SimulatorData>
-inline bool receive_get_position(socket_type& connection, simulator<SimulatorData>& sim) {
+template<typename Stream, typename SimulatorData>
+inline bool receive_get_position(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
 	uint64_t agent_id;
-	if (!read(agent_id, connection))
+	if (!read(agent_id, in))
 		return false;
 	position location = sim.get_position(agent_id);
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(location));
@@ -129,8 +133,8 @@ inline bool receive_get_position(socket_type& connection, simulator<SimulatorDat
 		&& send_message(connection, mem_stream.buffer, mem_stream.position);
 }
 
-template<typename SimulatorData>
-inline bool receive_get_config(socket_type& connection, simulator<SimulatorData>& sim) {
+template<typename Stream, typename SimulatorData>
+inline bool receive_get_config(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
 	const simulator_config& config = sim.get_config();
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(config));
 	fixed_width_stream<memory_stream> out(mem_stream);
@@ -139,10 +143,10 @@ inline bool receive_get_config(socket_type& connection, simulator<SimulatorData>
 		&& send_message(connection, mem_stream.buffer, mem_stream.position);
 }
 
-template<typename SimulatorData>
-inline bool receive_get_scent(socket_type& connection, simulator<SimulatorData>& sim) {
+template<typename Stream, typename SimulatorData>
+inline bool receive_get_scent(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
 	uint64_t agent_id;
-	if (!read(agent_id, connection))
+	if (!read(agent_id, in))
 		return false;
 	const float* scent = sim.get_scent(agent_id);
 	memory_stream mem_stream = memory_stream(sizeof(message_type)
@@ -153,10 +157,10 @@ inline bool receive_get_scent(socket_type& connection, simulator<SimulatorData>&
 		&& send_message(connection, mem_stream.buffer, mem_stream.position);
 }
 
-template<typename SimulatorData>
-inline bool receive_get_vision(socket_type& connection, simulator<SimulatorData>& sim) {
+template<typename Stream, typename SimulatorData>
+inline bool receive_get_vision(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
 	uint64_t agent_id;
-	if (!read(agent_id, connection))
+	if (!read(agent_id, in))
 		return false;
 	const float* vision = sim.get_vision(agent_id);
 	unsigned int vision_size = (2 * sim.get_config().vision_range + 1)
@@ -169,10 +173,10 @@ inline bool receive_get_vision(socket_type& connection, simulator<SimulatorData>
 		&& send_message(connection, mem_stream.buffer, mem_stream.position);
 }
 
-template<typename SimulatorData>
-inline bool receive_get_collected_items(socket_type& connection, simulator<SimulatorData>& sim) {
+template<typename Stream, typename SimulatorData>
+inline bool receive_get_collected_items(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
 	uint64_t agent_id;
-	if (!read(agent_id, connection))
+	if (!read(agent_id, in))
 		return false;
 	const unsigned int* items = sim.get_collected_items(agent_id);
 	memory_stream mem_stream = memory_stream(sizeof(message_type)
@@ -183,25 +187,53 @@ inline bool receive_get_collected_items(socket_type& connection, simulator<Simul
 		&& send_message(connection, mem_stream.buffer, mem_stream.position);
 }
 
+template<typename Stream, typename SimulatorData>
+inline bool receive_get_map(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
+	position bottom_left, top_right;
+	if (!read(bottom_left, in) || !read(top_right, in))
+		return false;
+
+	hash_map<position, patch_state> patches(32);
+	if (!sim.get_map(bottom_left, top_right, patches)) {
+		for (auto entry : patches)
+			free(entry.value);
+		patches.clear();
+	}
+
+	default_scribe scribe;
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(hash_map<position, patch_state>));
+	fixed_width_stream<memory_stream> out(mem_stream);
+	if (!write(message_type::GET_MAP_RESPONSE, out)
+	 || !write(patches, out, scribe, sim.get_config())
+	 || !send_message(connection, mem_stream.buffer, mem_stream.position))
+		return false;
+	for (auto entry : patches)
+		free(entry.value);
+	return true;
+}
+
 template<typename SimulatorData>
 void server_process_message(socket_type& connection, simulator<SimulatorData>& sim) {
 	message_type type;
-	if (!read(type, connection)) return;
+	fixed_width_stream<socket_type> in(connection);
+	if (!read(type, in)) return;
 	switch (type) {
 		case message_type::ADD_AGENT:
-			receive_add_agent(connection, sim); return;
+			receive_add_agent(in, connection, sim); return;
 		case message_type::MOVE:
-			receive_move(connection, sim); return;
+			receive_move(in, connection, sim); return;
 		case message_type::GET_POSITION:
-			receive_get_position(connection, sim); return;
+			receive_get_position(in, connection, sim); return;
 		case message_type::GET_CONFIG:
-			receive_get_config(connection, sim); return;
+			receive_get_config(in, connection, sim); return;
 		case message_type::GET_SCENT:
-			receive_get_scent(connection, sim); return;
+			receive_get_scent(in, connection, sim); return;
 		case message_type::GET_VISION:
-			receive_get_scent(connection, sim); return;
+			receive_get_scent(in, connection, sim); return;
 		case message_type::GET_COLLECTED_ITEMS:
-			receive_get_collected_items(connection, sim); return;
+			receive_get_collected_items(in, connection, sim); return;
+		case message_type::GET_MAP:
+			receive_get_map(in, connection, sim); return;
 
 		case message_type::ADD_AGENT_RESPONSE:
 		case message_type::MOVE_RESPONSE:
@@ -210,6 +242,7 @@ void server_process_message(socket_type& connection, simulator<SimulatorData>& s
 		case message_type::GET_SCENT_RESPONSE:
 		case message_type::GET_VISION_RESPONSE:
 		case message_type::GET_COLLECTED_ITEMS_RESPONSE:
+		case message_type::GET_MAP_RESPONSE:
 		case message_type::STEP_RESPONSE:
 			break;
 	}
@@ -363,6 +396,15 @@ bool send_get_collected_items(ClientType& c, uint64_t agent_id) {
 }
 
 template<typename ClientType>
+bool send_get_map(ClientType& c, position bottom_left, position top_right) {
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + 2 * sizeof(position));
+	fixed_width_stream<memory_stream> out(mem_stream);
+	return write(message_type::GET_MAP, out)
+		&& write(bottom_left, out) && write(top_right, out)
+		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
+}
+
+template<typename ClientType>
 inline bool receive_add_agent_response(ClientType& c) {
 	uint64_t agent_id;
 	fixed_width_stream<socket_type> in(c.connection);
@@ -451,6 +493,22 @@ inline bool receive_get_collected_items_response(ClientType& c) {
 }
 
 template<typename ClientType>
+inline bool receive_get_map_response(ClientType& c) {
+	default_scribe scribe;
+	fixed_width_stream<socket_type> in(c.connection);
+	hash_map<position, patch_state>* patches =
+			(hash_map<position, patch_state>*) malloc(sizeof(hash_map<position, patch_state>));
+	if (patches == NULL) {
+		fprintf(stderr, "receive_get_map_response ERROR: Out of memory.\n");
+		return false;
+	} else if (!read(*patches, in, alloc_position_keys, scribe, c.config)) {
+		free(patches); return false;
+	}
+	on_get_map(c, patches);
+	return true;
+}
+
+template<typename ClientType>
 inline bool receive_step_response(ClientType& c) {
 	on_step(c);
 	return true;
@@ -482,6 +540,8 @@ void run_response_listener(ClientType& c) {
 				receive_get_vision_response(c); continue;
 			case message_type::GET_COLLECTED_ITEMS_RESPONSE:
 				receive_get_collected_items_response(c); continue;
+			case message_type::GET_MAP_RESPONSE:
+				receive_get_map_response(c); continue;
 			case message_type::STEP_RESPONSE:
 				receive_step_response(c); continue;
 
@@ -492,6 +552,7 @@ void run_response_listener(ClientType& c) {
 			case message_type::GET_SCENT:
 			case message_type::GET_VISION:
 			case message_type::GET_COLLECTED_ITEMS:
+			case message_type::GET_MAP:
 				break;
 		}
 		fprintf(stderr, "run_response_listener ERROR: Received invalid message type from server %" PRId64 ".\n", (uint64_t) type);

@@ -416,6 +416,38 @@ bool write(const patch_data& data, Stream& out,
     return true;
 }
 
+inline void add_scent(float* dst, const float* scent, unsigned int scent_dimension, float value) {
+    for (unsigned int i = 0; i < scent_dimension; i++)
+        dst[i] += scent[i] * value;
+}
+
+template<typename T>
+void compute_scent_contribution(
+        const diffusion<T>& scent_model, const item& item,
+        position pos, uint64_t current_time,
+        const simulator_config& config, float* dst)
+{
+    /* compute item position in agent coordinates */
+    position relative_position = item.location - pos;
+
+    /* if the item is within scent range, add its contribution */
+    if (abs(relative_position.x) < scent_model.radius
+        && abs(relative_position.y) < scent_model.radius)
+    {
+        unsigned int creation_t = config.deleted_item_lifetime - 1;
+        if (item.creation_time > 0)
+            creation_t = min(creation_t, (unsigned int) (current_time - item.creation_time));
+        add_scent(dst, config.item_types[item.item_type].scent, config.scent_dimension,
+                (float) scent_model.get_value(creation_t, (int) relative_position.x, (int) relative_position.y));
+
+        if (item.deletion_time > 0) {
+            unsigned int deletion_t = (unsigned int) (current_time - item.deletion_time);
+            add_scent(dst, config.item_types[item.item_type].scent, config.scent_dimension,
+                (float) -scent_model.get_value(deletion_t, (int) relative_position.x, (int) relative_position.y));
+        }
+    }
+}
+
 /** Represents the state of an agent in the simulator. */
 struct agent_state {
     /* Current position of the agent. */
@@ -462,11 +494,6 @@ struct agent_state {
             current_vision[offset + i] += color[i];
     }
 
-    inline void add_scent(const float* scent, unsigned int scent_dimension, float value) {
-        for (unsigned int i = 0; i < scent_dimension; i++)
-            current_scent[i] += scent[i] * value;
-    }
-
     template<typename T>
     inline void update_state(
             patch<patch_data>* neighborhood[4],
@@ -490,31 +517,15 @@ struct agent_state {
                     neighborhood[i]->items.remove(j); j--; continue;
                 }
 
-                /* compute item position in agent coordinates */
-                position relative_position = item.location - current_position;
+                compute_scent_contribution(scent_model, item, current_position, current_time, config, current_scent);
 
                 /* if the item is in the visual field, add its color to the appropriate pixel */
+                position relative_position = item.location - current_position;
                 if (item.deletion_time == 0
                  && abs(relative_position.x) <= config.vision_range
                  && abs(relative_position.y) <= config.vision_range) {
                     add_color(relative_position, config.vision_range,
                             config.item_types[item.item_type].color, config.color_dimension);
-                }
-
-                /* if the item is within scent range, add its contribution */
-                if (abs(relative_position.x) < scent_model.radius
-                 && abs(relative_position.y) < scent_model.radius) {
-                    unsigned int creation_t = config.deleted_item_lifetime - 1;
-                    if (item.creation_time > 0)
-                        creation_t = min(creation_t, (unsigned int) (current_time - item.creation_time));
-                    add_scent(config.item_types[item.item_type].scent, config.scent_dimension,
-                            (float) scent_model.get_value(creation_t, (int) relative_position.x, (int) relative_position.y));
-
-                    if (item.deletion_time > 0) {
-                        unsigned int deletion_t = (unsigned int) (current_time - item.deletion_time);
-                        add_scent(config.item_types[item.item_type].scent, config.scent_dimension,
-                            (float) -scent_model.get_value(deletion_t, (int) relative_position.x, (int) relative_position.y));
-                    }
                 }
             }
 
@@ -661,6 +672,99 @@ inline bool write(const agent_state& agent, Stream& out, const simulator_config&
         && write(agent.agent_acted, out)
         && write(agent.requested_position, out)
         && write(agent.collected_items, out, config.item_types.length);
+}
+
+/**
+ * This structure contains full information about a patch. This is more than we
+ * need for simulation, but it is useful for visualization.
+ */
+struct patch_state {
+    position patch_position;
+    bool fixed;
+    float* scent;
+    float* vision;
+    item* items;
+    unsigned int item_count;
+    position* agents;
+    unsigned int agent_count;
+
+    static inline void move(const patch_state& src, patch_state& dst) {
+        core::move(src.patch_position, dst.patch_position);
+        core::move(src.fixed, dst.fixed);
+        core::move(src.scent, dst.scent);
+        core::move(src.vision, dst.vision);
+        core::move(src.items, dst.items);
+        core::move(src.item_count, dst.item_count);
+        core::move(src.agents, dst.agents);
+        core::move(src.agent_count, dst.agent_count);
+    }
+
+    static inline void free(patch_state& patch) {
+        core::free(patch.scent);
+        core::free(patch.vision);
+        core::free(patch.items);
+        core::free(patch.agents);
+    }
+
+    inline bool init_helper(unsigned int n,
+            unsigned int scent_dimension, unsigned int color_dimension,
+            unsigned int item_count, unsigned int agent_count)
+    {
+        scent = (float*) calloc(n * n * scent_dimension, sizeof(float));
+        if (scent == NULL) {
+            fprintf(stderr, "patch_state.init_helper ERROR: Insufficient memory for scent.\n");
+            return false;
+        }
+        vision = (float*) calloc(n * n * color_dimension, sizeof(float));
+        if (vision == NULL) {
+            fprintf(stderr, "patch_state.init_helper ERROR: Insufficient memory for vision.\n");
+            core::free(scent); return false;
+        }
+        items = (item*) malloc(sizeof(item) * item_count);
+        if (items == NULL) {
+            fprintf(stderr, "patch_state.init_helper ERROR: Insufficient memory for items.\n");
+            core::free(scent); core::free(vision); return false;
+        }
+        agents = (position*) malloc(sizeof(position) * agent_count);
+        if (agents == NULL) {
+            fprintf(stderr, "patch_state.init_helper ERROR: Insufficient memory for agents.\n");
+            core::free(scent); core::free(vision);
+            core::free(items); return false;
+        }
+        return true;
+    }
+};
+
+inline bool init(patch_state& patch, unsigned int n,
+        unsigned int scent_dimension, unsigned int color_dimension,
+        unsigned int item_count, unsigned int agent_count)
+{
+    patch.item_count = item_count;
+    patch.agent_count = agent_count;
+    return patch.init_helper(n, scent_dimension, color_dimension, item_count, agent_count);
+}
+
+template<typename Stream>
+bool read(patch_state& patch, Stream& in, const simulator_config& config) {
+    unsigned int n = config.patch_size;
+    return read(patch.patch_position, in) && read(patch.fixed, in)
+        && read(patch.item_count, in) && read(patch.agent_count, in)
+        && patch.init_helper(n, config.scent_dimension, config.color_dimension, patch.item_count, patch.agent_count)
+        && read(patch.scent, in, n * n * config.scent_dimension)
+        && read(patch.vision, in, n * n * config.color_dimension)
+        && read(patch.items, in, patch.item_count)
+        && read(patch.agents, in, patch.agent_count);
+}
+
+template<typename Stream>
+bool write(const patch_state& patch, Stream& out, const simulator_config& config) {
+    unsigned int n = config.patch_size;
+    return write(patch.patch_position, out) && write(patch.fixed, out)
+        && write(patch.item_count, out) && write(patch.agent_count, out)
+        && write(patch.scent, out, n * n * config.scent_dimension)
+        && write(patch.vision, out, n * n * config.color_dimension)
+        && write(patch.items, out, patch.item_count)
+        && write(patch.agents, out, patch.agent_count);
 }
 
 /**
@@ -837,46 +941,86 @@ public:
         return config;
     }
 
-    bool get_state(
+    bool get_map(
 			position bottom_left_corner,
 			position top_right_corner,
-            array<pair<position, bool>>& patches,
-            array<item>& items,
-            array<position>& agents,
-            float*& scent, float*& vision)
+            hash_map<position, patch_state>& patches)
     {
-        auto process_patch = [&](const patch_type& patch, position patch_position) {
-            if (!patches.add(make_pair(patch_position, patch.fixed)))
+        auto process_patch = [&](const patch_type& patch, position patch_position)
+        {
+            bool contains; unsigned int bucket;
+            if (!patches.check_size(alloc_position_keys)) return false;
+            patch_state& state = patches.get(patch_position, contains, bucket);
+            if (!init(state, config.patch_size,
+                    config.scent_dimension, config.color_dimension,
+                    patch.items.length, patch.data.agents.length))
                 return false;
-			for (const item& i : patch.items)
-				if (i.location.x >= bottom_left_corner.x && i.location.x <= top_right_corner.x
-				 && i.location.y >= bottom_left_corner.y && i.location.y <= top_right_corner.y
-				 && !items.add(i))
-					return false;
-            for (const agent_state* agent : patch.data.agents)
-				if (agent->current_position.x >= bottom_left_corner.x
-                 && agent->current_position.x <= top_right_corner.x
-				 && agent->current_position.y >= bottom_left_corner.y
-                 && agent->current_position.y <= top_right_corner.y
-				 && !agents.add(agent->current_position))
-					return false;
-			return true;
+            patches.table.keys[bucket] = patch_position;
+            patches.table.size++;
+
+            state.patch_position = patch_position;
+            state.item_count = 0;
+            for (unsigned int i = 0; i < patch.items.length; i++) {
+                if (patch.items[i].deletion_time == 0) {
+                    state.items[state.item_count] = patch.items[i];
+                    state.item_count++;
+                }
+            }
+
+            for (unsigned int i = 0; i < patch.data.agents.length; i++)
+                state.agents[i] = patch.data.agents[i]->current_position;
+            return true;
         };
-        if (!world.get_state(bottom_left_corner, top_right_corner, process_patch))
+
+        std::unique_lock<std::mutex> lock(agent_array_lock);
+		position bottom_left_patch_position, top_right_patch_position;
+        if (!world.get_state(bottom_left_corner, top_right_corner,
+                process_patch, bottom_left_patch_position, top_right_patch_position))
             return false;
 
-        scent = NULL; vision = NULL;
-        unsigned int height = top_right_corner.y - bottom_left_corner.y + 1;
-        unsigned int width = top_right_corner.x - bottom_left_corner.x + 1;
-        scent = (float*) malloc(sizeof(float) * config.scent_dimension * height * width);
-        vision = (float*) malloc(sizeof(float) * config.color_dimension * height * width);
-        if (scent == NULL || vision == NULL) {
-            fprintf(stderr, "simulation.get_state ERROR: Insufficient memory for scent/vision arrays.\n");
-            if (scent != NULL) free(scent);
-            return false;
+        for (int64_t x = bottom_left_patch_position.x - 1; x < top_right_patch_position.x + 1; x++) {
+            for (int64_t y = bottom_left_patch_position.y - 1; y < top_right_patch_position.y + 1; y++) {
+                const patch_type* patch = world.get_patch_if_exists({x, y});
+                if (patch == NULL) continue;
+
+                /* consider all patches in the neighborhood of 'patch' */
+                for (int diff_x = -1; diff_x <= 1; diff_x++) {
+                    for (int diff_y = -1; diff_y <= 1; diff_y++) {
+                        bool contains;
+                        patch_state& neighbor = patches.get({x + diff_x, y + diff_y}, contains);
+                        position world_position = neighbor.patch_position * config.patch_size;
+                        if (!contains) continue;
+
+                        /* for every item in 'patch', add its scent/vision contribution to 'neighbor' */
+                        for (const item& item : patch->items)
+                            for (unsigned int a = 0; a < config.patch_size; a++)
+                                for (unsigned int b = 0; b < config.patch_size; b++)
+                                    compute_scent_contribution(scent_model, item, world_position + position(a, b), time,
+                                            config, neighbor.scent + ((a*config.patch_size + b)*config.scent_dimension));
+                    }
+                }
+
+                /* add color contribution from the items and agents in the current patch */
+                bool contains;
+                patch_state& state = patches.get({x, y}, contains);
+                if (!contains) continue;
+                for (const item& item : patch->items) {
+                    if (item.deletion_time != 0) continue;
+                    position relative_position = item.location - position(x, y) * config.patch_size;
+                    float* pixel = state.vision + ((relative_position.x*config.patch_size + relative_position.y)*config.color_dimension);
+                    for (unsigned int i = 0; i < config.color_dimension; i++)
+                        pixel[i] += config.item_types[item.item_type].color[i];
+                }
+
+                for (const agent_state* agent : patch->data.agents) {
+                    position relative_position = agent->current_position - position(x, y) * config.patch_size;
+                    float* pixel = state.vision + ((relative_position.x*config.patch_size + relative_position.y)*config.color_dimension);
+                    for (unsigned int i = 0; i < config.color_dimension; i++)
+                        pixel[i] += config.agent_color[i];
+                }
+            }
         }
 
-        /* TODO: compute scent/vision for each cell in the bounding box */
         return true;
     }
 

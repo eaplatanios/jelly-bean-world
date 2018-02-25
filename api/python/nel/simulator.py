@@ -181,6 +181,9 @@ class Simulator(object):
   def time(self):
     return self._time
 
+  def _map(self, bottom_left, top_right):
+    return simulator_c.map(self._handle, self._client_handle, bottom_left, top_right)
+
 if __name__ == '__main__':
   # TODO: Parse command line arguments and construct a simulator config.
   # TODO: Start server.

@@ -256,6 +256,7 @@ struct client_data {
 	uint64_t agent_id;
 	const float* perception;
 	const unsigned int* items;
+	const hash_map<position, patch_state>* map;
 
 	bool move_result, waiting_for_step;
 	position pos;
@@ -306,6 +307,14 @@ void on_get_collected_items(client<client_data>& c, uint64_t agent_id, const uns
 	std::unique_lock<std::mutex> lck(locks[id]);
 	waiting_for_server[id] = false;
 	c.data.items = items;
+	conditions[id].notify_one();
+}
+
+void on_get_map(client<client_data>& c, const hash_map<position, patch_state>* map) {
+	unsigned int id = c.data.index;
+	std::unique_lock<std::mutex> lck(locks[id]);
+	waiting_for_server[id] = false;
+	c.data.map = map;
 	conditions[id].notify_one();
 }
 

@@ -242,9 +242,10 @@ public:
 	bool get_state(
 			position bottom_left_corner,
 			position top_right_corner,
-			ProcessPatchFunction process_patch) const
+			ProcessPatchFunction process_patch,
+			position& bottom_left_patch_position,
+			position& top_right_patch_position) const
 	{
-		position bottom_left_patch_position, top_right_patch_position;
 		world_to_patch_coordinates(bottom_left_corner, bottom_left_patch_position);
 		world_to_patch_coordinates(top_right_corner, top_right_patch_position);
 
@@ -258,6 +259,17 @@ public:
 			}
 		}
 		return true;
+	}
+
+	template<typename ProcessPatchFunction>
+	inline bool get_state(
+			position bottom_left_corner,
+			position top_right_corner,
+			ProcessPatchFunction process_patch) const
+	{
+		position bottom_left_patch_position, top_right_patch_position;
+		return get_state(bottom_left_corner, top_right_corner, process_patch,
+				bottom_left_patch_position, top_right_patch_position);
 	}
 
 	bool get_items(

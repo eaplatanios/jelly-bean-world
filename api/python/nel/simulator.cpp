@@ -60,6 +60,7 @@ struct py_client_data {
         float* scent;
         float* vision;
         unsigned int* collected_items;
+        hash_map<position, patch_state>* map;
     } response;
 
     /* for synchronization */
@@ -198,6 +199,15 @@ void on_get_collected_items(client<py_client_data>& c,
 	std::unique_lock<std::mutex> lck(c.data.lock);
 	c.data.waiting_for_server = false;
     c.data.response.collected_items = collected_items;
+    c.data.cv.notify_one();
+}
+
+void on_get_map(client<py_client_data>& c,
+        hash_map<position, patch_state>* map)
+{
+	std::unique_lock<std::mutex> lck(c.data.lock);
+	c.data.waiting_for_server = false;
+    c.data.response.map = map;
     c.data.cv.notify_one();
 }
 
@@ -777,6 +787,94 @@ static PyObject* simulator_collected_items(PyObject *self, PyObject *args) {
     return py_items;
 }
 
+static PyObject* build_py_map(
+        const hash_map<position, patch_state>& patches,
+        const simulator_config& config)
+{
+    unsigned int index = 0;
+    PyObject* list = PyList_New(patches.table.size);
+    for (const auto& entry : patches) {
+        const patch_state& patch = entry.value;
+        PyObject* items = PyList_New(patch.item_count);
+        for (unsigned int i = 0; i < patch.item_count; i++)
+            PyList_SetItem(items, i, Py_BuildValue("I(LL)",
+                    patch.items[i].item_type,
+                    patch.items[i].location.x,
+                    patch.items[i].location.y));
+
+        PyObject* agents = PyList_New(patch.agent_count);
+        for (unsigned int i = 0; i < patch.agent_count; i++)
+            PyList_SetItem(agents, i, Py_BuildValue("(LL)", patch.agents[i].x, patch.agents[i].y));
+
+        unsigned int n = config.patch_size;
+        PyObject* scent = PyList_New(n);
+        PyObject* vision = PyList_New(n);
+        for (unsigned int i = 0; i < config.patch_size; i++) {
+            PyObject* scent_row = PyList_New(n);
+            PyObject* vision_row = PyList_New(n);
+            PyList_SetItem(scent, i, scent_row);
+            PyList_SetItem(vision, i, vision_row);
+            for (unsigned int j = 0; j < config.patch_size; j++) {
+                PyObject* scent_cell = PyTuple_New(config.scent_dimension);
+                PyObject* vision_cell = PyTuple_New(config.color_dimension);
+                PyList_SetItem(scent_row, j, scent_cell);
+                PyList_SetItem(vision_row, j, vision_cell);
+                for (unsigned int k = 0; k < config.scent_dimension; k++)
+                    PyTuple_SetItem(scent_cell, k, PyFloat_FromDouble(patch.scent[(i*n + j)*config.scent_dimension + k]));
+                for (unsigned int k = 0; k < config.color_dimension; k++)
+                    PyTuple_SetItem(vision_cell, k, PyFloat_FromDouble(patch.vision[(i*n + j)*config.color_dimension + k]));
+            }
+        }
+
+        PyObject* fixed = patch.fixed ? Py_True : Py_False;
+        Py_INCREF(fixed);
+        PyObject* py_patch = Py_BuildValue("((LL)OOOOO)", patch.patch_position.x, patch.patch_position.y, fixed, scent, vision, items, agents);
+        PyList_SetItem(list, index, py_patch);
+        index++;
+    }
+    return list;
+}
+
+static PyObject* simulator_map(PyObject *self, PyObject *args) {
+    PyObject* py_sim_handle;
+    PyObject* py_client_handle;
+    int64_t py_bottom_left_x, py_bottom_left_y;
+    int64_t py_top_right_x, py_top_right_y;
+    if (!PyArg_ParseTuple(args, "OO(LL)(LL)", &py_sim_handle, &py_client_handle,
+            &py_bottom_left_x, &py_bottom_left_y, &py_top_right_x, &py_top_right_y))
+        return NULL;
+    position bottom_left = position(py_bottom_left_x, py_bottom_left_y);
+    position top_right = position(py_top_right_x, py_top_right_y);
+
+    if (py_client_handle == Py_None) {
+        /* the simulation is local, so call get_scent directly */
+        simulator<py_simulator_data>* sim_handle =
+                (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
+        hash_map<position, patch_state> patches(16, alloc_position_keys);
+        if (!sim_handle->get_map(bottom_left, top_right, patches)) {
+            PyErr_SetString(PyExc_RuntimeError, "simulator.get_map failed.");
+            return NULL;
+        }
+        return build_py_map(patches, sim_handle->get_config());
+    } else {
+        /* this is a client, so send a get_scent message to the server */
+        client<py_client_data>* client_handle =
+                (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
+        if (!send_get_map(*client_handle, bottom_left, top_right)) {
+            PyErr_SetString(PyExc_RuntimeError, "Unable to send get_map request.");
+            return NULL;
+        }
+
+		/* wait for response from server */
+		wait_for_server(*client_handle);
+        PyObject* py_map = build_py_map(*client_handle->data.response.map, client_handle->config);
+        for (auto entry : *client_handle->data.response.map)
+            free(entry.value);
+        free(*client_handle->data.response.map);
+        free(client_handle->data.response.map);
+    }
+}
+
 } /* namespace nel */
 
 static PyMethodDef SimulatorMethods[] = {
@@ -793,6 +891,7 @@ static PyMethodDef SimulatorMethods[] = {
     {"scent",  nel::simulator_scent, METH_VARARGS, "Gets the current scent perception of the given agent."},
     {"vision",  nel::simulator_vision, METH_VARARGS, "Gets the current vision perception of the given agent."},
     {"collected_items",  nel::simulator_collected_items, METH_VARARGS, "Gets the counts of the items collected by the given agent."},
+    {"map",  nel::simulator_map, METH_VARARGS, "Returns a list of patches within a given bounding box."},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
