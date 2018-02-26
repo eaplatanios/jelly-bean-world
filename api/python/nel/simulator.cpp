@@ -855,7 +855,10 @@ static PyObject* simulator_map(PyObject *self, PyObject *args) {
             PyErr_SetString(PyExc_RuntimeError, "simulator.get_map failed.");
             return NULL;
         }
-        return build_py_map(patches, sim_handle->get_config());
+        PyObject* py_map = build_py_map(patches, sim_handle->get_config());
+        for (auto entry : patches)
+            free(entry.value);
+        return py_map;
     } else {
         /* this is a client, so send a get_scent message to the server */
         client<py_client_data>* client_handle =
@@ -872,6 +875,7 @@ static PyObject* simulator_map(PyObject *self, PyObject *args) {
             free(entry.value);
         free(*client_handle->data.response.map);
         free(client_handle->data.response.map);
+        return py_map;
     }
 }
 

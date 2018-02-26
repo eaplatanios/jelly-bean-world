@@ -960,6 +960,7 @@ public:
 
             state.patch_position = patch_position;
             state.item_count = 0;
+            state.fixed = patch.fixed;
             for (unsigned int i = 0; i < patch.items.length; i++) {
                 if (patch.items[i].deletion_time == 0) {
                     state.items[state.item_count] = patch.items[i];
@@ -1089,7 +1090,7 @@ private:
                 unsigned int index = world.get_fixed_neighborhood(agent->current_position, neighborhood, patch_positions);
                 patch_type& current_patch = *neighborhood[index];
                 for (item& item : current_patch.items) {
-                    if (item.location == agent->current_position) {
+                    if (item.location == agent->current_position && item.deletion_time == 0) {
                         /* there is an item at our new position */
                         if (config.item_types[item.item_type].automatically_collected) {
                             /* collect this item */

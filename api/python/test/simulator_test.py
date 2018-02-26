@@ -4,7 +4,8 @@ from random import choice
 from time import sleep
 
 def try_move(agent):
-	dir = choice(list(nel.Direction))
+	#dir = choice(list(nel.Direction))
+	dir = choice([nel.Direction.RIGHT, nel.Direction.UP])
 	#dir = nel.Direction.RIGHT
 	return agent.move(dir)
 
@@ -45,6 +46,7 @@ while len(agents) < 1:
 	for agent in agents:
 		try_move(agent)
 
+painter = nel.MapVisualizer(config, (-30, -30), (100, 100))
 for t in range(1000):
 	for agent in agents:
 		try_move(agent)
@@ -53,3 +55,4 @@ for t in range(1000):
 	print("agents[0].collected_items(): " + str(agents[0].collected_items()))
 	print("agents[0].scent(): " + str(agents[0].scent()))
 	print("agents[0].vision(): " + str(agents[0].vision()))
+	painter.draw(sim._map((-30, -30), (100, 100)))
