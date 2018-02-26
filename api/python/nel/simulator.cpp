@@ -98,7 +98,7 @@ static pair<float*, Py_ssize_t> PyArg_ParseFloatList(PyObject* arg) {
         return make_pair<float*, Py_ssize_t>(NULL, 0);
     }
     for (unsigned int i = 0; i < len; i++)
-        items[i] = PyFloat_AsDouble(PyList_GetItem(arg, (Py_ssize_t) i));
+        items[i] = (float) PyFloat_AsDouble(PyList_GetItem(arg, (Py_ssize_t) i));
     return make_pair(items, len);
 }
 
@@ -302,13 +302,13 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
     pair<float*, Py_ssize_t> intensity_fn_args = PyArg_ParseFloatList(py_intensity_fn_args);
     pair<float*, Py_ssize_t> interaction_fn_args = PyArg_ParseFloatList(py_interaction_fn_args);
     config.intensity_fn = get_intensity_fn((intensity_fns) py_intensity_fn,
-            intensity_fn_args.key, (unsigned int) intensity_fn_args.value, config.item_types.length);
+            intensity_fn_args.key, (unsigned int) intensity_fn_args.value, (unsigned int) config.item_types.length);
     config.interaction_fn = get_interaction_fn((interaction_fns) py_interaction_fn,
-            interaction_fn_args.key, (unsigned int) interaction_fn_args.value, config.item_types.length);
+            interaction_fn_args.key, (unsigned int) interaction_fn_args.value, (unsigned int) config.item_types.length);
     config.intensity_fn_args = intensity_fn_args.key;
     config.interaction_fn_args = interaction_fn_args.key;
-    config.intensity_fn_arg_count = intensity_fn_args.value;
-    config.interaction_fn_arg_count = interaction_fn_args.value;
+    config.intensity_fn_arg_count = (unsigned int) intensity_fn_args.value;
+    config.interaction_fn_arg_count = (unsigned int) interaction_fn_args.value;
 
     if (config.intensity_fn == NULL || config.interaction_fn == NULL
      || config.intensity_fn_args == NULL || config.interaction_fn_args == NULL) {
@@ -320,7 +320,7 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
     py_simulator_data data;
     data.save_directory = save_filepath;
     if (save_filepath != NULL)
-        data.save_directory_length = strlen(save_filepath);
+        data.save_directory_length = (unsigned int) strlen(save_filepath);
     data.save_frequency = save_frequency;
     data.server = NULL;
     data.callback = py_callback;
@@ -364,7 +364,7 @@ static PyObject* simulator_load(PyObject *self, PyObject *args)
     py_simulator_data data;
     data.save_directory = save_filepath;
     if (save_filepath != NULL)
-        data.save_directory_length = strlen(save_filepath);
+        data.save_directory_length = (unsigned int) strlen(save_filepath);
     data.save_frequency = save_frequency;
     data.server = NULL;
     data.callback = py_callback;
@@ -757,7 +757,7 @@ static PyObject* simulator_collected_items(PyObject *self, PyObject *args) {
         return NULL;
 
     const unsigned int* items;
-    unsigned int item_type_count;
+    size_t item_type_count;
     if (py_client_handle == Py_None) {
         /* the simulation is local, so call get_scent directly */
         simulator<py_simulator_data>* sim_handle =
@@ -780,7 +780,7 @@ static PyObject* simulator_collected_items(PyObject *self, PyObject *args) {
     }
 
     PyObject* py_items = PyTuple_New(item_type_count);
-    for (unsigned int i = 0; i < item_type_count; i++)
+    for (size_t i = 0; i < item_type_count; i++)
         PyTuple_SetItem(py_items, i, PyLong_FromSize_t(items[i]));
     if (py_client_handle != Py_None)
         free((float*) items);

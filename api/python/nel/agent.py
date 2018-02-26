@@ -1,6 +1,6 @@
 from __future__ import absolute_import, division, print_function
 
-import abc, six
+import abc
 
 from .position import Position
 
@@ -14,7 +14,9 @@ class AgentState(object):
     self.vision = vision
 
 
-class Agent(six.with_metaclass(abc.ABCMeta, object)):
+class Agent(object):
+  __metaclass__ = abc.ABCMeta
+
   def __init__(self, simulator):
     self._simulator = simulator
     self._id = simulator._add_agent(self)

@@ -1,9 +1,13 @@
 from __future__ import absolute_import, division, print_function
 
+#try:
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection, PatchCollection
 from matplotlib.patches import Circle, Rectangle
+modules_loaded = True
+#except ImportError:
+#	modules_loaded = False
 
 __all__ = ['MapVisualizer']
 
@@ -13,6 +17,8 @@ MAXIMUM_SCENT = 6.0
 
 class MapVisualizer(object):
 	def __init__(self, simulator_config, bottom_left, top_right):
+		if not modules_loaded:
+			raise ImportError("numpy and matplotlib are required to use MapVisualizer.")
 		plt.ion()
 		self._config = simulator_config
 		self._xlim = [bottom_left[0], top_right[0]]

@@ -179,11 +179,11 @@ inline bool receive_get_collected_items(Stream& in, socket_type& connection, sim
 	if (!read(agent_id, in))
 		return false;
 	const unsigned int* items = sim.get_collected_items(agent_id);
-	memory_stream mem_stream = memory_stream(sizeof(message_type)
-			+ sizeof(agent_id) + (sizeof(unsigned int) * sim.get_config().item_types.length));
+	memory_stream mem_stream = memory_stream((unsigned int) (sizeof(message_type)
+			+ sizeof(agent_id) + (sizeof(unsigned int) * sim.get_config().item_types.length)));
 	fixed_width_stream<memory_stream> out(mem_stream);
 	return write(message_type::GET_COLLECTED_ITEMS_RESPONSE, out)
-		&& write(agent_id, out) && write(items, out, sim.get_config().item_types.length)
+		&& write(agent_id, out) && write(items, out, (unsigned int) sim.get_config().item_types.length)
 		&& send_message(connection, mem_stream.buffer, mem_stream.position);
 }
 
@@ -317,7 +317,7 @@ struct client {
 	simulator_config config;
 	ClientData data;
 
-	static inline bool free(client<ClientData>& c) {
+	static inline void free(client<ClientData>& c) {
 		c.response_listener.~thread();
 		core::free(c.config);
 		core::free(c.data);
@@ -485,7 +485,7 @@ inline bool receive_get_collected_items_response(ClientType& c) {
 	if (items == NULL) {
 		fprintf(stderr, "receive_get_collected_items_response ERROR: Out of memory.\n");
 		return false;
-	} else if (!read(agent_id, in) || !read(items, in, c.config.item_types.length)) {
+	} else if (!read(agent_id, in) || !read(items, in, (unsigned int) c.config.item_types.length)) {
 		free(items); return false;
 	}
 	on_get_collected_items(c, agent_id, items);

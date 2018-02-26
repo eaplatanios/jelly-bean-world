@@ -136,7 +136,7 @@ public:
 #if !defined(NDEBUG)
 			rng.seed(0);
 #else
-			rng.seed(time(NULL));
+			rng.seed((unsigned int) time(NULL));
 #endif
 		}
 
@@ -448,7 +448,7 @@ inline bool init(map<PerPatchData>& world, unsigned int n,
 #if !defined(NDEBUG)
 	new (&world.rng) std::minstd_rand(0);
 #else
-	new (&world.rng) std::minstd_rand(time(NULL));
+	new (&world.rng) std::minstd_rand((unsigned int) time(NULL));
 #endif
 	return true;
 }

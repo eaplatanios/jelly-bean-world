@@ -656,7 +656,7 @@ inline bool read(agent_state& agent, Stream& in, const simulator_config& config)
      || !read(agent.current_vision, in, (2*config.vision_range + 1) * (2*config.vision_range + 1) * config.color_dimension)
      || !read(agent.agent_acted, in)
      || !read(agent.requested_position, in)
-     || !read(agent.collected_items, in, config.item_types.length)) {
+     || !read(agent.collected_items, in, (unsigned int) config.item_types.length)) {
          free(agent.current_scent); free(agent.current_vision);
          free(agent.collected_items); return false;
      }
@@ -671,7 +671,7 @@ inline bool write(const agent_state& agent, Stream& out, const simulator_config&
         && write(agent.current_vision, out, (2*config.vision_range + 1) * (2*config.vision_range + 1) * config.color_dimension)
         && write(agent.agent_acted, out)
         && write(agent.requested_position, out)
-        && write(agent.collected_items, out, config.item_types.length);
+        && write(agent.collected_items, out, (unsigned int) config.item_types.length);
 }
 
 /**
@@ -853,7 +853,7 @@ public:
 
         if (!init(*new_agent, world, scent_model, config, time)) {
             agent_array_lock.lock();
-            agents.remove(id);
+            agents.remove((size_t) id);
             core::free(new_agent);
             agent_array_lock.unlock();
             return UINT64_MAX;
@@ -877,7 +877,7 @@ public:
         if (num_steps > config.max_steps_per_movement) return false;
 
         agent_array_lock.lock();
-        agent_state& agent = *agents[agent_id];
+        agent_state& agent = *agents[(size_t) agent_id];
         agent_array_lock.unlock();
 
         agent.lock.lock();
@@ -907,28 +907,28 @@ public:
 
     inline position get_position(uint64_t agent_id) {
         agent_array_lock.lock();
-        agent_state& agent = *agents[agent_id];
+        agent_state& agent = *agents[(size_t) agent_id];
         agent_array_lock.unlock();
         return agent.current_position;
     }
 
     inline const float* get_scent(uint64_t agent_id) {
         agent_array_lock.lock();
-        agent_state& agent = *agents[agent_id];
+        agent_state& agent = *agents[(size_t) agent_id];
         agent_array_lock.unlock();
         return agent.current_scent;
     }
 
     inline const float* get_vision(uint64_t agent_id) {
         agent_array_lock.lock();
-        agent_state& agent = *agents[agent_id];
+        agent_state& agent = *agents[(size_t) agent_id];
         agent_array_lock.unlock();
         return agent.current_vision;
     }
 
     inline const unsigned int* get_collected_items(uint64_t agent_id) {
         agent_array_lock.lock();
-        agent_state& agent = *agents[agent_id];
+        agent_state& agent = *agents[(size_t) agent_id];
         agent_array_lock.unlock();
         return agent.collected_items;
     }
@@ -953,7 +953,8 @@ public:
             patch_state& state = patches.get(patch_position, contains, bucket);
             if (!init(state, config.patch_size,
                     config.scent_dimension, config.color_dimension,
-                    patch.items.length, patch.data.agents.length))
+                    (unsigned int) patch.items.length,
+					(unsigned int) patch.data.agents.length))
                 return false;
             patches.table.keys[bucket] = patch_position;
             patches.table.size++;
@@ -1238,7 +1239,7 @@ bool read(simulator<SimulatorData>& sim, Stream& in, const SimulatorData& data)
 
     size_t agent_count;
     if (!read(agent_count, in)
-     || !array_init(sim.agents, 1 << (core::log2(agent_count) + 2))) {
+     || !array_init(sim.agents, ((size_t) 1) << (core::log2(agent_count) + 2))) {
         free(sim.data); free(sim.config); return false;
     }
     for (unsigned int i = 0; i < agent_count; i++) {
@@ -1301,7 +1302,7 @@ bool write(const simulator<SimulatorData>& sim, Stream& out)
     if (!write(sim.config, out))
         return false;
 
-    hash_map<const agent_state*, unsigned int> agent_indices(sim.agents.length * RESIZE_THRESHOLD_INVERSE);
+    hash_map<const agent_state*, unsigned int> agent_indices((unsigned int) sim.agents.length * RESIZE_THRESHOLD_INVERSE);
     if (!write(sim.agents.length, out)) return false;
     for (unsigned int i = 0; i < sim.agents.length; i++) {
         agent_indices.put(sim.agents[i], i);
