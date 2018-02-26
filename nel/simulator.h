@@ -291,7 +291,7 @@ bool read(simulator_config& config, Stream& in) {
      || !read(config.patch_size, in)
      || !read(config.gibbs_iterations, in)
      || !read(config.item_types, in, config.scent_dimension, config.color_dimension))
-     return false;
+        return false;
 
     config.agent_color = (float*) malloc(sizeof(float) * config.color_dimension);
     if (config.agent_color == NULL) {

@@ -440,7 +440,10 @@ template<typename ClientType>
 inline bool receive_get_config_response(ClientType& c) {
 	simulator_config& config = *((simulator_config*) alloca(sizeof(simulator_config)));
 	fixed_width_stream<socket_type> in(c.connection);
-	if (!read(config, in)) return false;
+	if (!read(config, in)) {
+		fprintf(stderr, "receive_get_config_response ERROR: Unable to deserialize configuration.\n");
+		return false;
+	}
 	swap(c.config, config);
 	free(config); /* free the old configuration */
 	return true;
