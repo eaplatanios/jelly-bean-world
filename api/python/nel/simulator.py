@@ -173,10 +173,10 @@ class Simulator(object):
   def _collected_items(self, agent_id):
     return simulator_c.collected_items(self._handle, self._client_handle, agent_id)
 
-  def _step_callback(self):
+  def _step_callback(self, saved):
     self._time += 1
     for (id, agent) in self.agents.items():
-      agent.on_step()
+      agent.on_step(saved)
 
   def time(self):
     return self._time

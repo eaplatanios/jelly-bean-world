@@ -23,6 +23,6 @@ void test_diffusion(T alpha, T lambda,
 }
 
 int main(int argc, const char** argv) {
-	test_diffusion<double>(0.13, 0.47, 64, 2000 + 1);
+	test_diffusion<double>(0.14, 0.4, 32, 2000 + 1);
 	return EXIT_SUCCESS;
 }

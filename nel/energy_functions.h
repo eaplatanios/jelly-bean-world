@@ -74,7 +74,8 @@ interaction_function get_interaction_fn(interaction_fns type, float* args,
 		return zero_interaction_fn;
 	case interaction_fns::PIECEWISE_BOX:
 		if (num_args < 4 * item_type_count * item_type_count + 1) {
-			fprintf(stderr, "get_interaction_fn ERROR: A piecewise-box integration function requires 4 arguments.");
+			fprintf(stderr, "get_interaction_fn ERROR: A piecewise-box integration"
+					" function requires 4 * (item_type_count)^2 + 1 arguments.");
 			return NULL;
 		}
 		return piecewise_box_interaction_fn;

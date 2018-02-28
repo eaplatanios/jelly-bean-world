@@ -102,19 +102,19 @@ static pair<float*, Py_ssize_t> PyArg_ParseFloatList(PyObject* arg) {
     return make_pair(items, len);
 }
 
-void save(const simulator<py_simulator_data>* sim,
+bool save(const simulator<py_simulator_data>* sim,
         const py_simulator_data& data, uint64_t time)
 {
     int length = snprintf(NULL, 0, "%" PRIu64, time);
     if (length < 0) {
         fprintf(stderr, "on_step ERROR: Error computing filepath to save simulation.\n");
-        return;
+        return false;
     }
 
     char* filepath = (char*) malloc(sizeof(char) * (data.save_directory_length + length + 1));
     if (filepath == NULL) {
         fprintf(stderr, "on_step ERROR: Insufficient memory for filepath.\n");
-        return;
+        return false;
     }
 
     for (unsigned int i = 0; i < data.save_directory_length; i++)
@@ -124,28 +124,32 @@ void save(const simulator<py_simulator_data>* sim,
     FILE* file = fopen(filepath, "wb");
     if (file == NULL) {
         fprintf(stderr, "on_step: Unable to open '%s' for writing", filepath);
-        perror(""); return;
+        perror(""); return false;
     }
 
     fixed_width_stream<FILE*> out(file);
-    write(*sim, out);
+    bool result = write(*sim, out);
     fclose(file);
+    return result;
 }
 
 void on_step(const simulator<py_simulator_data>* sim,
         py_simulator_data& data, uint64_t time)
 {
+    bool saved = false;
     if (data.server != NULL) {
         /* this simulator is a server, so send a step response to every client */
         if (!send_step_response(*data.server))
             fprintf(stderr, "on_step ERROR: send_step_response failed.\n");
     } if (data.save_directory != NULL && time % data.save_frequency == 0) {
         /* save the simulator to a local file */
-        save(sim, data, time);
+        saved = save(sim, data, time);
     }
 
     /* call python callback */
-    PyObject* args = Py_BuildValue("()", time);
+    PyObject* py_saved = saved ? Py_True : Py_False;
+    Py_INCREF(py_saved);
+    PyObject* args = Py_BuildValue("(O)", py_saved);
     PyObject* result = PyEval_CallObject(data.callback, args);
     Py_DECREF(args);
     if (result != NULL)

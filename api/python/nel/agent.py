@@ -37,5 +37,5 @@ class Agent(object):
     return self._simulator._collected_items(self._id)
 
   @abc.abstractmethod
-  def on_step(self):
+  def on_step(self, saved):
     pass
