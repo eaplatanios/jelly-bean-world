@@ -2,11 +2,12 @@ import nel
 from math import pi, tan
 from random import choice
 from time import sleep
+from timeit import default_timer
 
 def try_move(agent):
 	#dir = choice(list(nel.Direction))
-	dir = choice([nel.Direction.RIGHT, nel.Direction.UP])
-	#dir = nel.Direction.RIGHT
+	#dir = choice([nel.Direction.RIGHT, nel.Direction.UP])
+	dir = nel.Direction.RIGHT
 	return agent.move(dir)
 
 class RandomAgent(nel.Agent):
@@ -22,12 +23,12 @@ items.append(nel.Item("banana", [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], False))
 items.append(nel.Item("onion", [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], False))
 items.append(nel.Item("jellybean", [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], True))
 
-intensity_fn_args = [-5.5, -5.4, -5.0]
+intensity_fn_args = [-5.2, -5.0, -5.2]
 interaction_fn_args = [len(items)]
-interaction_fn_args.extend([0.0, 0.0, 0.0, 0.0])         # parameters for interaction between item 0 and item 0
-interaction_fn_args.extend([0.0, 0.0, 0.0, 0.0])         # parameters for interaction between item 0 and item 1
+interaction_fn_args.extend([10.0, 200.0, 0.0, -6.0])     # parameters for interaction between item 0 and item 0
+interaction_fn_args.extend([200.0, 0.0, -6.0, -6.0])     # parameters for interaction between item 0 and item 1
 interaction_fn_args.extend([10.0, 200.0, 2.0, -100.0])   # parameters for interaction between item 0 and item 2
-interaction_fn_args.extend([0.0, 0.0, 0.0, 0.0])         # parameters for interaction between item 1 and item 0
+interaction_fn_args.extend([200.0, 0.0, -6.0, -6.0])     # parameters for interaction between item 1 and item 0
 interaction_fn_args.extend([0.0, 0.0, 0.0, 0.0])         # parameters for interaction between item 1 and item 1
 interaction_fn_args.extend([200.0, 0.0, -100.0, -100.0]) # parameters for interaction between item 1 and item 2
 interaction_fn_args.extend([10.0, 200.0, 2.0, -100.0])   # parameters for interaction between item 2 and item 0
@@ -56,13 +57,19 @@ while len(agents) < 1:
 	for agent in agents:
 		try_move(agent)
 
-painter = nel.MapVisualizer(sim, config, (-30, -30), (150, 150))
-for t in range(1000):
+#painter = nel.MapVisualizer(sim, config, (-30, -30), (150, 150))
+start_time = default_timer()
+elapsed = 0.0
+for t in range(10000):
 	for agent in agents:
 		try_move(agent)
-	print("time: " + str(sim.time()))
-	print("agents[0].position(): " + str(agents[0].position()))
-	print("agents[0].collected_items(): " + str(agents[0].collected_items()))
-	print("agents[0].scent(): " + str(agents[0].scent()))
-	print("agents[0].vision(): " + str(agents[0].vision()))
-	painter.draw()
+	if default_timer() - start_time > 1.0:
+		elapsed += default_timer() - start_time
+		print(str(sim.time() / elapsed) + " simulation steps per second.")
+		start_time = default_timer()
+	#print("time: " + str(sim.time()))
+	#print("agents[0].position(): " + str(agents[0].position()))
+	#print("agents[0].collected_items(): " + str(agents[0].collected_items()))
+	#print("agents[0].scent(): " + str(agents[0].scent()))
+	#print("agents[0].vision(): " + str(agents[0].vision()))
+	#painter.draw()

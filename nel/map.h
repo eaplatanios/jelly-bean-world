@@ -121,6 +121,7 @@ struct map {
 	unsigned int gibbs_iterations;
 
 	std::minstd_rand rng;
+	gibbs_field_cache cache;
 
 	typedef patch<PerPatchData> patch_type;
 	typedef item item_type;
@@ -132,13 +133,15 @@ public:
 		patches(1024, alloc_position_keys), 
 		intensity_fn(intensity_fn), interaction_fn(interaction_fn), 
 		intensity_fn_args(intensity_fn_args), interaction_fn_args(interaction_fn_args), 
-		n(n), item_type_count(item_type_count), gibbs_iterations(gibbs_iterations) {
+		n(n), item_type_count(item_type_count), gibbs_iterations(gibbs_iterations),
+		cache(*this, n, item_type_count, is_stationary(intensity_fn), is_stationary(interaction_fn))
+	{
 #if !defined(NDEBUG)
-			rng.seed(0);
+		rng.seed(0);
 #else
-			rng.seed((unsigned int) time(NULL));
+		rng.seed((unsigned int) time(NULL));
 #endif
-		}
+	}
 
 	~map() { free_helper(); }
 
@@ -146,12 +149,14 @@ public:
 		rng.seed(new_seed);
 	}
 
-	inline float intensity(const position& pos, unsigned int item_type) {
+	inline float intensity(const position& pos, unsigned int item_type) const {
 		return intensity_fn(pos, item_type, intensity_fn_args);
 	}
 
 	inline float interaction(
-			const position& pos1, const position& pos2, unsigned int item_type1, unsigned int item_type2) {
+			const position& pos1, const position& pos2,
+			unsigned int item_type1, unsigned int item_type2) const
+	{
 		return interaction_fn(pos1, pos2, item_type1, item_type2, interaction_fn_args);
 	}
 
@@ -311,6 +316,7 @@ public:
 	static inline void free(map& world) {
 		world.free_helper();
 		core::free(world.patches);
+		core::free(world.cache);
 		world.rng.~linear_congruential_engine();
 	}
 
@@ -413,15 +419,30 @@ private:
 		}
 
 		/* construct the Gibbs field and sample the patches at positions_to_sample */
-		gibbs_field<map> field(*this,
-				positions_to_sample.data,
-				(unsigned int) positions_to_sample.length,
-				n, item_type_count);
-		for (unsigned int i = 0; i < gibbs_iterations; i++)
-			field.sample(rng);
+		if (is_stationary(intensity_fn)) {
+			if (is_stationary(interaction_fn)) {
+				sample_patches<true, true>(positions_to_sample);
+			} else {
+				sample_patches<true, false>(positions_to_sample);
+			}
+		} else {
+			if (is_stationary(interaction_fn)) {
+				sample_patches<false, true>(positions_to_sample);
+			} else {
+				sample_patches<false, false>(positions_to_sample);
+			}
+		}
 
 		for (unsigned int i = 0; i < patch_count; i++)
 			patches[i]->fixed = true;
+	}
+
+	template<bool StationaryIntensity, bool StationaryInteraction>
+	inline void sample_patches(const array<position>& positions_to_sample) {
+		gibbs_field<map<PerPatchData>, StationaryIntensity, StationaryInteraction> field(
+				*this, cache, positions_to_sample.data, (unsigned int) positions_to_sample.length, n, item_type_count);
+		for (unsigned int i = 0; i < gibbs_iterations; i++)
+			field.sample(rng);
 	}
 
 	inline void free_helper() {
@@ -445,6 +466,12 @@ inline bool init(map<PerPatchData>& world, unsigned int n,
 	world.n = n;
 	world.item_type_count = item_type_count;
 	world.gibbs_iterations = gibbs_iterations;
+	if (!init(world.cache, world, n, item_type_count,
+			is_stationary(intensity_fn), is_stationary(interaction_fn))) {
+		free(world.patches);
+		return false;
+	}
+
 #if !defined(NDEBUG)
 	new (&world.rng) std::minstd_rand(0);
 #else
@@ -476,10 +503,18 @@ bool read(map<PerPatchData>& world, Stream& in,
 	world.interaction_fn = interaction_fn;
 	world.intensity_fn_args = intensity_fn_args;
 	world.interaction_fn_args = interaction_fn_args;
-	return read(world.patches, in, alloc_position_keys, scribe, patch_reader)
-		&& read(world.n, in)
-		&& read(world.item_type_count, in)
-		&& read(world.gibbs_iterations, in);
+	if (!read(world.n, in)
+	 || !read(world.item_type_count, in)
+	 || !read(world.gibbs_iterations, in)
+	 || !read(world.patches, in, alloc_position_keys, scribe, patch_reader))
+		return false;
+	if (!init(world.cache, world, world.n, world.item_type_count,
+			is_stationary(intensity_fn), is_stationary(interaction_fn)))
+	{
+		free(world.patches);
+		return false;
+	}
+	return true;
 }
 
 /* NOTE: this function assumes the variables in the map are not modified during writing */

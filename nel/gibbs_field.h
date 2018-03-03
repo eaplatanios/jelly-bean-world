@@ -10,10 +10,129 @@ namespace nel {
 
 using namespace core;
 
+/**
+ * Structure for optimizing gibbs_field sampling when the intensity and/or
+ * interaction functions are stationary.
+ */
+struct gibbs_field_cache
+{
+	float* intensities;
+	float* interactions;
+	unsigned int two_n, four_n;
+	unsigned int item_type_count;
+
+	template<typename Map>
+	gibbs_field_cache(const Map& map, unsigned int n, unsigned int item_type_count,
+			bool is_intensity_stationary, bool is_interaction_stationary) :
+		intensities(NULL), interactions(NULL),
+		two_n(2*n), four_n(4*n), item_type_count(item_type_count)
+	{
+		if (!init_helper(map, is_intensity_stationary, is_interaction_stationary))
+			exit(EXIT_FAILURE);
+	}
+
+	~gibbs_field_cache() { free_helper(); }
+
+	template<typename Map, bool Stationary>
+	inline float intensity(const Map& map, const position& pos, unsigned int item_type) {
+		if (Stationary)
+			return intensities[item_type];
+		else return map.intensity(pos, item_type);
+	}
+
+	template<typename Map, bool Stationary>
+	inline float interaction(const Map& map,
+			const position& first_position, const position& second_position,
+			unsigned int first_item_type, unsigned int second_item_type)
+	{
+		if (!Stationary) {
+			if (first_position == second_position) return 0.0f;
+			return map.interaction(first_position, second_position, first_item_type, second_item_type);
+		}
+
+		position diff = first_position - second_position + position(two_n, two_n);
+#if !defined(NDEBUG)
+		if (diff.x < 0 || diff.x >= four_n || diff.y < 0 || diff.y >= four_n) {
+			fprintf(stderr, "gibbs_field_cache.interaction WARNING: The "
+					"given two positions further than 4*n from each other.");
+			return 0.0f;
+		}
+#endif
+		return interactions[((diff.x*four_n + diff.y)*item_type_count + first_item_type)*item_type_count + second_item_type];
+	}
+
+	static inline void free(gibbs_field_cache& cache) { cache.free_helper(); }
+
+private:
+	template<typename Map>
+	inline bool init_helper(const Map& map, bool is_intensity_stationary, bool is_interaction_stationary) {
+		if (is_intensity_stationary) {
+			intensities = (float*) malloc(sizeof(float) * item_type_count);
+			if (intensities == NULL) {
+				fprintf(stderr, "gibbs_field_cache.init_helper ERROR: Insufficient memory for intensities.\n");
+				return false;
+			}
+
+			/* precompute all intensities */
+			for (unsigned int i = 0; i < item_type_count; i++)
+				intensities[i] = map.intensity(position(0, 0), i);
+		}
+		if (is_interaction_stationary) {
+			interactions = (float*) malloc(sizeof(float) * four_n * four_n * item_type_count * item_type_count);
+			if (interactions == NULL) {
+				fprintf(stderr, "gibbs_field_cache.init_helper ERROR: Insufficient memory for interactions.\n");
+				if (intensities != NULL) core::free(intensities);
+				return false;
+			}
+
+			/* precompute all interactions */
+			for (unsigned int x = 0; x < four_n; x++) {
+				for (unsigned int y = 0; y < four_n; y++) {
+					for (unsigned int i = 0; i < item_type_count; i++) {
+						for (unsigned int j = 0; j < item_type_count; j++) {
+							float interaction;
+							if (x == two_n && y == two_n)
+								interaction = 0.0f;
+							else interaction = map.interaction(position(two_n, two_n), position(x, y), i, j);
+							interactions[((x*four_n + y)*item_type_count + i)*item_type_count + j] = interaction;
+						}
+					}
+				}
+			}
+		}
+		return true;
+	}
+
+	inline void free_helper() {
+		if (intensities != NULL)
+			core::free(intensities);
+		if (interactions != NULL)
+			core::free(interactions);
+	}
+
+	template<typename A>
+	friend bool init(gibbs_field_cache&, const A&,
+			unsigned int, unsigned int, bool, bool);
+};
+
 template<typename Map>
+bool init(gibbs_field_cache& cache, const Map& map,
+		unsigned int n, unsigned int item_type_count,
+		bool is_intensity_stationary, bool is_interaction_stationary)
+{
+	cache.intensities = NULL;
+	cache.interactions = NULL;
+	cache.two_n = 2*n;
+	cache.four_n = 4*n;
+	cache.item_type_count = item_type_count;
+	return cache.init_helper(map, is_intensity_stationary, is_interaction_stationary);
+}
+
+template<typename Map, bool StationaryIntensity, bool StationaryInteraction>
 class gibbs_field
 {
 	Map& map;
+	gibbs_field_cache& cache;
 	position* patch_positions;
 	unsigned int patch_count;
 
@@ -24,18 +143,20 @@ class gibbs_field
 	typedef typename Map::item_type item_type;
 
 public:
-	/* NOTE: `patches` and `patch_positions` are used directly, and not copied */
-	gibbs_field(Map& map, position* patch_positions, unsigned int patch_count,
-			unsigned int n, unsigned int item_type_count) :
-		map(map), patch_positions(patch_positions), patch_count(patch_count),
+	/* NOTE: `patch_positions` is used directly, and not copied, so the caller maintains ownership */
+	gibbs_field(Map& map, gibbs_field_cache& cache, position* patch_positions,
+			unsigned int patch_count, unsigned int n, unsigned int item_type_count) :
+		map(map), cache(cache), patch_positions(patch_positions), patch_count(patch_count),
 		n(n), item_type_count(item_type_count) { }
 
 	~gibbs_field() { }
 
 	template<typename RNGType>
 	void sample(RNGType& rng) {
-		for (unsigned int i = 0; i < patch_count * n * n; i++)
-			sample_cell(rng, patch_positions[sample_uniform(rng, patch_count)], {sample_uniform(rng, n), sample_uniform(rng, n)});
+		for (unsigned int i = 0; i < patch_count; i++)
+			for (unsigned int x = 0; x < n; x++)
+				for (unsigned int y = 0; y < n; y++)
+					sample_cell(rng, patch_positions[i], {x, y});
 	}
 
 private:
@@ -56,22 +177,25 @@ private:
 		unsigned int patch_index;
 		unsigned int neighbor_count = map.get_neighborhood(world_position, neighborhood, neighbor_positions, patch_index);
 
-		float* log_probabilities = (float*) malloc(sizeof(float) * (item_type_count + 1));
+		/* compute the old item type and index */
+		patch_type& current_patch = *neighborhood[patch_index];
 		unsigned int old_item_index = 0, old_item_type = item_type_count;
-		for (unsigned int i = 0; i < item_type_count; i++) {
-			/* compute the energy contribution of this cell when the item type is `i` */
-			log_probabilities[i] = map.intensity(world_position, i);
-			for (unsigned int j = 0; j < neighbor_count; j++) {
-				const array<item_type>& items = neighborhood[j]->items;
-				for (unsigned int m = 0; m < items.length; m++) {
-					if (items[m].location == world_position) {
-						old_item_index = m;
-						old_item_type = items[m].item_type;
-						continue; /* ignore the current position */
-					}
+		for (unsigned int m = 0; m < current_patch.items.length; m++) {
+			if (current_patch.items[m].location == world_position) {
+				old_item_type = current_patch.items[m].item_type;
+				old_item_index = m; break;
+			}
+		}
 
-					log_probabilities[i] += map.interaction(world_position, items[m].location, i, items[m].item_type);
-				}
+		float* log_probabilities = (float*) malloc(sizeof(float) * (item_type_count + 1));
+		for (unsigned int i = 0; i < item_type_count; i++)
+			log_probabilities[i] = cache.intensity<Map, StationaryIntensity>(map, world_position, i);
+		for (unsigned int j = 0; j < neighbor_count; j++) {
+			const array<item_type>& items = neighborhood[j]->items;
+			for (unsigned int m = 0; m < items.length; m++) {
+				for (unsigned int i = 0; i < item_type_count; i++)
+					/* compute the energy contribution of this cell when the item type is `i` */
+					log_probabilities[i] += cache.interaction<Map, StationaryInteraction>(map, world_position, items[m].location, i, items[m].item_type);
 			}
 		}
 
@@ -82,7 +206,6 @@ private:
 				log_probabilities, random, item_type_count + 1);
 		free(log_probabilities);
 
-		patch_type& current_patch = *neighborhood[patch_index];
 		if (old_item_type == sampled_item_type) {
 			/* the Gibbs step didn't change anything */
 			return;

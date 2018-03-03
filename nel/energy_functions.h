@@ -132,6 +132,16 @@ inline bool write(const interaction_function& function, Stream& out) {
 	}
 }
 
+inline bool is_stationary(const intensity_function& function) {
+	return (function == zero_intensity_fn
+		 || function == constant_intensity_fn);
+}
+
+inline bool is_stationary(const interaction_function& function) {
+	return (function == zero_interaction_fn
+		 || function == piecewise_box_interaction_fn);
+}
+
 } /* namespace nel */
 
 #endif /* ENERGY_FUNCTIONS_H_ */
