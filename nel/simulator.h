@@ -573,6 +573,7 @@ inline bool init(
         uint64_t& current_time)
 {
     agent.current_position = {0, 0};
+    agent.requested_position = {0, 0};
     agent.current_scent = (float*) malloc(sizeof(float) * config.scent_dimension);
     if (agent.current_scent == NULL) {
         fprintf(stderr, "init ERROR: Insufficient memory for agent_state.current_scent.\n");
@@ -905,32 +906,13 @@ public:
         return true;
     }
 
-    inline position get_position(uint64_t agent_id) {
+    inline void get_agent_states(agent_state** states,
+            uint64_t* agent_ids, unsigned int agent_count)
+    {
         agent_array_lock.lock();
-        agent_state& agent = *agents[(size_t) agent_id];
+        for (unsigned int i = 0; i < agent_count; i++)
+            states[i] = agents[(size_t) agent_ids[i]];
         agent_array_lock.unlock();
-        return agent.current_position;
-    }
-
-    inline const float* get_scent(uint64_t agent_id) {
-        agent_array_lock.lock();
-        agent_state& agent = *agents[(size_t) agent_id];
-        agent_array_lock.unlock();
-        return agent.current_scent;
-    }
-
-    inline const float* get_vision(uint64_t agent_id) {
-        agent_array_lock.lock();
-        agent_state& agent = *agents[(size_t) agent_id];
-        agent_array_lock.unlock();
-        return agent.current_vision;
-    }
-
-    inline const unsigned int* get_collected_items(uint64_t agent_id) {
-        agent_array_lock.lock();
-        agent_state& agent = *agents[(size_t) agent_id];
-        agent_array_lock.unlock();
-        return agent.collected_items;
     }
 
     inline SimulatorData& get_data() {
@@ -1039,7 +1021,7 @@ public:
     }
 
 private:
-    /* Precondition: The mutex is locked. This function does not release the mutex. */
+    /* Precondition: The mutex is locked. This function releases the mutex. */
     inline void step()
     {
         requested_move_lock.lock();
@@ -1134,6 +1116,7 @@ private:
         update_agent_scent_and_vision();
 
         /* Invoke the step callback function for each agent. */
+        agent_array_lock.unlock();
         on_step(this, data, time);
     }
 

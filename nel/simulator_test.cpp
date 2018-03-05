@@ -41,7 +41,7 @@ FILE* out = stderr;
 async_server server;
 
 //#define MULTITHREADED
-//#define USE_MPI
+#define USE_MPI
 //#define TEST_SERIALIZATION
 //#define TEST_SERVER_CONNECTION_LOSS
 //#define TEST_CLIENT_CONNECTION_LOSS
@@ -92,7 +92,10 @@ inline bool try_move(
 		simulator<empty_data>& sim,
 		unsigned int i, bool& reverse)
 {
-	position current_position = sim.get_position((uint64_t) i);
+	agent_state* state;
+	uint64_t id = (uint64_t) i;
+	sim.get_agent_states(&state, &id, 1);
+	position current_position = state->current_position;
 
 	direction dir;
 	switch (move_pattern) {
@@ -254,8 +257,7 @@ bool test_multithreaded(const simulator_config& config)
 struct client_data {
 	unsigned int index;
 	uint64_t agent_id;
-	const float* perception;
-	const unsigned int* items;
+	agent_state* agent;
 	const hash_map<position, patch_state>* map;
 
 	bool move_result, waiting_for_step;
@@ -278,35 +280,15 @@ void on_move(client<client_data>& c, uint64_t agent_id, bool request_success) {
 	conditions[id].notify_one();
 }
 
-void on_get_position(client<client_data>& c, uint64_t agent_id, const position& pos) {
+void on_get_agent_states(client<client_data>& c, agent_state* agent, unsigned int agent_count) {
 	unsigned int id = c.data.index;
 	std::unique_lock<std::mutex> lck(locks[id]);
 	waiting_for_server[id] = false;
-	c.data.pos = pos;
-	conditions[id].notify_one();
-}
-
-void on_get_scent(client<client_data>& c, uint64_t agent_id, const float* scent) {
-	unsigned int id = c.data.index;
-	std::unique_lock<std::mutex> lck(locks[id]);
-	waiting_for_server[id] = false;
-	c.data.perception = scent;
-	conditions[id].notify_one();
-}
-
-void on_get_vision(client<client_data>& c, uint64_t agent_id, const float* vision) {
-	unsigned int id = c.data.index;
-	std::unique_lock<std::mutex> lck(locks[id]);
-	waiting_for_server[id] = false;
-	c.data.perception = vision;
-	conditions[id].notify_one();
-}
-
-void on_get_collected_items(client<client_data>& c, uint64_t agent_id, const unsigned int* items) {
-	unsigned int id = c.data.index;
-	std::unique_lock<std::mutex> lck(locks[id]);
-	waiting_for_server[id] = false;
-	c.data.items = items;
+	if (c.data.agent != NULL) {
+		free(*c.data.agent);
+		free(c.data.agent);
+	}
+	c.data.agent = &agent[0];
 	conditions[id].notify_one();
 }
 
@@ -343,23 +325,23 @@ inline void wait_for_server(std::condition_variable& cv,
 inline bool mpi_try_move(
 		client<client_data>& c, unsigned int i, bool& reverse)
 {
-	/* get current position */
+	/* get agent state (we need the current position) */
 	waiting_for_server[i] = true;
-	if (!send_get_position(c, c.data.agent_id)) {
+	if (!send_get_agent_states(c, &c.data.agent_id, 1)) {
 		print_lock.lock();
-		fprintf(out, "ERROR: Unable to send get_position request.\n");
+		fprintf(out, "ERROR: Server returned failure for get_agent_states request.\n");
 		print_lock.unlock();
 		return false;
 	}
+	/* wait for response from server */
 	wait_for_server(conditions[i], locks[i], waiting_for_server[i], c.client_running);
-	if (!c.client_running) return true;
 
 	direction dir;
 	switch (move_pattern) {
 	case movement_pattern::RADIAL:
-		dir = next_direction(c.data.pos, (2 * M_PI * i) / agent_count); break;
+		dir = next_direction(c.data.agent->current_position, (2 * M_PI * i) / agent_count); break;
 	case movement_pattern::BACK_AND_FORTH:
-		dir = next_direction(c.data.pos, -10 * (int64_t) agent_count, 10 * agent_count, reverse); break;
+		dir = next_direction(c.data.agent->current_position, -10 * (int64_t) agent_count, 10 * agent_count, reverse); break;
 	}
 
 	/* send move request */
@@ -402,8 +384,13 @@ void run_mpi_agent(unsigned int id,
 void cleanup_mpi(client<client_data>* clients,
 		unsigned int length = agent_count)
 {
-	for (unsigned int i = 0; i < length; i++)
+	for (unsigned int i = 0; i < length; i++) {
 		stop_client(clients[i]);
+		if (clients[i].data.agent != NULL) {
+			free(*clients[i].data.agent);
+			free(clients[i].data.agent);
+		}
+	}
 	stop_server(server);
 }
 
@@ -419,6 +406,7 @@ bool test_mpi(const simulator_config& config)
 	client<client_data> clients[agent_count];
 	for (unsigned int i = 0; i < agent_count; i++) {
 		clients[i].data.index = i;
+		clients[i].data.agent = NULL;
 		if (!init_client(clients[i], "localhost", "54353")) {
 			fprintf(out, "ERROR: Unable to initialize client %u.\n", i);
 			cleanup_mpi(clients, i); return false;

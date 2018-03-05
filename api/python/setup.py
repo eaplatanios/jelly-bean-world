@@ -1,9 +1,10 @@
 from distutils.core import setup, Extension
 from distutils.command.build_ext import build_ext
+import numpy as np
 
 extra_compile_args = {
     'msvc' : ['/W3', '/GT', '/Ox', '/Ot', '/Oy', '/DNDEBUG', '/DUNICODE'],
-    'unix' : ['-std=c++11', '-O3', '-DNDEBUG', '-fomit-frame-pointer', '-fno-stack-protector', '-mtune=native', '-march=native']}
+    'unix' : ['-std=c++11', '-Ofast', '-DNDEBUG', '-fomit-frame-pointer', '-fno-stack-protector', '-mtune=native', '-march=native']}
 extra_link_args = {
     'msvc' : ['ws2_32.lib']}
 
@@ -22,7 +23,7 @@ simulator_c = Extension(
   'nel.simulator_c',
   define_macros = [('MAJOR_VERSION', '1'),
                    ('MINOR_VERSION', '0')],
-  include_dirs = ['../..', '../../deps'],
+  include_dirs = ['../..', '../../deps', np.get_include()],
   # libraries = ['...'],
   # library_dirs = ['/usr/local/lib'],
   sources = ['nel/simulator.cpp'])

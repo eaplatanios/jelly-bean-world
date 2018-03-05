@@ -4,17 +4,14 @@ from random import choice
 from time import sleep
 from timeit import default_timer
 
-def try_move(agent):
-	#dir = choice(list(nel.Direction))
-	#dir = choice([nel.Direction.RIGHT, nel.Direction.UP])
-	dir = nel.Direction.RIGHT
-	return agent.move(dir)
-
-class RandomAgent(nel.Agent):
+class EasterlyAgent(nel.Agent):
 	def __init__(self, simulator):
-		super(RandomAgent, self).__init__(simulator)
+		super(EasterlyAgent, self).__init__(simulator)
 
-	def on_step(self, saved):
+	def next_move(self):
+		return nel.Direction.RIGHT
+
+	def save(self, saved):
 		pass
 
 
@@ -23,7 +20,7 @@ items.append(nel.Item("banana", [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], False))
 items.append(nel.Item("onion", [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], False))
 items.append(nel.Item("jellybean", [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], True))
 
-intensity_fn_args = [-5.2, -5.0, -5.2]
+intensity_fn_args = [-5.3, -5.0, -5.3]
 interaction_fn_args = [len(items)]
 interaction_fn_args.extend([10.0, 200.0, 0.0, -6.0])     # parameters for interaction between item 0 and item 0
 interaction_fn_args.extend([200.0, 0.0, -6.0, -6.0])     # parameters for interaction between item 0 and item 1
@@ -48,21 +45,21 @@ agents = []
 while len(agents) < 1:
 	print("adding agent " + str(len(agents)))
 	try:
-		agent = RandomAgent(sim)
+		agent = EasterlyAgent(sim)
 		agents.append(agent)
 	except:
 		pass
 
 	# move agents to avoid collision at (0,0)
 	for agent in agents:
-		try_move(agent)
+		sim._move(agent._id, agent.next_move(), 1)
 
-#painter = nel.MapVisualizer(sim, config, (-30, -30), (150, 150))
+painter = nel.MapVisualizer(sim, config, (-30, -30), (150, 150))
 start_time = default_timer()
 elapsed = 0.0
 for t in range(10000):
 	for agent in agents:
-		try_move(agent)
+		sim._move(agent._id, agent.next_move(), 1)
 	if default_timer() - start_time > 1.0:
 		elapsed += default_timer() - start_time
 		print(str(sim.time() / elapsed) + " simulation steps per second.")
@@ -72,4 +69,4 @@ for t in range(10000):
 	#print("agents[0].collected_items(): " + str(agents[0].collected_items()))
 	#print("agents[0].scent(): " + str(agents[0].scent()))
 	#print("agents[0].vision(): " + str(agents[0].vision()))
-	#painter.draw()
+	painter.draw()

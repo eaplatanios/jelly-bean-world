@@ -1,4 +1,7 @@
 #include <Python.h>
+#define PY_ARRAY_UNIQUE_SYMBOL NEL_ARRAY_API
+#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
+#include <numpy/arrayobject.h>
 
 #include <thread>
 #include "nel/gibbs_field.h"
@@ -56,10 +59,7 @@ struct py_client_data {
     union response {
         bool move_result;
         uint64_t agent_id;
-        position pos;
-        float* scent;
-        float* vision;
-        unsigned int* collected_items;
+        pair<agent_state*, unsigned int> agents;
         hash_map<position, patch_state>* map;
     } response;
 
@@ -174,36 +174,12 @@ void on_move(client<py_client_data>& c, uint64_t agent_id, bool request_success)
 	c.data.cv.notify_one();
 }
 
-void on_get_position(client<py_client_data>& c, uint64_t agent_id, const position& pos) {
+void on_get_agent_states(client<py_client_data>& c, agent_state* agents, unsigned int agent_count) {
 	std::unique_lock<std::mutex> lck(c.data.lock);
 	c.data.waiting_for_server = false;
-	c.data.response.pos = pos;
+	c.data.response.agents.key = agents;
+	c.data.response.agents.value = agent_count;
 	c.data.cv.notify_one();
-}
-
-void on_get_scent(client<py_client_data>& c, uint64_t agent_id, float* scent)
-{
-	std::unique_lock<std::mutex> lck(c.data.lock);
-	c.data.waiting_for_server = false;
-    c.data.response.scent = scent;
-    c.data.cv.notify_one();
-}
-
-void on_get_vision(client<py_client_data>& c, uint64_t agent_id, float* vision)
-{
-	std::unique_lock<std::mutex> lck(c.data.lock);
-	c.data.waiting_for_server = false;
-    c.data.response.vision = vision;
-    c.data.cv.notify_one();
-}
-
-void on_get_collected_items(client<py_client_data>& c,
-        uint64_t agent_id, unsigned int* collected_items)
-{
-	std::unique_lock<std::mutex> lck(c.data.lock);
-	c.data.waiting_for_server = false;
-    c.data.response.collected_items = collected_items;
-    c.data.cv.notify_one();
 }
 
 void on_get_map(client<py_client_data>& c,
@@ -627,168 +603,118 @@ static PyObject* simulator_move(PyObject *self, PyObject *args) {
     }
 }
 
-/** 
- * Gets the current position of an agent in the simulation environment.
- * 
- * \param   self    Pointer to the Python object calling this method.
- * \param   args    Arguments:
- *                  - Handle to the native simulator object as a PyLong.
- *                  - Handle to the native client object as a PyLong.
- *                  - Agent ID.
- * \returns Tuple containing the horizontal and vertical coordinates of the 
- *          agent's current position.
- */
-static PyObject* simulator_position(PyObject *self, PyObject *args) {
+static PyObject* build_py_agent(
+        const agent_state& agent, const simulator_config& config)
+{
+    /* first copy all arrays in 'agent' */
+    int64_t* positions = (int64_t*) malloc(sizeof(int64_t) * 2);
+    if (positions == NULL) {
+        PyErr_NoMemory();
+        return NULL;
+    }
+    float* scent = (float*) malloc(sizeof(float) * config.scent_dimension);
+    if (scent == NULL) {
+        PyErr_NoMemory(); free(positions);
+        return NULL;
+    }
+    unsigned int vision_size = (2*config.vision_range + 1) * (2*config.vision_range + 1) * config.color_dimension;
+    float* vision = (float*) malloc(sizeof(float) * vision_size);
+    if (vision == NULL) {
+        PyErr_NoMemory(); free(positions); free(scent);
+        return NULL;
+    }
+    uint64_t* items = (uint64_t*) malloc(sizeof(uint64_t) * config.item_types.length);
+    if (items == NULL) {
+        PyErr_NoMemory(); free(positions); free(scent); free(vision);
+        return NULL;
+    }
+
+    positions[0] = agent.current_position.x;
+    positions[1] = agent.current_position.y;
+    for (unsigned int i = 0; i < config.scent_dimension; i++)
+        scent[i] = agent.current_scent[i];
+    for (unsigned int i = 0; i < vision_size; i++)
+        vision[i] = agent.current_vision[i];
+    for (unsigned int i = 0; i < config.item_types.length; i++)
+        items[i] = agent.collected_items[i];
+
+    npy_intp pos_dim[] = {2};
+    npy_intp scent_dim[] = {config.scent_dimension};
+    npy_intp vision_dim[] = {2 * config.vision_range + 1, 2 * config.vision_range + 1, config.color_dimension};
+    npy_intp items_dim[] = {(npy_intp) config.item_types.length};
+    PyObject* py_position = PyArray_SimpleNewFromData(1, pos_dim, NPY_INT64, positions);
+    PyObject* py_scent = PyArray_SimpleNewFromData(1, scent_dim, NPY_FLOAT, scent);
+    PyObject* py_vision = PyArray_SimpleNewFromData(3, vision_dim, NPY_FLOAT, vision);
+    PyObject* py_items = PyArray_SimpleNewFromData(1, items_dim, NPY_UINT64, items);
+
+    return Py_BuildValue("(OOOO)", py_position, py_scent, py_vision, py_items);
+}
+
+static PyObject* simulator_agent_states(PyObject *self, PyObject *args) {
     PyObject* py_sim_handle;
     PyObject* py_client_handle;
-    unsigned long long agent_id;
-    if (!PyArg_ParseTuple(args, "OOK", &py_sim_handle, &py_client_handle, &agent_id))
+    PyObject* py_agent_ids;
+    if (!PyArg_ParseTuple(args, "OOO", &py_sim_handle, &py_client_handle, &py_agent_ids))
         return NULL;
+    if (!PyList_Check(py_agent_ids)) {
+        PyErr_SetString(PyExc_TypeError, "Third argument must be a list of ints.");
+        return NULL;
+    }
+
+    Py_ssize_t agent_count = PyList_Size(py_agent_ids);
+    uint64_t* agent_ids = (uint64_t*) malloc(sizeof(uint64_t) * agent_count);
+    if (agent_ids == NULL) {
+        PyErr_NoMemory();
+        return NULL;
+    }
+    for (Py_ssize_t i = 0; i < agent_count; i++)
+        agent_ids[i] = PyLong_AsUnsignedLongLong(PyList_GetItem(py_agent_ids, i));
+
     if (py_client_handle == Py_None) {
-        /* the simulation is local, so call get_position directly */
+        /* the simulation is local, so call get_agent_states directly */
+        agent_state** states = (agent_state**) malloc(sizeof(agent_state*) * agent_count);
+        if (states == NULL) {
+            PyErr_NoMemory();
+            free(agent_ids); return NULL;
+        }
+
         simulator<py_simulator_data>* sim_handle =
                 (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
-        position pos = sim_handle->get_position(agent_id);
-        return Py_BuildValue("(LL)", pos.x, pos.y);
+        sim_handle->get_agent_states(states, agent_ids, agent_count);
+        free(agent_ids);
+
+        PyObject* py_states = PyList_New(agent_count);
+        if (py_states == NULL) return NULL;
+        for (unsigned int i = 0; i < agent_count; i++) {
+            states[i]->lock.lock();
+            PyList_SetItem(py_states, i, build_py_agent(*states[i], sim_handle->get_config()));
+            states[i]->lock.unlock();
+        }
+        free(states);
+        return py_states;
     } else {
-        /* this is a client, so send a get_position message to the server */
+        /* this is a client, so send a get_agent_states message to the server */
         client<py_client_data>* client_handle =
                 (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
-        if (!send_get_position(*client_handle, agent_id)) {
+        if (!send_get_agent_states(*client_handle, agent_ids, agent_count)) {
             PyErr_SetString(PyExc_RuntimeError, "Unable to send get_position request.");
-            return NULL;
+            free(agent_ids); return NULL;
         }
 
 		/* wait for response from server */
 		wait_for_server(*client_handle);
+        agent_state* states = client_handle->data.response.agents.key;
+        agent_count = client_handle->data.response.agents.value;
 
-        return Py_BuildValue("(LL)", client_handle->data.response.pos.x, client_handle->data.response.pos.y);
-    }
-}
-
-static PyObject* simulator_scent(PyObject *self, PyObject *args) {
-    PyObject* py_sim_handle;
-    PyObject* py_client_handle;
-    unsigned long long agent_id;
-    if (!PyArg_ParseTuple(args, "OOK", &py_sim_handle, &py_client_handle, &agent_id))
-        return NULL;
-
-    const float* scent;
-    unsigned int scent_dimension;
-    if (py_client_handle == Py_None) {
-        /* the simulation is local, so call get_scent directly */
-        simulator<py_simulator_data>* sim_handle =
-                (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
-        scent = sim_handle->get_scent(agent_id);
-        scent_dimension = sim_handle->get_config().scent_dimension;
-    } else {
-        /* this is a client, so send a get_scent message to the server */
-        client<py_client_data>* client_handle =
-                (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
-        if (!send_get_scent(*client_handle, agent_id)) {
-            PyErr_SetString(PyExc_RuntimeError, "Unable to send get_scent request.");
-            return NULL;
+        PyObject* py_states = PyList_New(agent_count);
+        if (py_states == NULL) return NULL;
+        for (unsigned int i = 0; i < agent_count; i++) {
+            PyList_SetItem(py_states, i, build_py_agent(states[i], client_handle->config));
+            free(states[i]);
         }
-
-		/* wait for response from server */
-		wait_for_server(*client_handle);
-        scent = client_handle->data.response.scent;
-        scent_dimension = client_handle->config.scent_dimension;
+        free(states);
+        return py_states;
     }
-
-    PyObject* py_scent = PyTuple_New(scent_dimension);
-    for (unsigned int i = 0; i < scent_dimension; i++)
-        PyTuple_SetItem(py_scent, i, PyFloat_FromDouble(scent[i]));
-    if (py_client_handle != Py_None)
-        free((float*) scent);
-    return py_scent;
-}
-
-static PyObject* simulator_vision(PyObject *self, PyObject *args) {
-    PyObject* py_sim_handle;
-    PyObject* py_client_handle;
-    unsigned long long agent_id;
-    if (!PyArg_ParseTuple(args, "OOK", &py_sim_handle, &py_client_handle, &agent_id))
-        return NULL;
-
-    const float* vision;
-    unsigned int color_dimension, vision_range;
-    if (py_client_handle == Py_None) {
-        /* the simulation is local, so call get_vision directly */
-        simulator<py_simulator_data>* sim_handle =
-                (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
-        vision = sim_handle->get_vision(agent_id);
-        vision_range = sim_handle->get_config().vision_range;
-        color_dimension = sim_handle->get_config().color_dimension;
-    } else {
-        /* this is a client, so send a get_vision message to the server */
-        client<py_client_data>* client_handle =
-                (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
-        if (!send_get_vision(*client_handle, agent_id)) {
-            PyErr_SetString(PyExc_RuntimeError, "Unable to send get_vision request.");
-            return NULL;
-        }
-
-		/* wait for response from server */
-		wait_for_server(*client_handle);
-        vision = client_handle->data.response.vision;
-        color_dimension = client_handle->config.color_dimension;
-        vision_range = client_handle->config.vision_range;
-    }
-
-    PyObject* py_vision = PyList_New(2 * vision_range + 1);
-    for (unsigned int i = 0; i < 2 * vision_range + 1; i++) {
-        PyObject* row = PyList_New(2 * vision_range + 1);
-        PyList_SetItem(py_vision, i, row);
-        for (unsigned int j = 0; j < 2 * vision_range + 1; j++) {
-            PyObject* pixel = PyTuple_New(color_dimension);
-            PyList_SetItem(row, j, pixel);
-            unsigned int offset = (i*(2*vision_range + 1) + j) * color_dimension;
-            for (unsigned int k = 0; k < color_dimension; k++)
-                PyTuple_SetItem(pixel, k, PyFloat_FromDouble(vision[offset + k]));
-        }
-    }
-    if (py_client_handle != Py_None)
-        free((float*) vision);
-    return py_vision;
-}
-
-static PyObject* simulator_collected_items(PyObject *self, PyObject *args) {
-    PyObject* py_sim_handle;
-    PyObject* py_client_handle;
-    unsigned long long agent_id;
-    if (!PyArg_ParseTuple(args, "OOK", &py_sim_handle, &py_client_handle, &agent_id))
-        return NULL;
-
-    const unsigned int* items;
-    size_t item_type_count;
-    if (py_client_handle == Py_None) {
-        /* the simulation is local, so call get_scent directly */
-        simulator<py_simulator_data>* sim_handle =
-                (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
-        items = sim_handle->get_collected_items(agent_id);
-        item_type_count = sim_handle->get_config().item_types.length;
-    } else {
-        /* this is a client, so send a get_scent message to the server */
-        client<py_client_data>* client_handle =
-                (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
-        if (!send_get_scent(*client_handle, agent_id)) {
-            PyErr_SetString(PyExc_RuntimeError, "Unable to send get_scent request.");
-            return NULL;
-        }
-
-		/* wait for response from server */
-		wait_for_server(*client_handle);
-        items = client_handle->data.response.collected_items;
-        item_type_count = client_handle->config.item_types.length;
-    }
-
-    PyObject* py_items = PyTuple_New(item_type_count);
-    for (size_t i = 0; i < item_type_count; i++)
-        PyTuple_SetItem(py_items, i, PyLong_FromSize_t(items[i]));
-    if (py_client_handle != Py_None)
-        free((float*) items);
-    return py_items;
 }
 
 static PyObject* build_py_map(
@@ -799,40 +725,31 @@ static PyObject* build_py_map(
     PyObject* list = PyList_New(patches.table.size);
     for (const auto& entry : patches) {
         const patch_state& patch = entry.value;
-        PyObject* items = PyList_New(patch.item_count);
+        PyObject* py_items = PyList_New(patch.item_count);
         for (unsigned int i = 0; i < patch.item_count; i++)
-            PyList_SetItem(items, i, Py_BuildValue("I(LL)",
+            PyList_SetItem(py_items, i, Py_BuildValue("I(LL)",
                     patch.items[i].item_type,
                     patch.items[i].location.x,
                     patch.items[i].location.y));
 
-        PyObject* agents = PyList_New(patch.agent_count);
+        PyObject* py_agents = PyList_New(patch.agent_count);
         for (unsigned int i = 0; i < patch.agent_count; i++)
-            PyList_SetItem(agents, i, Py_BuildValue("(LL)", patch.agents[i].x, patch.agents[i].y));
+            PyList_SetItem(py_agents, i, Py_BuildValue("(LL)", patch.agents[i].x, patch.agents[i].y));
 
         unsigned int n = config.patch_size;
-        PyObject* scent = PyList_New(n);
-        PyObject* vision = PyList_New(n);
-        for (unsigned int i = 0; i < config.patch_size; i++) {
-            PyObject* scent_row = PyList_New(n);
-            PyObject* vision_row = PyList_New(n);
-            PyList_SetItem(scent, i, scent_row);
-            PyList_SetItem(vision, i, vision_row);
-            for (unsigned int j = 0; j < config.patch_size; j++) {
-                PyObject* scent_cell = PyTuple_New(config.scent_dimension);
-                PyObject* vision_cell = PyTuple_New(config.color_dimension);
-                PyList_SetItem(scent_row, j, scent_cell);
-                PyList_SetItem(vision_row, j, vision_cell);
-                for (unsigned int k = 0; k < config.scent_dimension; k++)
-                    PyTuple_SetItem(scent_cell, k, PyFloat_FromDouble(patch.scent[(i*n + j)*config.scent_dimension + k]));
-                for (unsigned int k = 0; k < config.color_dimension; k++)
-                    PyTuple_SetItem(vision_cell, k, PyFloat_FromDouble(patch.vision[(i*n + j)*config.color_dimension + k]));
-            }
-        }
+        float* scent = (float*) malloc(sizeof(float) * n * n * config.scent_dimension);
+        float* vision = (float*) malloc(sizeof(float) * n * n * config.color_dimension);
+        memcpy(scent, patch.scent, sizeof(float) * n * n * config.scent_dimension);
+        memcpy(vision, patch.vision, sizeof(float) * n * n * config.color_dimension);
+
+        npy_intp scent_dim[] = {n, n, config.scent_dimension};
+        npy_intp vision_dim[] = {n, n, config.color_dimension};
+        PyObject* py_scent = PyArray_SimpleNewFromData(3, scent_dim, NPY_FLOAT, scent);
+        PyObject* py_vision = PyArray_SimpleNewFromData(3, vision_dim, NPY_FLOAT, vision);
 
         PyObject* fixed = patch.fixed ? Py_True : Py_False;
         Py_INCREF(fixed);
-        PyObject* py_patch = Py_BuildValue("((LL)OOOOO)", patch.patch_position.x, patch.patch_position.y, fixed, scent, vision, items, agents);
+        PyObject* py_patch = Py_BuildValue("((LL)OOOOO)", patch.patch_position.x, patch.patch_position.y, fixed, py_scent, py_vision, py_items, py_agents);
         PyList_SetItem(list, index, py_patch);
         index++;
     }
@@ -895,10 +812,7 @@ static PyMethodDef SimulatorMethods[] = {
     {"stop_client",  nel::simulator_stop_client, METH_VARARGS, "Stops the simulator client."},
     {"add_agent",  nel::simulator_add_agent, METH_VARARGS, "Adds an agent to the simulator and returns its ID."},
     {"move",  nel::simulator_move, METH_VARARGS, "Attempts to move the agent in the simulation environment."},
-    {"position",  nel::simulator_position, METH_VARARGS, "Gets the current position of an agent in the simulation environment."},
-    {"scent",  nel::simulator_scent, METH_VARARGS, "Gets the current scent perception of the given agent."},
-    {"vision",  nel::simulator_vision, METH_VARARGS, "Gets the current vision perception of the given agent."},
-    {"collected_items",  nel::simulator_collected_items, METH_VARARGS, "Gets the counts of the items collected by the given agent."},
+    {"agent_states",  nel::simulator_agent_states, METH_VARARGS, "Gets the states of the agents specified by the given IDs."},
     {"map",  nel::simulator_map, METH_VARARGS, "Returns a list of patches within a given bounding box."},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
@@ -909,10 +823,12 @@ static PyMethodDef SimulatorMethods[] = {
     };
 
     PyMODINIT_FUNC PyInit_simulator_c(void) {
+        import_array();
         return PyModule_Create(&simulator_module);
     }
 #else
     PyMODINIT_FUNC initsimulator_c(void) {
+        import_array();
         (void) Py_InitModule("simulator_c", SimulatorMethods);
     }
 #endif

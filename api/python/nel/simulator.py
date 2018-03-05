@@ -3,9 +3,7 @@ from __future__ import absolute_import, division, print_function
 from enum import Enum
 from nel import simulator_c
 
-from .agent import AgentState
 from .item import IntensityFunction, InteractionFunction
-from .position import Position
 
 __all__ = ['MovementConflictPolicy', 'SimulatorConfig', 'Simulator']
 
@@ -73,9 +71,10 @@ class Simulator(object):
   """
 
   def __init__(
-      self, sim_config=None, is_server=False, server_address=None,
-      port=54353, conn_queue_capacity=256, num_workers=8,
-      save_frequency=1000, save_filepath=None, load_filepath=None):
+      self, on_step_callback=None, sim_config=None,
+      is_server=False, server_address=None, port=54353,
+      conn_queue_capacity=256, num_workers=8, save_frequency=1000,
+      save_filepath=None, load_filepath=None):
     """Creates a new simulator.
 
     Arguments:
@@ -85,6 +84,10 @@ class Simulator(object):
     self._server_handle = None
     self._client_handle = None
     self._time = 0
+    if on_step_callback == None:
+      self._on_step = lambda *args: None
+    else:
+      self._on_step = on_step_callback
     if save_frequency <= 0:
       raise ValueError('"save_frequency" must be strictly greater than zero.')
     if sim_config != None:
@@ -143,6 +146,7 @@ class Simulator(object):
       The new agent's ID.
     """
     id = simulator_c.add_agent(self._handle, self._client_handle)
+    (py_agent._position, py_agent._scent, py_agent._vision, py_agent._items) = self._agent_states([id])[0]
     self.agents[id] = py_agent
     return id
 
@@ -161,22 +165,20 @@ class Simulator(object):
     return simulator_c.move(self._handle,
       self._client_handle, agent_id, direction.value, num_steps)
 
-  def _position(self, agent_id):
-    return simulator_c.position(self._handle, self._client_handle, agent_id)
-
-  def _scent(self, agent_id):
-    return simulator_c.scent(self._handle, self._client_handle, agent_id)
-
-  def _vision(self, agent_id):
-    return simulator_c.vision(self._handle, self._client_handle, agent_id)
-
-  def _collected_items(self, agent_id):
-    return simulator_c.collected_items(self._handle, self._client_handle, agent_id)
+  def _agent_states(self, agent_ids):
+    return simulator_c.agent_states(self._handle, self._client_handle, agent_ids)
 
   def _step_callback(self, saved):
     self._time += 1
-    for (id, agent) in self.agents.items():
-      agent.on_step(saved)
+    agent_ids = list(self.agents.keys())
+    agent_values = list(self.agents.values())
+    states = self._agent_states(agent_ids)
+    for i in range(len(agent_ids)):
+      agent = agent_values[i]
+      (agent._position, agent._scent, agent._vision, agent._items) = states[i]
+      if saved:
+        agent.save()
+    self._on_step()
 
   def time(self):
     return self._time

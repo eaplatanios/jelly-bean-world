@@ -68,7 +68,7 @@ class MapVisualizer(object):
 						edgecolor=(0,0,0), linestyle='solid', linewidth=0.4))
 
 			# convert 'scent' to a numpy array and transform into a subtractive color space (so zero is white)
-			scent_img = np.clip(np.array(scent) / MAXIMUM_SCENT, 0.0, 1.0)
+			scent_img = np.clip(scent / MAXIMUM_SCENT, 0.0, 1.0)
 			scent_img = 1.0 - 0.5 * np.dot(scent_img, np.array([[0, 1, 1], [1, 0, 1], [1, 1, 0]]))
 			self._ax.imshow(np.rot90(scent_img),
 					extent=(patch_position[0]*n - 0.5, patch_position[0]*n + n - 0.5,

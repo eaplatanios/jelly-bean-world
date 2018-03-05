@@ -5,11 +5,11 @@ A framework for experimenting with never-ending learning.
 ## Requirements
 
 - GCC 5+, Clang 5+, or Visual C++ 14+
-- Python 2.7 or 3.6 (for the Python API)
+- Python 2.7 or 3.5+ and Numpy (for the Python API)
 
-## Installation Instructions
+## Using Python
 
-### Python API
+### Installation Instructions
 
 Assuming that you have Python installed in your system and 
 that you are located in the root directory of this 
@@ -21,8 +21,151 @@ cd api/python
 python setup.py install
 ```
 
-You can proceed with the [description of a typical workflow](#workflow), for 
-some instructions on how to use this library.
+### Usage
+
+The typical workflow is as follows:
+
+  1. Extend the `Agent` class to implement custom agents.
+  2. Create a Simulator object.
+  3. Construct agent instances in this simulator.
+  4. Issue move commands for each agent.
+
+The following simple example where a simulator is constructed locally (within
+the same process) and a single agent continuously moves east. Note that the
+agent's decision-making logic goes in the `next_move` method.
+
+```python
+import nel
+
+class EasterlyAgent(nel.Agent):
+  def __init__(self, simulator):
+    super(EasterlyAgent, self).__init__(simulator)
+
+  def next_move(self):
+    return nel.Direction.RIGHT
+
+  def save(self, saved):
+    pass
+
+
+items = []
+items.append(nel.Item("banana", [1.0, 1.0, 0.0], [1.0, 1.0, 0.0], True))
+
+intensity_fn_args = [-2.0]
+interaction_fn_args = [len(items)]
+interaction_fn_args.extend([40.0, 200.0, 0.0, -40.0]) # parameters for interaction between item 0 and item 0
+
+config = nel.SimulatorConfig(max_steps_per_movement=1, vision_range=1,
+  patch_size=32, gibbs_num_iter=10, items=items, agent_color=[0.0, 0.0, 1.0],
+  collision_policy=nel.MovementConflictPolicy.FIRST_COME_FIRST_SERVED,
+  decay_param=0.4, diffusion_param=0.14, deleted_item_lifetime=2000,
+  intensity_fn=nel.IntensityFunction.CONSTANT, intensity_fn_args=intensity_fn_args,
+  interaction_fn=nel.InteractionFunction.PIECEWISE_BOX, interaction_fn_args=interaction_fn_args)
+
+sim = nel.Simulator(sim_config=config)
+
+agent = EasterlyAgent(sim)
+
+for t in range(10000):
+  sim._move(agent._id, agent.next_move(), 1)
+```
+
+See `api/python/test/simulator_test.py` for an example with more types of items
+as well as a visualization using the MapVisualizer class.
+
+## Using C++
+
+The typical workflow is as follows:
+
+  1. Create a Simulator object.
+  2. Add agents to this simulator.
+  3. Issue move commands for each agent.
+
+The following simple example where a simulator is constructed locally (within
+the same process) and a single agent continuously moves east.
+
+```c++
+#include "simulator.h"
+
+using namespace nel;
+
+struct empty_data {
+  static inline void free(empty_data& data) { }
+};
+
+constexpr bool init(empty_data& data, const empty_data& src) { return true; }
+
+inline void set_interaction_args(float* args, unsigned int item_type_count,
+    unsigned int first_item_type, unsigned int second_item_type,
+    float first_cutoff, float second_cutoff, float first_value, float second_value)
+{
+  args[4 * (first_item_type * item_type_count + second_item_type) + 1] = first_cutoff;
+  args[4 * (first_item_type * item_type_count + second_item_type) + 2] = second_cutoff;
+  args[4 * (first_item_type * item_type_count + second_item_type) + 3] = first_value;
+  args[4 * (first_item_type * item_type_count + second_item_type) + 4] = second_value;
+}
+
+void on_step(const simulator<empty_data>* sim, empty_data& data, uint64_t time) { }
+
+int main(int argc, const char** argv) {
+  simulator_config config;
+  config.max_steps_per_movement = 1;
+  config.scent_dimension = 3;
+  config.color_dimension = 3;
+  config.vision_range = 10;
+  config.patch_size = 32;
+  config.gibbs_iterations = 10;
+  config.agent_color = (float*) calloc(config.color_dimension, sizeof(float));
+  config.agent_color[2] = 1.0f;
+  config.collision_policy = movement_conflict_policy::FIRST_COME_FIRST_SERVED;
+  config.decay_param = 0.5f;
+  config.diffusion_param = 0.12f;
+  config.deleted_item_lifetime = 2000;
+
+  /* configure item types */
+  config.item_types.ensure_capacity(1);
+  config.item_types[0].name = "banana";
+  config.item_types[0].scent = (float*) calloc(config.scent_dimension, sizeof(float));
+  config.item_types[0].color = (float*) calloc(config.color_dimension, sizeof(float));
+  config.item_types[0].scent[0] = 1.0f;
+  config.item_types[0].color[0] = 1.0f;
+  config.item_types[0].automatically_collected = true;
+  config.item_types.length = 1;
+
+  config.intensity_fn_arg_count = (unsigned int) config.item_types.length;
+  config.interaction_fn_arg_count = (unsigned int) (4 * config.item_types.length * config.item_types.length + 1);
+  config.intensity_fn = constant_intensity_fn;
+  config.interaction_fn = piecewise_box_interaction_fn;
+  config.intensity_fn_args = (float*) malloc(sizeof(float) * config.intensity_fn_arg_count);
+  config.interaction_fn_args = (float*) malloc(sizeof(float) * config.interaction_fn_arg_count);
+  config.intensity_fn_args[0] = -2.0f;
+  config.interaction_fn_args[0] = (float) config.item_types.length;
+  set_interaction_args(config.interaction_fn_args, (unsigned int) config.item_types.length, 0, 0, 40.0f, 200.0f, 0.0f, -40.0f);
+
+  simulator<empty_data>& sim = *((simulator<empty_data>*) alloca(sizeof(simulator<empty_data>)));
+  if (!init(sim, config, empty_data())) {
+    fprintf(stderr, "ERROR: Unable to initialize simulator.\n");
+    return EXIT_FAILURE;
+  }
+
+  uint64_t agent_id = sim.add_agent();
+  if (agent_id == UINT64_MAX) {
+    fprintf(stderr, "ERROR: Unable to add new agent.\n");
+    return EXIT_FAILURE;
+  }
+
+  for (unsigned int t = 0; t < 10000; t++) {
+    if (!sim.move(agent_id, direction::RIGHT, 1)) {
+      fprintf(stderr, "ERROR: Unable to move agent.\n");
+      return EXIT_FAILURE;
+    }
+  }
+  free(sim);
+}
+```
+
+See `nel/simulator_test.cpp` for an example with more types of items, as well
+as a multithreaded example and an MPI example.
 
 ## Design
 
@@ -56,18 +199,15 @@ Under the current design:
 time step and issues a notification about that event. The simulator only 
 advances the time step once all agents have requested to move.
 
-Simulators currently support two modes of operation:
+We provide a message-passing interface (using TCP) to allow the simulator to
+run remotely, and agents can issue move commands to the server. In Python, the
+Simulator can be constructed as a server with the appropriate constructor
+arguments. If a server address is provided to the Simulator constructor, it
+will try to connect to the Simulator running at the specified remote address,
+and all calls to the Simulator class will be issued as commands to the server.
+In C++, `nel/mpi.h` provides the functionality to run the server and clients.
+See `nel/simulator_test.cpp` for an example.
 
-  - **C Mode:** Uses the C-Python API bindings to interface with the simulator 
-    and should be faster than the MPI mode. However, this mode does not allow 
-    the simulator to run as a separate server process, that multiple agent 
-    processes can attach to. In this case, all agents must be defined and used 
-    as part of the same Python process that creates the simulator.
-  - **MPI Mode:** Uses message passing over a socket (using TCP) and allows the 
-    simulator to run as a separate server process that multiple agent processes 
-    can attach to. However, it may result in slower performance than the C mode. 
-    In this case, the simulator-agent interaction is done asynchronously using 
-    message passing.
 
 #### Mechanics
 
@@ -112,7 +252,6 @@ where `lambda` is the rate of decay of the scent at the current location,
 `alpha` is the rate of diffusion from neighboring cells, and `C(x,y,t)` is the
 scent of any items located at `(x,y)` at time `t` (this is zero if there are no
 items at that position).
-<!-- TODO: add details about modeling scent in inactive patches -->
 
 ### Agents
 
@@ -121,8 +260,8 @@ be used to request a move from the simulator and they also have an abstract
 `on_step()` method that users can implement based on what they want their agent 
 to do on each time step.
 
-Agents also have a private field named `_current_state` that contains their 
-current state in the simulation.
+Agents also have a private fields that store state information, such as the
+agent's position, current scent perception, current visual perception, etc.
 
 ### Implementation
 
@@ -130,17 +269,6 @@ The core library is implemented in **C++** and has no dependencies. It should
 be able to run on Mac, Linux, and Windows. We already provide a **Python** API
 that is quite simple to use and extend. APIs for other languages should also be
 easy to implement.
-
-## Workflow
-
-The typical workflow for this library is as follows:
-
-  1. Extend the `Agent` class to implement custom agents.
-  2. Create a simulator (if using the MPI mode, `start_server(...)` should be 
-     called before this server can be used).
-  3. Create agent instances in that simulator.
-  4. *Optionally:* Allow for some way to monitor the agent's performance in its 
-     `on_step()` method.
 
 ## Troubleshooting
 

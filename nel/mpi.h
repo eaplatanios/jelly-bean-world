@@ -13,19 +13,13 @@ enum class message_type : uint64_t {
 	ADD_AGENT_RESPONSE = 1,
 	MOVE = 2,
 	MOVE_RESPONSE = 3,
-	GET_POSITION = 4,
-	GET_POSITION_RESPONSE = 5,
-	GET_CONFIG = 6,
-	GET_CONFIG_RESPONSE = 7,
-	GET_SCENT = 8,
-	GET_SCENT_RESPONSE = 9,
-	GET_VISION = 10,
-	GET_VISION_RESPONSE = 11,
-	GET_COLLECTED_ITEMS = 12,
-	GET_COLLECTED_ITEMS_RESPONSE = 13,
-	GET_MAP = 14,
-	GET_MAP_RESPONSE = 15,
-	STEP_RESPONSE = 16
+	GET_CONFIG = 4,
+	GET_CONFIG_RESPONSE = 5,
+	GET_AGENT_STATES = 6,
+	GET_AGENT_STATES_RESPONSE = 7,
+	GET_MAP = 8,
+	GET_MAP_RESPONSE = 9,
+	STEP_RESPONSE = 10
 };
 
 template<typename Stream>
@@ -44,24 +38,18 @@ inline bool write(const message_type& type, Stream& out) {
 template<typename Stream>
 inline bool print(const message_type& type, Stream& out) {
 	switch (type) {
-	case message_type::ADD_AGENT:           return core::print("ADD_AGENT", out);
-	case message_type::MOVE:                return core::print("MOVE", out);
-	case message_type::GET_POSITION:        return core::print("GET_POSITION", out);
-	case message_type::GET_CONFIG:          return core::print("GET_CONFIG", out);
-	case message_type::GET_SCENT:           return core::print("GET_SCENT", out);
-	case message_type::GET_VISION:          return core::print("GET_VISION", out);
-	case message_type::GET_COLLECTED_ITEMS: return core::print("GET_COLLECTED_ITEMS", out);
-	case message_type::GET_MAP:             return core::print("GET_MAP", out);
+	case message_type::ADD_AGENT:        return core::print("ADD_AGENT", out);
+	case message_type::MOVE:             return core::print("MOVE", out);
+	case message_type::GET_CONFIG:       return core::print("GET_CONFIG", out);
+	case message_type::GET_AGENT_STATES: return core::print("GET_AGENT_STATES", out);
+	case message_type::GET_MAP:          return core::print("GET_MAP", out);
 
-	case message_type::ADD_AGENT_RESPONSE:           return core::print("ADD_AGENT_RESPONSE", out);
-	case message_type::MOVE_RESPONSE:                return core::print("MOVE_RESPONSE", out);
-	case message_type::GET_POSITION_RESPONSE:        return core::print("GET_POSITION_RESPONSE", out);
-	case message_type::GET_CONFIG_RESPONSE:          return core::print("GET_CONFIG_RESPONSE", out);
-	case message_type::GET_SCENT_RESPONSE:           return core::print("GET_SCENT_RESPONSE", out);
-	case message_type::GET_VISION_RESPONSE:          return core::print("GET_VISION_RESPONSE", out);
-	case message_type::GET_COLLECTED_ITEMS_RESPONSE: return core::print("GET_VISION_RESPONSE", out);
-	case message_type::GET_MAP_RESPONSE:             return core::print("GET_MAP_RESPONSE", out);
-	case message_type::STEP_RESPONSE:                return core::print("STEP_RESPONSE", out);
+	case message_type::ADD_AGENT_RESPONSE:        return core::print("ADD_AGENT_RESPONSE", out);
+	case message_type::MOVE_RESPONSE:             return core::print("MOVE_RESPONSE", out);
+	case message_type::GET_CONFIG_RESPONSE:       return core::print("GET_CONFIG_RESPONSE", out);
+	case message_type::GET_AGENT_STATES_RESPONSE: return core::print("GET_AGENT_STATES_RESPONSE", out);
+	case message_type::GET_MAP_RESPONSE:          return core::print("GET_MAP_RESPONSE", out);
+	case message_type::STEP_RESPONSE:             return core::print("STEP_RESPONSE", out);
 	}
 	fprintf(stderr, "print ERROR: Unrecognized message_type.\n");
 	return false;
@@ -95,6 +83,8 @@ inline bool send_message(socket_type& socket, const void* data, unsigned int len
 	return send(socket.handle, (const char*) data, length, 0) != 0;
 }
 
+/*T TODO: the below functions should send an error back to client upon failure */
+
 template<typename Stream, typename SimulatorData>
 inline bool receive_add_agent(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
 	uint64_t new_agent = sim.add_agent();
@@ -121,16 +111,43 @@ inline bool receive_move(Stream& in, socket_type& connection, simulator<Simulato
 }
 
 template<typename Stream, typename SimulatorData>
-inline bool receive_get_position(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
-	uint64_t agent_id;
-	if (!read(agent_id, in))
+inline bool receive_get_agent_states(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
+	unsigned int agent_count;
+	if (!read(agent_count, in))
 		return false;
-	position location = sim.get_position(agent_id);
-	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(location));
+	uint64_t* agent_ids = NULL;
+	agent_state** agents = NULL;
+	agent_ids = (uint64_t*) malloc(sizeof(uint64_t) * agent_count);
+	agents = (agent_state**) malloc(sizeof(agent_state*) * agent_count);
+	if (agent_ids == NULL || agents == NULL) {
+		if (agent_ids != NULL) free(agent_ids);
+		fprintf(stderr, "receive_get_agent_states ERROR: Out of memory.\n");
+		return false;
+	} else if (!read(agent_ids, in, agent_count)) {
+		free(agent_ids); free(agents);
+		return false;
+	}
+
+	const simulator_config& config = sim.get_config();
+	sim.get_agent_states(agents, agent_ids, agent_count);
+	free(agent_ids);
+
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_count) + agent_count * sizeof(agent_state));
 	fixed_width_stream<memory_stream> out(mem_stream);
-	return write(message_type::GET_POSITION_RESPONSE, out)
-		&& write(agent_id, out) && write(location, out)
-		&& send_message(connection, mem_stream.buffer, mem_stream.position);
+	if (!write(message_type::GET_AGENT_STATES_RESPONSE, out)
+	 || !write(agent_count, out)) {
+		free(agents); return false;
+	}
+	for (unsigned int i = 0; i < agent_count; i++) {
+		agents[i]->lock.lock();
+		if (!write(*agents[i], out, config)) {
+			agents[i]->lock.unlock();
+			free(agents); return false;
+		}
+		agents[i]->lock.unlock();
+	}
+	free(agents);
+	return send_message(connection, mem_stream.buffer, mem_stream.position);
 }
 
 template<typename Stream, typename SimulatorData>
@@ -140,50 +157,6 @@ inline bool receive_get_config(Stream& in, socket_type& connection, simulator<Si
 	fixed_width_stream<memory_stream> out(mem_stream);
 	return write(message_type::GET_CONFIG_RESPONSE, out)
 		&& write(config, out)
-		&& send_message(connection, mem_stream.buffer, mem_stream.position);
-}
-
-template<typename Stream, typename SimulatorData>
-inline bool receive_get_scent(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
-	uint64_t agent_id;
-	if (!read(agent_id, in))
-		return false;
-	const float* scent = sim.get_scent(agent_id);
-	memory_stream mem_stream = memory_stream(sizeof(message_type)
-			+ sizeof(agent_id) + (sizeof(float) * sim.get_config().scent_dimension));
-	fixed_width_stream<memory_stream> out(mem_stream);
-	return write(message_type::GET_SCENT_RESPONSE, out)
-		&& write(agent_id, out) && write(scent, out, sim.get_config().scent_dimension)
-		&& send_message(connection, mem_stream.buffer, mem_stream.position);
-}
-
-template<typename Stream, typename SimulatorData>
-inline bool receive_get_vision(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
-	uint64_t agent_id;
-	if (!read(agent_id, in))
-		return false;
-	const float* vision = sim.get_vision(agent_id);
-	unsigned int vision_size = (2 * sim.get_config().vision_range + 1)
-			* (2 * sim.get_config().vision_range + 1) * sim.get_config().color_dimension;
-	memory_stream mem_stream = memory_stream(sizeof(message_type)
-			+ sizeof(agent_id) + (sizeof(float) * vision_size));
-	fixed_width_stream<memory_stream> out(mem_stream);
-	return write(message_type::GET_VISION_RESPONSE, out)
-		&& write(agent_id, out) && write(vision, out, vision_size)
-		&& send_message(connection, mem_stream.buffer, mem_stream.position);
-}
-
-template<typename Stream, typename SimulatorData>
-inline bool receive_get_collected_items(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
-	uint64_t agent_id;
-	if (!read(agent_id, in))
-		return false;
-	const unsigned int* items = sim.get_collected_items(agent_id);
-	memory_stream mem_stream = memory_stream((unsigned int) (sizeof(message_type)
-			+ sizeof(agent_id) + (sizeof(unsigned int) * sim.get_config().item_types.length)));
-	fixed_width_stream<memory_stream> out(mem_stream);
-	return write(message_type::GET_COLLECTED_ITEMS_RESPONSE, out)
-		&& write(agent_id, out) && write(items, out, (unsigned int) sim.get_config().item_types.length)
 		&& send_message(connection, mem_stream.buffer, mem_stream.position);
 }
 
@@ -222,26 +195,17 @@ void server_process_message(socket_type& connection, simulator<SimulatorData>& s
 			receive_add_agent(in, connection, sim); return;
 		case message_type::MOVE:
 			receive_move(in, connection, sim); return;
-		case message_type::GET_POSITION:
-			receive_get_position(in, connection, sim); return;
 		case message_type::GET_CONFIG:
 			receive_get_config(in, connection, sim); return;
-		case message_type::GET_SCENT:
-			receive_get_scent(in, connection, sim); return;
-		case message_type::GET_VISION:
-			receive_get_scent(in, connection, sim); return;
-		case message_type::GET_COLLECTED_ITEMS:
-			receive_get_collected_items(in, connection, sim); return;
+		case message_type::GET_AGENT_STATES:
+			receive_get_agent_states(in, connection, sim); return;
 		case message_type::GET_MAP:
 			receive_get_map(in, connection, sim); return;
 
 		case message_type::ADD_AGENT_RESPONSE:
 		case message_type::MOVE_RESPONSE:
-		case message_type::GET_POSITION_RESPONSE:
 		case message_type::GET_CONFIG_RESPONSE:
-		case message_type::GET_SCENT_RESPONSE:
-		case message_type::GET_VISION_RESPONSE:
-		case message_type::GET_COLLECTED_ITEMS_RESPONSE:
+		case message_type::GET_AGENT_STATES_RESPONSE:
 		case message_type::GET_MAP_RESPONSE:
 		case message_type::STEP_RESPONSE:
 			break;
@@ -354,11 +318,12 @@ bool send_move(ClientType& c, uint64_t agent_id, direction dir, unsigned int num
 }
 
 template<typename ClientType>
-bool send_get_position(ClientType& c, uint64_t agent_id) {
-	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(uint64_t));
+bool send_get_agent_states(ClientType& c, const uint64_t* agent_ids, unsigned int agent_count) {
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + agent_count * sizeof(uint64_t));
 	fixed_width_stream<memory_stream> out(mem_stream);
-	return write(message_type::GET_POSITION, out)
-		&& write(agent_id, out)
+	return write(message_type::GET_AGENT_STATES, out)
+		&& write(agent_count, out)
+		&& write(agent_ids, out, agent_count)
 		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
 }
 
@@ -366,33 +331,6 @@ template<typename ClientType>
 bool send_get_config(ClientType& c) {
 	message_type message = message_type::GET_CONFIG;
 	return send_message(c.connection, &message, sizeof(message));
-}
-
-template<typename ClientType>
-bool send_get_scent(ClientType& c, uint64_t agent_id) {
-	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(uint64_t));
-	fixed_width_stream<memory_stream> out(mem_stream);
-	return write(message_type::GET_SCENT, out)
-		&& write(agent_id, out)
-		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
-}
-
-template<typename ClientType>
-bool send_get_vision(ClientType& c, uint64_t agent_id) {
-	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(uint64_t));
-	fixed_width_stream<memory_stream> out(mem_stream);
-	return write(message_type::GET_VISION, out)
-		&& write(agent_id, out)
-		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
-}
-
-template<typename ClientType>
-bool send_get_collected_items(ClientType& c, uint64_t agent_id) {
-	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(uint64_t));
-	fixed_width_stream<memory_stream> out(mem_stream);
-	return write(message_type::GET_COLLECTED_ITEMS, out)
-		&& write(agent_id, out)
-		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
 }
 
 template<typename ClientType>
@@ -426,13 +364,28 @@ inline bool receive_move_response(ClientType& c) {
 }
 
 template<typename ClientType>
-inline bool receive_get_position_response(ClientType& c) {
-	position location;
-	uint64_t agent_id;
+inline bool receive_get_agent_states_response(ClientType& c) {
+	unsigned int agent_count;
 	fixed_width_stream<socket_type> in(c.connection);
-	if (!read(agent_id, in) || !read(location, in))
+	if (!read(agent_count, in))
 		return false;
-	on_get_position(c, agent_id, location);
+
+	agent_state* agents = (agent_state*) malloc(sizeof(agent_state) * agent_count);
+	if (agents == NULL) {
+		fprintf(stderr, "recieve_get_agent_states_response ERROR: Out of memory.\n");
+		return false;
+	}
+
+	for (unsigned int i = 0; i < agent_count; i++) {
+		if (!read(agents[i], in, c.config)) {
+			for (unsigned int j = 0; j < i; j++)
+				free(agents[j]);
+			free(agents); return false;
+		}
+	}
+
+	/* ownership of 'agents' is passed to callee */
+	on_get_agent_states(c, agents, agent_count);
 	return true;
 }
 
@@ -446,52 +399,6 @@ inline bool receive_get_config_response(ClientType& c) {
 	}
 	swap(c.config, config);
 	free(config); /* free the old configuration */
-	return true;
-}
-
-template<typename ClientType>
-inline bool receive_get_scent_response(ClientType& c) {
-	uint64_t agent_id;
-	fixed_width_stream<socket_type> in(c.connection);
-	float* scent = (float*) malloc(sizeof(float) * c.config.scent_dimension);
-	if (scent == NULL) {
-		fprintf(stderr, "receive_get_scent_response ERROR: Out of memory.\n");
-		return false;
-	} else if (!read(agent_id, in) || !read(scent, in, c.config.scent_dimension)) {
-		free(scent); return false;
-	}
-	on_get_scent(c, agent_id, scent);
-	return true;
-}
-
-template<typename ClientType>
-inline bool receive_get_vision_response(ClientType& c) {
-	uint64_t agent_id;
-	fixed_width_stream<socket_type> in(c.connection);
-	unsigned int vision_size = (2 * c.config.vision_range + 1) * (2 * c.config.vision_range + 1) * c.config.color_dimension;
-	float* vision = (float*) malloc(sizeof(float) * vision_size);
-	if (vision == NULL) {
-		fprintf(stderr, "receive_get_vision_response ERROR: Out of memory.\n");
-		return false;
-	} else if (!read(agent_id, in) || !read(vision, in, vision_size)) {
-		free(vision); return false;
-	}
-	on_get_vision(c, agent_id, vision);
-	return true;
-}
-
-template<typename ClientType>
-inline bool receive_get_collected_items_response(ClientType& c) {
-	uint64_t agent_id;
-	fixed_width_stream<socket_type> in(c.connection);
-	unsigned int* items = (unsigned int*) malloc(sizeof(unsigned int) * c.config.item_types.length);
-	if (items == NULL) {
-		fprintf(stderr, "receive_get_collected_items_response ERROR: Out of memory.\n");
-		return false;
-	} else if (!read(agent_id, in) || !read(items, in, (unsigned int) c.config.item_types.length)) {
-		free(items); return false;
-	}
-	on_get_collected_items(c, agent_id, items);
 	return true;
 }
 
@@ -533,16 +440,10 @@ void run_response_listener(ClientType& c) {
 				receive_add_agent_response(c); continue;
 			case message_type::MOVE_RESPONSE:
 				receive_move_response(c); continue;
-			case message_type::GET_POSITION_RESPONSE:
-				receive_get_position_response(c); continue;
 			case message_type::GET_CONFIG_RESPONSE:
 				receive_get_config_response(c); continue;
-			case message_type::GET_SCENT_RESPONSE:
-				receive_get_scent_response(c); continue;
-			case message_type::GET_VISION_RESPONSE:
-				receive_get_vision_response(c); continue;
-			case message_type::GET_COLLECTED_ITEMS_RESPONSE:
-				receive_get_collected_items_response(c); continue;
+			case message_type::GET_AGENT_STATES_RESPONSE:
+				receive_get_agent_states_response(c); continue;
 			case message_type::GET_MAP_RESPONSE:
 				receive_get_map_response(c); continue;
 			case message_type::STEP_RESPONSE:
@@ -550,11 +451,8 @@ void run_response_listener(ClientType& c) {
 
 			case message_type::ADD_AGENT:
 			case message_type::MOVE:
-			case message_type::GET_POSITION:
 			case message_type::GET_CONFIG:
-			case message_type::GET_SCENT:
-			case message_type::GET_VISION:
-			case message_type::GET_COLLECTED_ITEMS:
+			case message_type::GET_AGENT_STATES:
 			case message_type::GET_MAP:
 				break;
 		}
