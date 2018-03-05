@@ -3,7 +3,7 @@ from distutils.command.build_ext import build_ext
 import numpy as np
 
 extra_compile_args = {
-    'msvc' : ['/W3', '/GT', '/Ox', '/Ot', '/Oy', '/DNDEBUG', '/DUNICODE'],
+    'msvc' : ['/W3', '/GT', '/Gy', '/Oi', '/Ox', '/Ot', '/Oy', '/DNDEBUG', '/DUNICODE'],
     'unix' : ['-std=c++11', '-Ofast', '-DNDEBUG', '-fomit-frame-pointer', '-fno-stack-protector', '-mtune=native', '-march=native']}
 extra_link_args = {
     'msvc' : ['ws2_32.lib']}

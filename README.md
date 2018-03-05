@@ -30,9 +30,9 @@ The typical workflow is as follows:
   3. Construct agent instances in this simulator.
   4. Issue move commands for each agent.
 
-The following simple example where a simulator is constructed locally (within
-the same process) and a single agent continuously moves east. Note that the
-agent's decision-making logic goes in the `next_move` method.
+The following is a simple example where a simulator is constructed locally
+(within the same process) and a single agent continuously moves east. Note that
+the agent's decision-making logic goes in the `next_move` method.
 
 ```python
 import nel
@@ -70,8 +70,9 @@ for t in range(10000):
   sim._move(agent._id, agent.next_move(), 1)
 ```
 
-See `api/python/test/simulator_test.py` for an example with more types of items
-as well as a visualization using the MapVisualizer class.
+See [api/python/test/simulator_test.py](api/python/test/simulator_test.py) for
+an example with more types of items as well as a visualization using the
+MapVisualizer class.
 
 ## Using C++
 
@@ -81,8 +82,8 @@ The typical workflow is as follows:
   2. Add agents to this simulator.
   3. Issue move commands for each agent.
 
-The following simple example where a simulator is constructed locally (within
-the same process) and a single agent continuously moves east.
+The following is a simple example where a simulator is constructed locally
+(within the same process) and a single agent continuously moves east.
 
 ```c++
 #include "simulator.h"
@@ -164,8 +165,8 @@ int main(int argc, const char** argv) {
 }
 ```
 
-See `nel/simulator_test.cpp` for an example with more types of items, as well
-as a multithreaded example and an MPI example.
+See [nel/simulator_test.cpp](nel/simulator_test.cpp) for an example with more
+types of items, as well as a multithreaded example and an MPI example.
 
 ## Design
 

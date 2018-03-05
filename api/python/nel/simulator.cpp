@@ -97,8 +97,8 @@ static pair<float*, Py_ssize_t> PyArg_ParseFloatList(PyObject* arg) {
         PyErr_NoMemory();
         return make_pair<float*, Py_ssize_t>(NULL, 0);
     }
-    for (unsigned int i = 0; i < len; i++)
-        items[i] = (float) PyFloat_AsDouble(PyList_GetItem(arg, (Py_ssize_t) i));
+    for (Py_ssize_t i = 0; i < len; i++)
+        items[i] = (float) PyFloat_AsDouble(PyList_GetItem(arg, i));
     return make_pair(items, len);
 }
 
@@ -639,8 +639,11 @@ static PyObject* build_py_agent(
         items[i] = agent.collected_items[i];
 
     npy_intp pos_dim[] = {2};
-    npy_intp scent_dim[] = {config.scent_dimension};
-    npy_intp vision_dim[] = {2 * config.vision_range + 1, 2 * config.vision_range + 1, config.color_dimension};
+    npy_intp scent_dim[] = {(npy_intp) config.scent_dimension};
+    npy_intp vision_dim[] = {
+			2 * (npy_intp) config.vision_range + 1,
+			2 * (npy_intp) config.vision_range + 1,
+			(npy_intp) config.color_dimension};
     npy_intp items_dim[] = {(npy_intp) config.item_types.length};
     PyObject* py_position = PyArray_SimpleNewFromData(1, pos_dim, NPY_INT64, positions);
     PyObject* py_scent = PyArray_SimpleNewFromData(1, scent_dim, NPY_FLOAT, scent);
@@ -685,7 +688,7 @@ static PyObject* simulator_agent_states(PyObject *self, PyObject *args) {
 
         PyObject* py_states = PyList_New(agent_count);
         if (py_states == NULL) return NULL;
-        for (unsigned int i = 0; i < agent_count; i++) {
+        for (Py_ssize_t i = 0; i < agent_count; i++) {
             states[i]->lock.lock();
             PyList_SetItem(py_states, i, build_py_agent(*states[i], sim_handle->get_config()));
             states[i]->lock.unlock();
@@ -708,7 +711,7 @@ static PyObject* simulator_agent_states(PyObject *self, PyObject *args) {
 
         PyObject* py_states = PyList_New(agent_count);
         if (py_states == NULL) return NULL;
-        for (unsigned int i = 0; i < agent_count; i++) {
+        for (Py_ssize_t i = 0; i < agent_count; i++) {
             PyList_SetItem(py_states, i, build_py_agent(states[i], client_handle->config));
             free(states[i]);
         }
@@ -736,14 +739,14 @@ static PyObject* build_py_map(
         for (unsigned int i = 0; i < patch.agent_count; i++)
             PyList_SetItem(py_agents, i, Py_BuildValue("(LL)", patch.agents[i].x, patch.agents[i].y));
 
-        unsigned int n = config.patch_size;
+        npy_intp n = (npy_intp) config.patch_size;
         float* scent = (float*) malloc(sizeof(float) * n * n * config.scent_dimension);
         float* vision = (float*) malloc(sizeof(float) * n * n * config.color_dimension);
         memcpy(scent, patch.scent, sizeof(float) * n * n * config.scent_dimension);
         memcpy(vision, patch.vision, sizeof(float) * n * n * config.color_dimension);
 
-        npy_intp scent_dim[] = {n, n, config.scent_dimension};
-        npy_intp vision_dim[] = {n, n, config.color_dimension};
+        npy_intp scent_dim[] = {n, n, (npy_intp) config.scent_dimension};
+        npy_intp vision_dim[] = {n, n, (npy_intp) config.color_dimension};
         PyObject* py_scent = PyArray_SimpleNewFromData(3, scent_dim, NPY_FLOAT, scent);
         PyObject* py_vision = PyArray_SimpleNewFromData(3, vision_dim, NPY_FLOAT, vision);
 
