@@ -29,5 +29,9 @@ class Agent(object):
     return self._items
 
   @abc.abstractmethod
+  def next_move(self):
+    pass
+
+  @abc.abstractmethod
   def save(self):
     pass

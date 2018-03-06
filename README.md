@@ -74,6 +74,17 @@ See [api/python/test/simulator_test.py](api/python/test/simulator_test.py) for
 an example with more types of items as well as a visualization using the
 MapVisualizer class.
 
+### Agent class
+
+Agents have a very simple interface. They have an abstract `next_move` method
+which should contain the decision-making logic of the agent and return the
+direction in which the agent has decided to move. They also have an abstract
+`save` method that users can implement to save the state of an agent to a file.
+`save` is called by Simulator whenever the simulator is saved.
+
+Agents also have a private fields that store state information, such as the
+agent's position, current scent perception, current visual perception, etc.
+
 ## Using C++
 
 The typical workflow is as follows:
@@ -191,10 +202,9 @@ Under the current design:
   - Each agent interacts with the simulator by deciding 
     **when and where to move**.
   - Once all agents have requested to move, the simulator progresses by one 
-    time step and notifies all the agents (by invoking the `on_step()` method 
-    that they implement).
-  - All items in the world are automatically collected by the agents and are 
-    available in their *current state* information. <!-- TODO: !!! -->
+    time step and notifies invokes a callback function.
+  - Some items in the world are automatically collected by the agents. The
+    collected items are available in each agent's state information.
 
 **NOTE:** Note that the agent is not moved until the simulator advances the
 time step and issues a notification about that event. The simulator only 
@@ -254,15 +264,10 @@ where `lambda` is the rate of decay of the scent at the current location,
 scent of any items located at `(x,y)` at time `t` (this is zero if there are no
 items at that position).
 
-### Agents
-
-Agents have a very simple interface. They implement a `move` method that can 
-be used to request a move from the simulator and they also have an abstract 
-`on_step()` method that users can implement based on what they want their agent 
-to do on each time step.
-
-Agents also have a private fields that store state information, such as the
-agent's position, current scent perception, current visual perception, etc.
+Our simulator keeps track of the creation and destruction times of each item in
+the world, and so the scent can be computed correctly, even as items are
+created and destroyed (collected) in the world. The simulation ensures the
+scent (or lack thereof) diffuses correctly.
 
 ### Implementation
 
