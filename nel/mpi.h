@@ -97,7 +97,7 @@ inline bool receive_add_agent(Stream& in, socket_type& connection, simulator<Sim
 
 template<typename Stream, typename SimulatorData>
 inline bool receive_move(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
-	uint64_t agent_id;
+	uint64_t agent_id = UINT64_MAX;
 	direction dir;
 	unsigned int num_steps;
 	if (!read(agent_id, in) || !read(dir, in) || !read(num_steps, in))
@@ -112,7 +112,7 @@ inline bool receive_move(Stream& in, socket_type& connection, simulator<Simulato
 
 template<typename Stream, typename SimulatorData>
 inline bool receive_get_agent_states(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
-	unsigned int agent_count;
+	unsigned int agent_count = 0;
 	if (!read(agent_count, in))
 		return false;
 	uint64_t* agent_ids = NULL;

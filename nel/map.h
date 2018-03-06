@@ -243,6 +243,74 @@ public:
 		return index;
 	}
 
+	template<typename ProcessNeighborhood>
+	void iterate_neighborhoods(const position& patch_position, ProcessNeighborhood process_neighborhood_function)
+	{
+		patch_type* current = get_patch_if_exists(patch_position);
+		patch_type* top = get_patch_if_exists(patch_position.up());
+		patch_type* bottom = get_patch_if_exists(patch_position.down());
+		patch_type* left = get_patch_if_exists(patch_position.left());
+		patch_type* right = get_patch_if_exists(patch_position.right());
+		patch_type* top_left = get_patch_if_exists(patch_position.up().left());
+		patch_type* top_right = get_patch_if_exists(patch_position.up().right());
+		patch_type* bottom_left = get_patch_if_exists(patch_position.down().left());
+		patch_type* bottom_right = get_patch_if_exists(patch_position.down().right());
+
+		patch_type* bottom_left_neighborhood[4];
+		patch_type* top_left_neighborhood[4];
+		patch_type* bottom_right_neighborhood[4];
+		patch_type* top_right_neighborhood[4];
+		unsigned int bottom_left_neighbor_count = 1;
+		unsigned int top_left_neighbor_count = 1;
+		unsigned int bottom_right_neighbor_count = 1;
+		unsigned int top_right_neighbor_count = 1;
+		bottom_left_neighborhood[0] = current;
+		top_left_neighborhood[0] = current;
+		bottom_right_neighborhood[0] = current;
+		top_right_neighborhood[0] = current;
+		if (left != NULL) {
+			bottom_left_neighborhood[bottom_left_neighbor_count++] = left;
+			top_left_neighborhood[top_left_neighbor_count++] = left;
+		} if (right != NULL) {
+			bottom_right_neighborhood[bottom_right_neighbor_count++] = right;
+			top_right_neighborhood[top_right_neighbor_count++] = right;
+		} if (top != NULL) {
+			top_left_neighborhood[top_left_neighbor_count++] = top;
+			top_right_neighborhood[top_right_neighbor_count++] = top;
+		} if (bottom != NULL) {
+			bottom_left_neighborhood[bottom_left_neighbor_count++] = bottom;
+			bottom_right_neighborhood[bottom_right_neighbor_count++] = bottom;
+		} if (bottom_left != NULL) {
+			bottom_left_neighborhood[bottom_left_neighbor_count++] = bottom_left;
+		} if (top_left != NULL) {
+			top_left_neighborhood[top_left_neighbor_count++] = top_left;
+		} if (bottom_right != NULL) {
+			bottom_right_neighborhood[bottom_right_neighbor_count++] = bottom_right;
+		} if (top_right != NULL) {
+			top_right_neighborhood[top_right_neighbor_count++] = top_right;
+		}
+
+		unsigned int half_n = n / 2;
+		unsigned int x, y;
+		for (x = 0; x < half_n; x++) {
+			for (y = 0; y < half_n; y++) {
+				/* bottom-left quadrant */
+				process_neighborhood_function(x, y, bottom_left_neighborhood, bottom_left_neighbor_count);
+			} for (; y < n; y++) {
+				/* top-left quadrant */
+				process_neighborhood_function(x, y, top_left_neighborhood, top_left_neighbor_count);
+			}
+		} for (; x < n; x++) {
+			for (y = 0; y < half_n; y++) {
+				/* bottom-right quadrant */
+				process_neighborhood_function(x, y, bottom_right_neighborhood, bottom_right_neighbor_count);
+			} for (; y < n; y++) {
+				/* top-right quadrant */
+				process_neighborhood_function(x, y, top_right_neighborhood, top_right_neighbor_count);
+			}
+		}
+	}
+
 	template<typename ProcessPatchFunction>
 	bool get_state(
 			position bottom_left_corner,

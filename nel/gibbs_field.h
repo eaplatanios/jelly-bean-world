@@ -153,10 +153,17 @@ public:
 
 	template<typename RNGType>
 	void sample(RNGType& rng) {
-		for (unsigned int i = 0; i < patch_count; i++)
-			for (unsigned int x = 0; x < n; x++)
-				for (unsigned int y = 0; y < n; y++)
-					sample_cell(rng, patch_positions[i], {x, y});
+		for (unsigned int i = 0; i < patch_count; i++) {
+			position patch_position_offset = patch_positions[i] * n;
+			auto process_neighborhood = [&](unsigned int x, unsigned int y,
+					patch_type* neighborhood[4], unsigned int neighbor_count)
+			{
+				position world_position = patch_position_offset + position(x, y);
+				sample_cell(rng, neighborhood, neighbor_count, patch_positions[i], world_position);
+			};
+
+			map.iterate_neighborhoods(patch_positions[i], process_neighborhood);
+		}
 	}
 
 private:
@@ -165,20 +172,16 @@ private:
 		return rng() % n;
 	}
 
+	/* NOTE: we assume `neighborhood[0]` refers to the patch at the given `patch_position` */
 	template<typename RNGType>
 	inline void sample_cell(RNGType& rng,
+			patch_type* neighborhood[4],
+			unsigned int neighbor_count,
 			const position& patch_position,
-			const position& position_within_patch)
+			const position& world_position)
 	{
-		patch_type* neighborhood[4];
-		position neighbor_positions[4];
-		position world_position = patch_position * n + position_within_patch;
-
-		unsigned int patch_index;
-		unsigned int neighbor_count = map.get_neighborhood(world_position, neighborhood, neighbor_positions, patch_index);
-
 		/* compute the old item type and index */
-		patch_type& current_patch = *neighborhood[patch_index];
+		patch_type& current_patch = *neighborhood[0];
 		unsigned int old_item_index = 0, old_item_type = item_type_count;
 		for (unsigned int m = 0; m < current_patch.items.length; m++) {
 			if (current_patch.items[m].location == world_position) {
@@ -187,7 +190,7 @@ private:
 			}
 		}
 
-		float* log_probabilities = (float*) malloc(sizeof(float) * (item_type_count + 1));
+		float* log_probabilities = (float*) alloca(sizeof(float) * (item_type_count + 1));
 		for (unsigned int i = 0; i < item_type_count; i++)
 			log_probabilities[i] = cache.intensity<Map, StationaryIntensity>(map, world_position, i);
 		for (unsigned int j = 0; j < neighbor_count; j++) {
@@ -204,7 +207,6 @@ private:
 		float random = (float) rng() / engine.max();
 		unsigned int sampled_item_type = select_categorical(
 				log_probabilities, random, item_type_count + 1);
-		free(log_probabilities);
 
 		if (old_item_type == sampled_item_type) {
 			/* the Gibbs step didn't change anything */
