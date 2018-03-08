@@ -12,6 +12,8 @@ namespace nel {
 
 using namespace core;
 
+static PyObject* add_agent_error;
+
 enum class simulator_type {
     C = 0, MPI = 1
 };
@@ -58,7 +60,7 @@ struct py_client_data {
     /* storing the server responses */
     union response {
         bool move_result;
-        uint64_t agent_id;
+        uint64_t agent_id, time;
         pair<agent_state*, unsigned int> agents;
         hash_map<position, patch_state>* map;
     } response;
@@ -137,20 +139,26 @@ void on_step(const simulator<py_simulator_data>* sim,
         py_simulator_data& data, uint64_t time)
 {
     bool saved = false;
-    if (data.server != NULL) {
-        /* this simulator is a server, so send a step response to every client */
-        if (!send_step_response(*data.server))
-            fprintf(stderr, "on_step ERROR: send_step_response failed.\n");
-    } if (data.save_directory != NULL && time % data.save_frequency == 0) {
+    if (data.save_directory != NULL && time % data.save_frequency == 0) {
         /* save the simulator to a local file */
         saved = save(sim, data, time);
+    } if (data.server != NULL) {
+        /* this simulator is a server, so send a step response to every client */
+        auto write_step_response = [=](fixed_width_stream<memory_stream>& out) {
+            return write(saved, out);
+        };
+        if (!send_step_response(*data.server, write_step_response))
+            fprintf(stderr, "on_step ERROR: send_step_response failed.\n");
     }
 
     /* call python callback */
     PyObject* py_saved = saved ? Py_True : Py_False;
     Py_INCREF(py_saved);
     PyObject* args = Py_BuildValue("(O)", py_saved);
+    PyGILState_STATE gstate;
+    gstate = PyGILState_Ensure();
     PyObject* result = PyEval_CallObject(data.callback, args);
+    PyGILState_Release(gstate);
     Py_DECREF(args);
     if (result != NULL)
         Py_DECREF(result);
@@ -191,14 +199,30 @@ void on_get_map(client<py_client_data>& c,
     c.data.cv.notify_one();
 }
 
+void on_get_time(client<py_client_data>& c, uint64_t time)
+{
+	std::unique_lock<std::mutex> lck(c.data.lock);
+	c.data.waiting_for_server = false;
+    c.data.response.time = time;
+    c.data.cv.notify_one();
+}
+
 void on_step(client<py_client_data>& c) {
 	std::unique_lock<std::mutex> lck(c.data.lock);
 	c.data.waiting_for_step = false;
 	c.data.cv.notify_one();
 
+    bool saved;
+    if (!read(saved, c.connection)) return;
+
     /* call python callback */
-    PyObject* args = Py_BuildValue("()");
+    PyObject* py_saved = saved ? Py_True : Py_False;
+    Py_INCREF(py_saved);
+    PyObject* args = Py_BuildValue("(O)", py_saved);
+    PyGILState_STATE gstate;
+    gstate = PyGILState_Ensure();
     PyObject* result = PyEval_CallObject(c.data.callback, args);
+    PyGILState_Release(gstate);
     Py_DECREF(args);
     if (result != NULL)
         Py_DECREF(result);
@@ -215,6 +239,19 @@ inline void wait_for_server(client<py_client_data>& c)
 	std::unique_lock<std::mutex> lck(c.data.lock);
 	while (c.data.waiting_for_server && c.client_running)
         c.data.cv.wait(lck);
+}
+
+/* sets add_agent_error to the Python class nel.AddAgentError */
+static inline void import_add_agent_error() {
+#if PY_MAJOR_VERSION >= 3
+    PyObject* module_name = PyUnicode_FromString("nel");
+#else
+    PyObject* module_name = PyString_FromString("nel");
+#endif
+    PyObject* module = PyImport_Import(module_name);
+    PyObject* module_dict = PyModule_GetDict(module);
+    add_agent_error = PyDict_GetItemString(module_dict, "AddAgentError");
+    Py_DECREF(module_name); Py_DECREF(module);
 }
 
 /**
@@ -315,6 +352,7 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
         PyErr_SetString(PyExc_RuntimeError, "Failed to initialize simulator.");
         return NULL;
     }
+    import_add_agent_error();
     return PyLong_FromVoidPtr(sim);
 }
 
@@ -362,6 +400,7 @@ static PyObject* simulator_load(PyObject *self, PyObject *args)
         return NULL;
     }
     fclose(file);
+    import_add_agent_error();
     return PyLong_FromVoidPtr(sim);
 }
 
@@ -519,7 +558,7 @@ static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
                 (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
         uint64_t id = sim_handle->add_agent();
         if (id == UINT64_MAX) {
-            PyErr_SetString(PyExc_RuntimeError, "Failed to add new agent.");
+            PyErr_SetString(add_agent_error, "Failed to add new agent.");
             return NULL;
         }
         return PyLong_FromUnsignedLongLong(id);
@@ -527,6 +566,7 @@ static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
         /* this is a client, so send an add_agent message to the server */
         client<py_client_data>* client_handle =
                 (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
+        client_handle->data.waiting_for_server = true;
         if (!send_add_agent(*client_handle)) {
             PyErr_SetString(PyExc_RuntimeError, "Unable to send add_agent request.");
             return NULL;
@@ -537,7 +577,7 @@ static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
 
 		if (client_handle->data.response.agent_id == UINT64_MAX) {
             /* server returned failure */
-            PyErr_SetString(PyExc_RuntimeError, "Failed to add new agent.");
+            PyErr_SetString(add_agent_error, "Failed to add new agent.");
             return NULL;
 		}
 
@@ -585,6 +625,7 @@ static PyObject* simulator_move(PyObject *self, PyObject *args) {
         /* this is a client, so send a move message to the server */
         client<py_client_data>* client_handle =
                 (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
+        client_handle->data.waiting_for_server = true;
         if (!send_move(*client_handle, agent_id, (direction) dir, num_steps)) {
             PyErr_SetString(PyExc_RuntimeError, "Unable to send move request.");
             return NULL;
@@ -699,6 +740,7 @@ static PyObject* simulator_agent_states(PyObject *self, PyObject *args) {
         /* this is a client, so send a get_agent_states message to the server */
         client<py_client_data>* client_handle =
                 (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
+        client_handle->data.waiting_for_server = true;
         if (!send_get_agent_states(*client_handle, agent_ids, agent_count)) {
             PyErr_SetString(PyExc_RuntimeError, "Unable to send get_position request.");
             free(agent_ids); return NULL;
@@ -787,6 +829,7 @@ static PyObject* simulator_map(PyObject *self, PyObject *args) {
         /* this is a client, so send a get_scent message to the server */
         client<py_client_data>* client_handle =
                 (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
+        client_handle->data.waiting_for_server = true;
         if (!send_get_map(*client_handle, bottom_left, top_right)) {
             PyErr_SetString(PyExc_RuntimeError, "Unable to send get_map request.");
             return NULL;
@@ -800,6 +843,33 @@ static PyObject* simulator_map(PyObject *self, PyObject *args) {
         free(*client_handle->data.response.map);
         free(client_handle->data.response.map);
         return py_map;
+    }
+}
+
+static PyObject* simulator_time(PyObject *self, PyObject *args) {
+    PyObject* py_sim_handle;
+    PyObject* py_client_handle;
+    if (!PyArg_ParseTuple(args, "OO", &py_sim_handle, &py_client_handle))
+        return NULL;
+
+    if (py_client_handle == Py_None) {
+        /* the simulation is local, so call get_scent directly */
+        simulator<py_simulator_data>* sim_handle =
+                (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
+        return PyLong_FromUnsignedLongLong(sim_handle->time);
+    } else {
+        /* this is a client, so send a get_scent message to the server */
+        client<py_client_data>* client_handle =
+                (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
+        client_handle->data.waiting_for_server = true;
+        if (!send_get_time(*client_handle)) {
+            PyErr_SetString(PyExc_RuntimeError, "Unable to send get_time request.");
+            return NULL;
+        }
+
+		/* wait for response from server */
+		wait_for_server(*client_handle);
+        return PyLong_FromUnsignedLongLong(client_handle->data.response.time);
     }
 }
 
@@ -817,6 +887,7 @@ static PyMethodDef SimulatorMethods[] = {
     {"move",  nel::simulator_move, METH_VARARGS, "Attempts to move the agent in the simulation environment."},
     {"agent_states",  nel::simulator_agent_states, METH_VARARGS, "Gets the states of the agents specified by the given IDs."},
     {"map",  nel::simulator_map, METH_VARARGS, "Returns a list of patches within a given bounding box."},
+    {"time",  nel::simulator_time, METH_VARARGS, "Returns the current simulator time."},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 

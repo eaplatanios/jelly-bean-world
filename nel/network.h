@@ -643,7 +643,7 @@ bool run_client(
 
 	socket_type sock;
 	addrinfo* entry = addresses;
-	for (; entry != NULL; entry++) {
+	for (; entry != NULL; entry = entry->ai_next) {
 		sock = socket(entry->ai_family, entry->ai_socktype, entry->ai_protocol);
 		if (!sock.is_valid()) {
 			network_error("run_client ERROR: Unable to open socket");
@@ -664,8 +664,10 @@ bool run_client(
 	}
 	freeaddrinfo(addresses);
 
-	if (entry == NULL)
+	if (entry == NULL) {
+		fprintf(stderr, "run_client ERROR: Unable to find server at %s:%s.\n", server_address, server_port);
 		return false;
+	}
 
 	process_connection(sock);
 	return true;

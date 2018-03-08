@@ -38,13 +38,16 @@ the agent's decision-making logic goes in the `next_move` method.
 import nel
 
 class EasterlyAgent(nel.Agent):
-  def __init__(self, simulator):
-    super(EasterlyAgent, self).__init__(simulator)
+  def __init__(self, simulator, load_filepath=None):
+    super(EasterlyAgent, self).__init__(simulator, load_filepath)
 
   def next_move(self):
     return nel.Direction.RIGHT
 
-  def save(self, saved):
+  def save(self, filepath):
+    pass
+
+  def _load(self, filepath):
     pass
 
 
@@ -78,9 +81,11 @@ MapVisualizer class.
 
 Agents have a very simple interface. They have an abstract `next_move` method
 which should contain the decision-making logic of the agent and return the
-direction in which the agent has decided to move. They also have an abstract
-`save` method that users can implement to save the state of an agent to a file.
-`save` is called by Simulator whenever the simulator is saved.
+direction in which the agent has decided to move. The Agent class has an
+abstract `save` method that users can implement to save the state of an agent
+to a file. `save` is called by Simulator whenever the simulator is saved. The
+Agent class also has an abstract `_load` method which is called by the Agent
+constructor to load the agent's state from a given filepath.
 
 Agents also have a private fields that store state information, such as the
 agent's position, current scent perception, current visual perception, etc.

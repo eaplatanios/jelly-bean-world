@@ -19,7 +19,9 @@ enum class message_type : uint64_t {
 	GET_AGENT_STATES_RESPONSE = 7,
 	GET_MAP = 8,
 	GET_MAP_RESPONSE = 9,
-	STEP_RESPONSE = 10
+	GET_TIME = 10,
+	GET_TIME_RESPONSE = 11,
+	STEP_RESPONSE = 12
 };
 
 template<typename Stream>
@@ -43,12 +45,14 @@ inline bool print(const message_type& type, Stream& out) {
 	case message_type::GET_CONFIG:       return core::print("GET_CONFIG", out);
 	case message_type::GET_AGENT_STATES: return core::print("GET_AGENT_STATES", out);
 	case message_type::GET_MAP:          return core::print("GET_MAP", out);
+	case message_type::GET_TIME:         return core::print("GET_TIME", out);
 
 	case message_type::ADD_AGENT_RESPONSE:        return core::print("ADD_AGENT_RESPONSE", out);
 	case message_type::MOVE_RESPONSE:             return core::print("MOVE_RESPONSE", out);
 	case message_type::GET_CONFIG_RESPONSE:       return core::print("GET_CONFIG_RESPONSE", out);
 	case message_type::GET_AGENT_STATES_RESPONSE: return core::print("GET_AGENT_STATES_RESPONSE", out);
 	case message_type::GET_MAP_RESPONSE:          return core::print("GET_MAP_RESPONSE", out);
+	case message_type::GET_TIME_RESPONSE:         return core::print("GET_TIME_RESPONSE", out);
 	case message_type::STEP_RESPONSE:             return core::print("STEP_RESPONSE", out);
 	}
 	fprintf(stderr, "print ERROR: Unrecognized message_type.\n");
@@ -72,7 +76,7 @@ struct async_server {
 };
 
 inline bool init(async_server& new_server) {
-	if (!hash_set_init(new_server.client_connections, 1024))
+	if (!hash_set_init(new_server.client_connections, 1024, alloc_socket_keys))
 		return false;
 	new (&new_server.server_thread) std::thread();
 	new (&new_server.connection_set_lock) std::mutex();
@@ -185,6 +189,15 @@ inline bool receive_get_map(Stream& in, socket_type& connection, simulator<Simul
 	return true;
 }
 
+template<typename Stream, typename SimulatorData>
+inline bool receive_get_time(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(sim.time));
+	fixed_width_stream<memory_stream> out(mem_stream);
+	return write(message_type::GET_TIME_RESPONSE, out)
+		&& write(sim.time, out)
+		&& send_message(connection, mem_stream.buffer, mem_stream.position);
+}
+
 template<typename SimulatorData>
 void server_process_message(socket_type& connection, simulator<SimulatorData>& sim) {
 	message_type type;
@@ -201,24 +214,41 @@ void server_process_message(socket_type& connection, simulator<SimulatorData>& s
 			receive_get_agent_states(in, connection, sim); return;
 		case message_type::GET_MAP:
 			receive_get_map(in, connection, sim); return;
+		case message_type::GET_TIME:
+			receive_get_time(in, connection, sim); return;
 
 		case message_type::ADD_AGENT_RESPONSE:
 		case message_type::MOVE_RESPONSE:
 		case message_type::GET_CONFIG_RESPONSE:
 		case message_type::GET_AGENT_STATES_RESPONSE:
 		case message_type::GET_MAP_RESPONSE:
+		case message_type::GET_TIME_RESPONSE:
 		case message_type::STEP_RESPONSE:
 			break;
 	}
 	fprintf(stderr, "server_process_message WARNING: Received message with unrecognized type.\n");
 }
 
-inline bool send_step_response(async_server& server) {
+template<typename WriteStepResponseFunc>
+inline bool send_step_response(async_server& server, WriteStepResponseFunc write_step_response) {
 	std::unique_lock<std::mutex> lock(server.connection_set_lock);
 	bool success = true;
-	for (socket_type& client_connection : server.client_connections)
-		success &= write(message_type::STEP_RESPONSE, client_connection);
+	for (socket_type& client_connection : server.client_connections) {
+		memory_stream mem_stream = memory_stream(sizeof(message_type));
+		fixed_width_stream<memory_stream> out(mem_stream);
+		success &= write(message_type::STEP_RESPONSE, out)
+				&& write_step_response(out)
+				&& send_message(client_connection, mem_stream.buffer, mem_stream.position);
+	}
 	return success;
+}
+
+constexpr bool empty_step_response(const fixed_width_stream<memory_stream>& stream) {
+	return true;
+}
+
+inline bool send_step_response(async_server& server) {
+	return send_step_response(server, empty_step_response);
 }
 
 template<typename SimulatorData>
@@ -343,6 +373,12 @@ bool send_get_map(ClientType& c, position bottom_left, position top_right) {
 }
 
 template<typename ClientType>
+bool send_get_time(ClientType& c) {
+	message_type message = message_type::GET_TIME;
+	return send_message(c.connection, &message, sizeof(message));
+}
+
+template<typename ClientType>
 inline bool receive_add_agent_response(ClientType& c) {
 	uint64_t agent_id;
 	fixed_width_stream<socket_type> in(c.connection);
@@ -419,6 +455,15 @@ inline bool receive_get_map_response(ClientType& c) {
 }
 
 template<typename ClientType>
+inline bool receive_get_time_response(ClientType& c) {
+	uint64_t time;
+	fixed_width_stream<socket_type> in(c.connection);
+	if (!read(time, in)) return false;
+	on_get_time(c, time);
+	return true;
+}
+
+template<typename ClientType>
 inline bool receive_step_response(ClientType& c) {
 	on_step(c);
 	return true;
@@ -446,6 +491,8 @@ void run_response_listener(ClientType& c) {
 				receive_get_agent_states_response(c); continue;
 			case message_type::GET_MAP_RESPONSE:
 				receive_get_map_response(c); continue;
+			case message_type::GET_TIME_RESPONSE:
+				receive_get_time_response(c); continue;
 			case message_type::STEP_RESPONSE:
 				receive_step_response(c); continue;
 
@@ -454,6 +501,7 @@ void run_response_listener(ClientType& c) {
 			case message_type::GET_CONFIG:
 			case message_type::GET_AGENT_STATES:
 			case message_type::GET_MAP:
+			case message_type::GET_TIME:
 				break;
 		}
 		fprintf(stderr, "run_response_listener ERROR: Received invalid message type from server %" PRId64 ".\n", (uint64_t) type);

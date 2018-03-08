@@ -41,7 +41,7 @@ FILE* out = stderr;
 async_server server;
 
 //#define MULTITHREADED
-//#define USE_MPI
+#define USE_MPI
 //#define TEST_SERIALIZATION
 //#define TEST_SERVER_CONNECTION_LOSS
 //#define TEST_CLIENT_CONNECTION_LOSS
@@ -256,7 +256,7 @@ bool test_multithreaded(const simulator_config& config)
 
 struct client_data {
 	unsigned int index;
-	uint64_t agent_id;
+	uint64_t agent_id, time;
 	agent_state* agent;
 	const hash_map<position, patch_state>* map;
 
@@ -297,6 +297,14 @@ void on_get_map(client<client_data>& c, const hash_map<position, patch_state>* m
 	std::unique_lock<std::mutex> lck(locks[id]);
 	waiting_for_server[id] = false;
 	c.data.map = map;
+	conditions[id].notify_one();
+}
+
+void on_get_time(client<client_data>& c, uint64_t time) {
+	unsigned int id = c.data.index;
+	std::unique_lock<std::mutex> lck(locks[id]);
+	waiting_for_server[id] = false;
+	c.data.time = time;
 	conditions[id].notify_one();
 }
 

@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function
 
 from enum import Enum
+from pydoc import locate
 from nel import simulator_c
 
 from .item import IntensityFunction, InteractionFunction
@@ -74,7 +75,7 @@ class Simulator(object):
       self, on_step_callback=None, sim_config=None,
       is_server=False, server_address=None, port=54353,
       conn_queue_capacity=256, num_workers=8, save_frequency=1000,
-      save_filepath=None, load_filepath=None):
+      save_filepath=None, load_filepath=None, load_time=-1):
     """Creates a new simulator.
 
     Arguments:
@@ -83,13 +84,18 @@ class Simulator(object):
     self._handle = None
     self._server_handle = None
     self._client_handle = None
-    self._time = 0
+    self._save_filepath = save_filepath
+    self.agents = dict()
     if on_step_callback == None:
       self._on_step = lambda *args: None
     else:
       self._on_step = on_step_callback
+
     if save_frequency <= 0:
       raise ValueError('"save_frequency" must be strictly greater than zero.')
+    if load_filepath != None and load_time < 0:
+      raise ValueError('If "load_filepath" is specified, "load_time" must also be specified as a non-negative integer.')
+
     if sim_config != None:
       # create a local server or simulator
       if load_filepath != None:
@@ -110,20 +116,25 @@ class Simulator(object):
       if is_server:
         self._server_handle = simulator_c.start_server(
           self._handle, port, conn_queue_capacity, num_workers)
+      self._time = 0
     elif server_address != None:
       # connect to a remote server
-      if load_filepath != None:
-        raise ValueError('"load_filepath" must be None if "server_address" is specified.')
       self._client_handle = simulator_c.start_client(server_address, port, self._step_callback)
+      self._time = simulator_c.time(self._handle, self._client_handle)
+      if load_filepath != None:
+        # load agents from file
+        self._load_agents(load_filepath)
     else:
       # load local server or simulator from file
       if load_filepath == None:
         raise ValueError('"load_filepath" must be non-None if "sim_config" and "server_address" are None.')
-      self._handle = simulator_c.load(load_filepath, self._step_callback, save_frequency, save_filepath)
+      self._handle = simulator_c.load(load_filepath + str(load_time), self._step_callback, save_frequency, save_filepath)
+      self._time = simulator_c.time(self._handle, self._client_handle)
+      # remove the time from the end of the filepath to get the original save_filepath
+      self._load_agents(load_filepath)
       if is_server:
         self._server_handle = simulator_c.start_server(
           self._handle, port, conn_queue_capacity, num_workers)
-    self.agents = dict()
 
   def __del__(self):
     """Deletes this simulator and deallocates all 
@@ -150,7 +161,7 @@ class Simulator(object):
     self.agents[id] = py_agent
     return id
 
-  def _move(self, agent_id, direction, num_steps):
+  def move(self, agent, direction, num_steps):
     """Moves the specified agent in the simulated environment.
 
     Note that the agent is not moved until the simulator advances by a 
@@ -158,33 +169,53 @@ class Simulator(object):
     only advances the time step once all agents have requested to move.
 
     Arguments:
-      agent_id:  Agent ID.
+      agent:     The agent intending to move.
       direction: Direction along which to move.
       num_steps: Number of steps to take in the specified direction.
     """
     return simulator_c.move(self._handle,
-      self._client_handle, agent_id, direction.value, num_steps)
+      self._client_handle, agent._id, direction.value, num_steps)
 
   def _agent_states(self, agent_ids):
     return simulator_c.agent_states(self._handle, self._client_handle, agent_ids)
 
   def _step_callback(self, saved):
     self._time += 1
+    self._refresh_agent_states()
+    if saved:
+      self._save_agents()
+    self._on_step()
+
+  def _refresh_agent_states(self):
     agent_ids = list(self.agents.keys())
     agent_values = list(self.agents.values())
     states = self._agent_states(agent_ids)
     for i in range(len(agent_ids)):
       agent = agent_values[i]
       (agent._position, agent._scent, agent._vision, agent._items) = states[i]
-      if saved:
-        agent.save()
-    self._on_step()
 
   def time(self):
     return self._time
 
   def _map(self, bottom_left, top_right):
     return simulator_c.map(self._handle, self._client_handle, bottom_left, top_right)
+
+  def _load_agents(self, load_filepath):
+    with open(load_filepath + str(self._time) + '.agent_info', 'r') as fin:
+      for line in fin:
+        tokens = line.split(sep=' ')
+        agent_id = int(tokens[0])
+        agent_class = locate(tokens[1])
+        agent = agent_class(self, load_filepath=load_filepath + str(self._time) + '.agent' + str(agent_id))
+        agents[agent_id] = agent
+        agent._id = agent_id
+    self._refresh_agent_states()
+
+  def _save_agents(self):
+    with open(self._save_filepath + str(self._time) + '.agent_info', 'w') as fout:
+      for agent_id, agent in agents.items():
+        agent.save(self._save_filepath + str(self._time) + '.agent' + str(agent_id))
+        fout.write(str(agent_id) + ' ' + agent.__module__ + '.' + agent.__name__ + '\n')
 
 if __name__ == '__main__':
   # TODO: Parse command line arguments and construct a simulator config.

@@ -5,13 +5,16 @@ from time import sleep
 from timeit import default_timer
 
 class EasterlyAgent(nel.Agent):
-	def __init__(self, simulator):
-		super(EasterlyAgent, self).__init__(simulator)
+	def __init__(self, simulator, load_filepath=None):
+		super(EasterlyAgent, self).__init__(simulator, load_filepath)
 
 	def next_move(self):
 		return nel.Direction.RIGHT
 
-	def save(self, saved):
+	def save(self, filepath):
+		pass
+
+	def _load(self, filepath):
 		pass
 
 
@@ -47,19 +50,19 @@ while len(agents) < 1:
 	try:
 		agent = EasterlyAgent(sim)
 		agents.append(agent)
-	except:
+	except nel.AddAgentError:
 		pass
 
 	# move agents to avoid collision at (0,0)
 	for agent in agents:
-		sim._move(agent._id, agent.next_move(), 1)
+		sim.move(agent, agent.next_move(), 1)
 
 painter = nel.MapVisualizer(sim, config, (-30, -30), (150, 150))
 start_time = default_timer()
 elapsed = 0.0
 for t in range(10000):
 	for agent in agents:
-		sim._move(agent._id, agent.next_move(), 1)
+		sim.move(agent, agent.next_move(), 1)
 	if default_timer() - start_time > 1.0:
 		elapsed += default_timer() - start_time
 		print(str(sim.time() / elapsed) + " simulation steps per second.")
