@@ -13,13 +13,15 @@ struct test_server {
 	std::thread server_thread;
 	socket_type server_socket;
 	server_state state;
-	hash_set<socket_type> client_connections;
+	hash_map<socket_type, empty_data> client_connections;
 	std::mutex connection_set_lock;
 
 	test_server() : client_connections(1024, alloc_socket_keys) { }
 };
 
-void process_test_server_message(socket_type& server) {
+void process_test_server_message(socket_type& server,
+		const hash_map<socket_type, empty_data>& connections)
+{
 	bool is_string;
 	lock.lock();
 	if (!read(is_string, server)) {
@@ -45,14 +47,17 @@ void process_test_server_message(socket_type& server) {
 	lock.unlock();
 }
 
+inline void new_connection_callback(socket_type& server, const empty_data& data) { }
+
 bool init_server(test_server& new_server, uint16_t server_port,
 	unsigned int connection_queue_capacity, unsigned int worker_count)
 {
 	std::condition_variable cv; std::mutex lock;
 	auto dispatch = [&]() {
-		run_server(new_server.server_socket,
-			server_port, connection_queue_capacity, worker_count, new_server.state, cv, lock,
-			new_server.client_connections, new_server.connection_set_lock, process_test_server_message);
+		run_server(new_server.server_socket, server_port,
+			connection_queue_capacity, worker_count, new_server.state, cv, lock,
+			new_server.client_connections, new_server.connection_set_lock,
+			process_test_server_message, new_connection_callback);
 	};
 	new_server.state = server_state::STARTING;
 	new_server.server_thread = std::thread(dispatch);
@@ -90,14 +95,18 @@ bool init_client(socket_type& new_client,
 }
 
 void test_client_send(socket_type& client, int64_t i) {
-	if (!write(false, client)
-	 || !write(i, client))
+	memory_stream out = memory_stream(sizeof(bool) + sizeof(i));
+	if (!write(false, out)
+	 || !write(i, out)
+	 || !send_message(client, out.buffer, out.position))
 		 fprintf(stderr, "test_client_send ERROR: Failed to send int64_t to server.\n");
 }
 
 void test_client_send(socket_type& client, const string& s) {
-	if (!write(true, client)
-	 || !write(s, client))
+	memory_stream out = memory_stream(sizeof(bool) + sizeof(char) * s.length);
+	if (!write(true, out)
+	 || !write(s, out)
+	 || !send_message(client, out.buffer, out.position))
 		 fprintf(stderr, "test_client_send ERROR: Failed to send string to server.\n");
 }
 

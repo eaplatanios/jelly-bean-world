@@ -13,6 +13,7 @@ namespace nel {
 using namespace core;
 
 static PyObject* add_agent_error;
+static PyObject* mpi_error;
 
 enum class simulator_type {
     C = 0, MPI = 1
@@ -26,22 +27,37 @@ struct py_simulator_data
     async_server* server;
     PyObject* callback;
 
-    ~py_simulator_data() { free(*this); }
+    /* agents owned by the simulator */
+    array<uint64_t> agent_ids;
 
-	static inline void free(py_simulator_data& data) {
-        if (data.save_directory != NULL)
-            core::free(data.save_directory);
-        if (data.callback != NULL)
-            Py_DECREF(data.callback);
+    py_simulator_data() : agent_ids(16) { }
+    ~py_simulator_data() { free_helper(); }
+
+    static inline void free(py_simulator_data& data) {
+        data.free_helper();
+        core::free(data.agent_ids);
+    }
+
+private:
+    inline void free_helper() {
+        if (save_directory != NULL)
+            core::free(save_directory);
+        if (callback != NULL)
+            Py_DECREF(callback);
     }
 };
 
-inline bool init(py_simulator_data& data, const py_simulator_data& src) {
+inline bool init(py_simulator_data& data, const py_simulator_data& src)
+{
+    if (!array_init(data.agent_ids, src.agent_ids.capacity))
+        return false;
+    data.agent_ids.append(src.agent_ids.data, src.agent_ids.length);
+
     if (src.save_directory != NULL) {
         data.save_directory = (char*) malloc(sizeof(char) * max(1u, src.save_directory_length));
         if (data.save_directory == NULL) {
             fprintf(stderr, "init ERROR: Insufficient memory for py_simulator_data.save_directory.\n");
-            return false;
+            free(data.agent_ids); return false;
         }
         for (unsigned int i = 0; i < src.save_directory_length; i++)
             data.save_directory[i] = src.save_directory[i];
@@ -60,8 +76,7 @@ struct py_client_data {
     /* storing the server responses */
     union response {
         bool move_result;
-        uint64_t agent_id, time;
-        pair<agent_state*, unsigned int> agents;
+        PyObject* agent_states;
         hash_map<position, patch_state>* map;
     } response;
 
@@ -130,12 +145,90 @@ bool save(const simulator<py_simulator_data>* sim,
     }
 
     fixed_width_stream<FILE*> out(file);
-    bool result = write(*sim, out);
+    bool result = write(*sim, out)
+               && write(data.agent_ids.length, out)
+               && write(data.agent_ids.data, out, data.agent_ids.length);
     fclose(file);
     return result;
 }
 
+static inline bool build_py_agent(
+        const agent_state& agent,
+        const simulator_config& config,
+        PyObject*& py_position, PyObject*& py_scent,
+        PyObject*& py_vision, PyObject*& py_items)
+{
+    /* first copy all arrays in 'agent' */
+    int64_t* positions = (int64_t*) malloc(sizeof(int64_t) * 2);
+    if (positions == NULL) {
+        PyErr_NoMemory();
+        return false;
+    }
+    float* scent = (float*) malloc(sizeof(float) * config.scent_dimension);
+    if (scent == NULL) {
+        PyErr_NoMemory(); free(positions);
+        return false;
+    }
+    unsigned int vision_size = (2*config.vision_range + 1) * (2*config.vision_range + 1) * config.color_dimension;
+    float* vision = (float*) malloc(sizeof(float) * vision_size);
+    if (vision == NULL) {
+        PyErr_NoMemory(); free(positions); free(scent);
+        return false;
+    }
+    uint64_t* items = (uint64_t*) malloc(sizeof(uint64_t) * config.item_types.length);
+    if (items == NULL) {
+        PyErr_NoMemory(); free(positions); free(scent); free(vision);
+        return false;
+    }
+
+    positions[0] = agent.current_position.x;
+    positions[1] = agent.current_position.y;
+    for (unsigned int i = 0; i < config.scent_dimension; i++)
+        scent[i] = agent.current_scent[i];
+    for (unsigned int i = 0; i < vision_size; i++)
+        vision[i] = agent.current_vision[i];
+    for (unsigned int i = 0; i < config.item_types.length; i++)
+        items[i] = agent.collected_items[i];
+
+    npy_intp pos_dim[] = {2};
+    npy_intp scent_dim[] = {(npy_intp) config.scent_dimension};
+    npy_intp vision_dim[] = {
+            2 * (npy_intp) config.vision_range + 1,
+            2 * (npy_intp) config.vision_range + 1,
+            (npy_intp) config.color_dimension};
+    npy_intp items_dim[] = {(npy_intp) config.item_types.length};
+    py_position = PyArray_SimpleNewFromData(1, pos_dim, NPY_INT64, positions);
+    py_scent = PyArray_SimpleNewFromData(1, scent_dim, NPY_FLOAT, scent);
+    py_vision = PyArray_SimpleNewFromData(3, vision_dim, NPY_FLOAT, vision);
+    py_items = PyArray_SimpleNewFromData(1, items_dim, NPY_UINT64, items);
+    return true;
+}
+
+static PyObject* build_py_agent(
+        const agent_state& agent,
+        const simulator_config& config,
+        uint64_t agent_id)
+{
+    PyObject* py_position; PyObject* py_scent;
+    PyObject* py_vision; PyObject* py_items;
+    if (!build_py_agent(agent, config, py_position, py_scent, py_vision, py_items))
+        return NULL;
+    return Py_BuildValue("(OOOOO)", py_position, py_scent, py_vision, py_items, PyLong_FromUnsignedLongLong(agent_id));
+}
+
+static PyObject* build_py_agent(
+        const agent_state& agent,
+        const simulator_config& config)
+{
+    PyObject* py_position; PyObject* py_scent;
+    PyObject* py_vision; PyObject* py_items;
+    if (!build_py_agent(agent, config, py_position, py_scent, py_vision, py_items))
+        return NULL;
+    return Py_BuildValue("(OOOO)", py_position, py_scent, py_vision, py_items);
+}
+
 void on_step(const simulator<py_simulator_data>* sim,
+        const array<agent_state*>& agents,
         py_simulator_data& data, uint64_t time)
 {
     bool saved = false;
@@ -144,105 +237,123 @@ void on_step(const simulator<py_simulator_data>* sim,
         saved = save(sim, data, time);
     } if (data.server != NULL) {
         /* this simulator is a server, so send a step response to every client */
-        auto write_step_response = [=](fixed_width_stream<memory_stream>& out) {
-            return write(saved, out);
-        };
-        if (!send_step_response(*data.server, write_step_response))
+        if (!send_step_response(*data.server, agents, sim->get_config(), saved))
             fprintf(stderr, "on_step ERROR: send_step_response failed.\n");
     }
+
+    PyGILState_STATE gstate;
+    gstate = PyGILState_Ensure(); /* acquire global interpreter lock */
+    PyObject* py_states = PyList_New(data.agent_ids.length);
+    if (py_states == NULL) {
+        fprintf(stderr, "on_step ERROR: PyList_New returned NULL.\n");
+        PyGILState_Release(gstate); /* release global interpreter lock */
+        return;
+    }
+    const simulator_config& config = sim->get_config();
+    for (Py_ssize_t i = 0; i < data.agent_ids.length; i++)
+        PyList_SetItem(py_states, i, build_py_agent(*agents[data.agent_ids[i]], config, data.agent_ids[i]));
 
     /* call python callback */
     PyObject* py_saved = saved ? Py_True : Py_False;
     Py_INCREF(py_saved);
-    PyObject* args = Py_BuildValue("(O)", py_saved);
-    PyGILState_STATE gstate;
-    gstate = PyGILState_Ensure();
+    PyObject* args = Py_BuildValue("(OO)", py_states, py_saved);
     PyObject* result = PyEval_CallObject(data.callback, args);
-    PyGILState_Release(gstate);
     Py_DECREF(args);
     if (result != NULL)
         Py_DECREF(result);
+    PyGILState_Release(gstate); /* release global interpreter lock */
 }
 
 /**
  * Client callback functions.
  */
 
-void on_add_agent(client<py_client_data>& c, uint64_t agent_id) {
-	std::unique_lock<std::mutex> lck(c.data.lock);
-	c.data.waiting_for_server = false;
-	c.data.response.agent_id = agent_id;
+void on_add_agent(client<py_client_data>& c,
+        uint64_t agent_id, const agent_state& new_agent)
+{
+    PyGILState_STATE gstate;
+    gstate = PyGILState_Ensure(); /* acquire global interpreter lock */
+    PyObject* agent = (agent_id == UINT64_MAX) ? NULL : build_py_agent(new_agent, c.config, agent_id);
+    PyGILState_Release(gstate);
+
+    std::unique_lock<std::mutex> lck(c.data.lock);
+    c.data.waiting_for_server = false;
+    c.data.response.agent_states = agent;
     c.data.cv.notify_one();
 }
 
 void on_move(client<py_client_data>& c, uint64_t agent_id, bool request_success) {
-	std::unique_lock<std::mutex> lck(c.data.lock);
-	c.data.waiting_for_server = false;
-	c.data.response.move_result = request_success;
-	c.data.cv.notify_one();
-}
-
-void on_get_agent_states(client<py_client_data>& c, agent_state* agents, unsigned int agent_count) {
-	std::unique_lock<std::mutex> lck(c.data.lock);
-	c.data.waiting_for_server = false;
-	c.data.response.agents.key = agents;
-	c.data.response.agents.value = agent_count;
-	c.data.cv.notify_one();
+    std::unique_lock<std::mutex> lck(c.data.lock);
+    c.data.waiting_for_server = false;
+    c.data.response.move_result = request_success;
+    c.data.cv.notify_one();
 }
 
 void on_get_map(client<py_client_data>& c,
         hash_map<position, patch_state>* map)
 {
-	std::unique_lock<std::mutex> lck(c.data.lock);
-	c.data.waiting_for_server = false;
+    std::unique_lock<std::mutex> lck(c.data.lock);
+    c.data.waiting_for_server = false;
     c.data.response.map = map;
     c.data.cv.notify_one();
 }
 
-void on_get_time(client<py_client_data>& c, uint64_t time)
+void on_step(client<py_client_data>& c,
+        const array<uint64_t>& agent_ids,
+        const agent_state* agent_states)
 {
-	std::unique_lock<std::mutex> lck(c.data.lock);
-	c.data.waiting_for_server = false;
-    c.data.response.time = time;
+    std::unique_lock<std::mutex> lck(c.data.lock);
+    c.data.waiting_for_step = false;
     c.data.cv.notify_one();
-}
-
-void on_step(client<py_client_data>& c) {
-	std::unique_lock<std::mutex> lck(c.data.lock);
-	c.data.waiting_for_step = false;
-	c.data.cv.notify_one();
 
     bool saved;
     if (!read(saved, c.connection)) return;
 
+    PyGILState_STATE gstate;
+    gstate = PyGILState_Ensure(); /* acquire global interpreter lock */
+    PyObject* py_states = PyList_New(agent_ids.length);
+    if (py_states == NULL) {
+        fprintf(stderr, "on_step ERROR: PyList_New returned NULL.\n");
+        PyGILState_Release(gstate); /* release global interpreter lock */
+        return;
+    }
+    for (Py_ssize_t i = 0; i < agent_ids.length; i++)
+        PyList_SetItem(py_states, i, build_py_agent(agent_states[i], c.config, agent_ids[i]));
+
     /* call python callback */
     PyObject* py_saved = saved ? Py_True : Py_False;
     Py_INCREF(py_saved);
-    PyObject* args = Py_BuildValue("(O)", py_saved);
-    PyGILState_STATE gstate;
-    gstate = PyGILState_Ensure();
+    PyObject* args = Py_BuildValue("(OO)", py_states, py_saved);
     PyObject* result = PyEval_CallObject(c.data.callback, args);
-    PyGILState_Release(gstate);
     Py_DECREF(args);
     if (result != NULL)
         Py_DECREF(result);
+    PyGILState_Release(gstate); /* release global interpreter lock */
 }
 
 void on_lost_connection(client<py_client_data>& c) {
-	fprintf(stderr, "Client lost connection to server.\n");
-	c.client_running = false;
-	c.data.cv.notify_one();
+    fprintf(stderr, "Client lost connection to server.\n");
+    c.client_running = false;
+    c.data.cv.notify_one();
 }
 
 inline void wait_for_server(client<py_client_data>& c)
 {
-	std::unique_lock<std::mutex> lck(c.data.lock);
-	while (c.data.waiting_for_server && c.client_running)
+    /* release the global interpreter lock */
+    PyThreadState* python_thread = PyEval_SaveThread();
+
+    std::unique_lock<std::mutex> lck(c.data.lock);
+    while (c.data.waiting_for_server && c.client_running)
         c.data.cv.wait(lck);
+
+    /* re-acquire the global interpreter lock */
+    PyEval_RestoreThread(python_thread);
 }
 
-/* sets add_agent_error to the Python class nel.AddAgentError */
-static inline void import_add_agent_error() {
+/**
+ * Imports the Python exception classes from the nel module.
+ */
+static inline void import_errors() {
 #if PY_MAJOR_VERSION >= 3
     PyObject* module_name = PyUnicode_FromString("nel");
 #else
@@ -251,6 +362,7 @@ static inline void import_add_agent_error() {
     PyObject* module = PyImport_Import(module_name);
     PyObject* module_dict = PyModule_GetDict(module);
     add_agent_error = PyDict_GetItemString(module_dict, "AddAgentError");
+    mpi_error = PyDict_GetItemString(module_dict, "MPIError");
     Py_DECREF(module_name); Py_DECREF(module);
 }
 
@@ -352,7 +464,7 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
         PyErr_SetString(PyExc_RuntimeError, "Failed to initialize simulator.");
         return NULL;
     }
-    import_add_agent_error();
+    import_errors();
     return PyLong_FromVoidPtr(sim);
 }
 
@@ -393,15 +505,23 @@ static PyObject* simulator_load(PyObject *self, PyObject *args)
         PyErr_SetFromErrno(PyExc_OSError);
         return NULL;
     }
+    size_t agent_id_count;
     fixed_width_stream<FILE*> in(file);
     if (!read(*sim, in, data)) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to load simulator.");
         free(sim); fclose(file);
         return NULL;
+    } else if (!read(agent_id_count, in)
+            || !data.agent_ids.ensure_capacity(agent_id_count)
+            || !read(data.agent_ids.data, in, agent_id_count))
+    {
+        PyErr_SetString(PyExc_RuntimeError, "Failed to load agent IDs.");
+        free(*sim); free(sim); fclose(file);
+        return NULL;
     }
     fclose(file);
-    import_add_agent_error();
-    return PyLong_FromVoidPtr(sim);
+    import_errors();
+    return Py_BuildValue("(LO)", sim->time, PyLong_FromVoidPtr(sim));
 }
 
 /**
@@ -492,7 +612,8 @@ static PyObject* simulator_start_client(PyObject *self, PyObject *args)
     char* server_address;
     unsigned int port;
     PyObject* py_callback;
-    if (!PyArg_ParseTuple(args, "sIO", &server_address, &port, &py_callback)) {
+    PyObject* py_agent_ids;
+    if (!PyArg_ParseTuple(args, "sIOO", &server_address, &port, &py_callback, &py_agent_ids)) {
         fprintf(stderr, "Invalid argument types in the call to 'simulator_c.start_client'.\n");
         return NULL;
     }
@@ -502,22 +623,48 @@ static PyObject* simulator_start_client(PyObject *self, PyObject *args)
         return NULL;
     }
 
+    /* parse the list of agent IDs from Python */
+    Py_ssize_t agent_count = PyList_Size(py_agent_ids);
+    uint64_t* agent_ids = (uint64_t*) malloc(sizeof(uint64_t) * agent_count);
+    agent_state* agent_states = (agent_state*) malloc(sizeof(agent_state) * agent_count);
+    if (agent_ids == NULL || agent_states == NULL) {
+        if (agent_ids != NULL) free(agent_ids);
+        PyErr_NoMemory(); return NULL;
+    }
+    for (Py_ssize_t i = 0; i < agent_count; i++)
+        agent_ids[i] = PyLong_AsUnsignedLongLong(PyList_GetItem(py_agent_ids, i));
+
     client<py_client_data>* new_client =
             (client<py_client_data>*) malloc(sizeof(client<py_client_data>));
     if (new_client == NULL) {
         PyErr_NoMemory();
+        free(agent_ids); free(agent_states);
         return NULL;
     } else if (!init(*new_client)) {
         PyErr_NoMemory();
+        free(agent_ids); free(agent_states);
         free(new_client); return NULL;
-    } else if (!init_client(*new_client, server_address, (uint16_t) port)) {
+    }
+
+    uint64_t simulator_time = init_client(*new_client, server_address,
+            (uint16_t) port, agent_ids, agent_states, (unsigned int) agent_count);
+    if (simulator_time == UINT64_MAX) {
         PyErr_SetString(PyExc_RuntimeError, "Unable to initialize MPI client.");
         free(*new_client); free(new_client); return NULL;
     }
 
+    PyObject* py_states = PyList_New(agent_count);
+    if (py_states == NULL) return NULL;
+    for (Py_ssize_t i = 0; i < agent_count; i++) {
+        PyList_SetItem(py_states, i, build_py_agent(agent_states[i], new_client->config));
+        free(agent_states[i]);
+    }
+    free(agent_states); free(agent_ids);
+
     new_client->data.callback = py_callback;
     Py_INCREF(py_callback);
-    return PyLong_FromVoidPtr(new_client);
+    import_errors();
+    return Py_BuildValue("(LOO)", simulator_time, PyLong_FromVoidPtr(new_client), py_states);
 }
 
 static PyObject* simulator_stop_client(PyObject *self, PyObject *args)
@@ -556,32 +703,39 @@ static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
         /* the simulation is local, so call add_agent directly */
         simulator<py_simulator_data>* sim_handle =
                 (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
-        uint64_t id = sim_handle->add_agent();
-        if (id == UINT64_MAX) {
+        pair<uint64_t, agent_state*> new_agent = sim_handle->add_agent();
+        if (new_agent.key == UINT64_MAX) {
             PyErr_SetString(add_agent_error, "Failed to add new agent.");
             return NULL;
         }
-        return PyLong_FromUnsignedLongLong(id);
+        sim_handle->get_data().agent_ids.add(new_agent.key);
+        std::unique_lock<std::mutex> lock(new_agent.value->lock);
+        return Py_BuildValue("O", build_py_agent(*new_agent.value, sim_handle->get_config(), new_agent.key));
     } else {
         /* this is a client, so send an add_agent message to the server */
         client<py_client_data>* client_handle =
                 (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
+        if (!client_handle->client_running) {
+            PyErr_SetString(mpi_error, "Connection to the server was lost.");
+            return NULL;
+        }
+
         client_handle->data.waiting_for_server = true;
         if (!send_add_agent(*client_handle)) {
             PyErr_SetString(PyExc_RuntimeError, "Unable to send add_agent request.");
             return NULL;
         }
 
-		/* wait for response from server */
-		wait_for_server(*client_handle);
+        /* wait for response from server */
+        wait_for_server(*client_handle);
 
-		if (client_handle->data.response.agent_id == UINT64_MAX) {
+        if (client_handle->data.response.agent_states == NULL) {
             /* server returned failure */
             PyErr_SetString(add_agent_error, "Failed to add new agent.");
             return NULL;
-		}
+        }
 
-        return PyLong_FromUnsignedLongLong(client_handle->data.response.agent_id);
+        return client_handle->data.response.agent_states;
     }
 }
 
@@ -614,25 +768,32 @@ static PyObject* simulator_move(PyObject *self, PyObject *args) {
         /* the simulation is local, so call move directly */
         simulator<py_simulator_data>* sim_handle =
                 (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
-        if (sim_handle->move(agent_id, (direction) dir, num_steps)) {
-            Py_INCREF(Py_True);
-            return Py_True;
-        } else {
-            Py_INCREF(Py_False);
-            return Py_False;
-        }
+
+        /* release the global interpreter lock */
+        PyThreadState* python_thread = PyEval_SaveThread();
+        bool result = sim_handle->move(agent_id, (direction) dir, num_steps);
+
+        /* re-acquire the global interpreter lock and return */
+        PyEval_RestoreThread(python_thread);
+        PyObject* py_result = (result ? Py_True : Py_False);
+        Py_INCREF(py_result); return py_result;
     } else {
         /* this is a client, so send a move message to the server */
         client<py_client_data>* client_handle =
                 (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
+        if (!client_handle->client_running) {
+            PyErr_SetString(mpi_error, "Connection to the server was lost.");
+            return NULL;
+        }
+
         client_handle->data.waiting_for_server = true;
         if (!send_move(*client_handle, agent_id, (direction) dir, num_steps)) {
             PyErr_SetString(PyExc_RuntimeError, "Unable to send move request.");
             return NULL;
         }
 
-		/* wait for response from server */
-		wait_for_server(*client_handle);
+        /* wait for response from server */
+        wait_for_server(*client_handle);
 
         if (client_handle->data.response.move_result) {
             Py_INCREF(Py_True);
@@ -641,124 +802,6 @@ static PyObject* simulator_move(PyObject *self, PyObject *args) {
             Py_INCREF(Py_False);
             return Py_False;
         }
-    }
-}
-
-static PyObject* build_py_agent(
-        const agent_state& agent, const simulator_config& config)
-{
-    /* first copy all arrays in 'agent' */
-    int64_t* positions = (int64_t*) malloc(sizeof(int64_t) * 2);
-    if (positions == NULL) {
-        PyErr_NoMemory();
-        return NULL;
-    }
-    float* scent = (float*) malloc(sizeof(float) * config.scent_dimension);
-    if (scent == NULL) {
-        PyErr_NoMemory(); free(positions);
-        return NULL;
-    }
-    unsigned int vision_size = (2*config.vision_range + 1) * (2*config.vision_range + 1) * config.color_dimension;
-    float* vision = (float*) malloc(sizeof(float) * vision_size);
-    if (vision == NULL) {
-        PyErr_NoMemory(); free(positions); free(scent);
-        return NULL;
-    }
-    uint64_t* items = (uint64_t*) malloc(sizeof(uint64_t) * config.item_types.length);
-    if (items == NULL) {
-        PyErr_NoMemory(); free(positions); free(scent); free(vision);
-        return NULL;
-    }
-
-    positions[0] = agent.current_position.x;
-    positions[1] = agent.current_position.y;
-    for (unsigned int i = 0; i < config.scent_dimension; i++)
-        scent[i] = agent.current_scent[i];
-    for (unsigned int i = 0; i < vision_size; i++)
-        vision[i] = agent.current_vision[i];
-    for (unsigned int i = 0; i < config.item_types.length; i++)
-        items[i] = agent.collected_items[i];
-
-    npy_intp pos_dim[] = {2};
-    npy_intp scent_dim[] = {(npy_intp) config.scent_dimension};
-    npy_intp vision_dim[] = {
-			2 * (npy_intp) config.vision_range + 1,
-			2 * (npy_intp) config.vision_range + 1,
-			(npy_intp) config.color_dimension};
-    npy_intp items_dim[] = {(npy_intp) config.item_types.length};
-    PyObject* py_position = PyArray_SimpleNewFromData(1, pos_dim, NPY_INT64, positions);
-    PyObject* py_scent = PyArray_SimpleNewFromData(1, scent_dim, NPY_FLOAT, scent);
-    PyObject* py_vision = PyArray_SimpleNewFromData(3, vision_dim, NPY_FLOAT, vision);
-    PyObject* py_items = PyArray_SimpleNewFromData(1, items_dim, NPY_UINT64, items);
-
-    return Py_BuildValue("(OOOO)", py_position, py_scent, py_vision, py_items);
-}
-
-static PyObject* simulator_agent_states(PyObject *self, PyObject *args) {
-    PyObject* py_sim_handle;
-    PyObject* py_client_handle;
-    PyObject* py_agent_ids;
-    if (!PyArg_ParseTuple(args, "OOO", &py_sim_handle, &py_client_handle, &py_agent_ids))
-        return NULL;
-    if (!PyList_Check(py_agent_ids)) {
-        PyErr_SetString(PyExc_TypeError, "Third argument must be a list of ints.");
-        return NULL;
-    }
-
-    Py_ssize_t agent_count = PyList_Size(py_agent_ids);
-    uint64_t* agent_ids = (uint64_t*) malloc(sizeof(uint64_t) * agent_count);
-    if (agent_ids == NULL) {
-        PyErr_NoMemory();
-        return NULL;
-    }
-    for (Py_ssize_t i = 0; i < agent_count; i++)
-        agent_ids[i] = PyLong_AsUnsignedLongLong(PyList_GetItem(py_agent_ids, i));
-
-    if (py_client_handle == Py_None) {
-        /* the simulation is local, so call get_agent_states directly */
-        agent_state** states = (agent_state**) malloc(sizeof(agent_state*) * agent_count);
-        if (states == NULL) {
-            PyErr_NoMemory();
-            free(agent_ids); return NULL;
-        }
-
-        simulator<py_simulator_data>* sim_handle =
-                (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
-        sim_handle->get_agent_states(states, agent_ids, agent_count);
-        free(agent_ids);
-
-        PyObject* py_states = PyList_New(agent_count);
-        if (py_states == NULL) return NULL;
-        for (Py_ssize_t i = 0; i < agent_count; i++) {
-            states[i]->lock.lock();
-            PyList_SetItem(py_states, i, build_py_agent(*states[i], sim_handle->get_config()));
-            states[i]->lock.unlock();
-        }
-        free(states);
-        return py_states;
-    } else {
-        /* this is a client, so send a get_agent_states message to the server */
-        client<py_client_data>* client_handle =
-                (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
-        client_handle->data.waiting_for_server = true;
-        if (!send_get_agent_states(*client_handle, agent_ids, agent_count)) {
-            PyErr_SetString(PyExc_RuntimeError, "Unable to send get_position request.");
-            free(agent_ids); return NULL;
-        }
-
-		/* wait for response from server */
-		wait_for_server(*client_handle);
-        agent_state* states = client_handle->data.response.agents.key;
-        agent_count = client_handle->data.response.agents.value;
-
-        PyObject* py_states = PyList_New(agent_count);
-        if (py_states == NULL) return NULL;
-        for (Py_ssize_t i = 0; i < agent_count; i++) {
-            PyList_SetItem(py_states, i, build_py_agent(states[i], client_handle->config));
-            free(states[i]);
-        }
-        free(states);
-        return py_states;
     }
 }
 
@@ -829,47 +872,25 @@ static PyObject* simulator_map(PyObject *self, PyObject *args) {
         /* this is a client, so send a get_scent message to the server */
         client<py_client_data>* client_handle =
                 (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
+        if (!client_handle->client_running) {
+            PyErr_SetString(mpi_error, "Connection to the server was lost.");
+            return NULL;
+        }
+
         client_handle->data.waiting_for_server = true;
         if (!send_get_map(*client_handle, bottom_left, top_right)) {
             PyErr_SetString(PyExc_RuntimeError, "Unable to send get_map request.");
             return NULL;
         }
 
-		/* wait for response from server */
-		wait_for_server(*client_handle);
+        /* wait for response from server */
+        wait_for_server(*client_handle);
         PyObject* py_map = build_py_map(*client_handle->data.response.map, client_handle->config);
         for (auto entry : *client_handle->data.response.map)
             free(entry.value);
         free(*client_handle->data.response.map);
         free(client_handle->data.response.map);
         return py_map;
-    }
-}
-
-static PyObject* simulator_time(PyObject *self, PyObject *args) {
-    PyObject* py_sim_handle;
-    PyObject* py_client_handle;
-    if (!PyArg_ParseTuple(args, "OO", &py_sim_handle, &py_client_handle))
-        return NULL;
-
-    if (py_client_handle == Py_None) {
-        /* the simulation is local, so call get_scent directly */
-        simulator<py_simulator_data>* sim_handle =
-                (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
-        return PyLong_FromUnsignedLongLong(sim_handle->time);
-    } else {
-        /* this is a client, so send a get_scent message to the server */
-        client<py_client_data>* client_handle =
-                (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
-        client_handle->data.waiting_for_server = true;
-        if (!send_get_time(*client_handle)) {
-            PyErr_SetString(PyExc_RuntimeError, "Unable to send get_time request.");
-            return NULL;
-        }
-
-		/* wait for response from server */
-		wait_for_server(*client_handle);
-        return PyLong_FromUnsignedLongLong(client_handle->data.response.time);
     }
 }
 
@@ -885,9 +906,7 @@ static PyMethodDef SimulatorMethods[] = {
     {"stop_client",  nel::simulator_stop_client, METH_VARARGS, "Stops the simulator client."},
     {"add_agent",  nel::simulator_add_agent, METH_VARARGS, "Adds an agent to the simulator and returns its ID."},
     {"move",  nel::simulator_move, METH_VARARGS, "Attempts to move the agent in the simulation environment."},
-    {"agent_states",  nel::simulator_agent_states, METH_VARARGS, "Gets the states of the agents specified by the given IDs."},
     {"map",  nel::simulator_map, METH_VARARGS, "Returns a list of patches within a given bounding box."},
-    {"time",  nel::simulator_time, METH_VARARGS, "Returns the current simulator time."},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 

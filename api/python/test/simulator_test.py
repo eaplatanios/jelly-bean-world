@@ -60,12 +60,13 @@ while len(agents) < 1:
 painter = nel.MapVisualizer(sim, config, (-30, -30), (150, 150))
 start_time = default_timer()
 elapsed = 0.0
+sim_start_time = sim.time();
 for t in range(10000):
 	for agent in agents:
 		sim.move(agent, agent.next_move(), 1)
 	if default_timer() - start_time > 1.0:
 		elapsed += default_timer() - start_time
-		print(str(sim.time() / elapsed) + " simulation steps per second.")
+		print(str((sim.time() - sim_start_time) / elapsed) + " simulation steps per second.")
 		start_time = default_timer()
 	#print("time: " + str(sim.time()))
 	#print("agents[0].position(): " + str(agents[0].position()))

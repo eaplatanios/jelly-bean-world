@@ -75,7 +75,7 @@ for t in range(10000):
 
 See [api/python/test/simulator_test.py](api/python/test/simulator_test.py) for
 an example with more types of items as well as a visualization using the
-MapVisualizer class.
+`MapVisualizer` class.
 
 ### Agent class
 
@@ -221,8 +221,8 @@ Simulator can be constructed as a server with the appropriate constructor
 arguments. If a server address is provided to the Simulator constructor, it
 will try to connect to the Simulator running at the specified remote address,
 and all calls to the Simulator class will be issued as commands to the server.
-In C++, `nel/mpi.h` provides the functionality to run the server and clients.
-See `nel/simulator_test.cpp` for an example.
+In C++, [nel/mpi.h](nel/mpi.h) provides the functionality to run the server and
+clients. See [nel/simulator_test.cpp](nel/simulator_test.cpp) for an example.
 
 
 #### Mechanics

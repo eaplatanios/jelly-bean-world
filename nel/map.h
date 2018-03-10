@@ -599,10 +599,10 @@ bool write(const map<PerPatchData>& world, Stream& out,
 		return false;
 
 	default_scribe scribe;
-	return write(world.patches, out, scribe, patch_writer)
-		&& write(world.n, out)
+	return write(world.n, out)
 		&& write(world.item_type_count, out)
-		&& write(world.gibbs_iterations, out);
+		&& write(world.gibbs_iterations, out)
+		&& write(world.patches, out, scribe, patch_writer);
 }
 
 } /* namespace nel */

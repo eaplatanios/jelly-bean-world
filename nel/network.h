@@ -31,6 +31,16 @@ typedef int socklen_t;
 #define EVENT_QUEUE_CAPACITY 1024
 
 
+/** A structure with no contents. */
+struct empty_data {
+	static inline void move(const empty_data& src, const empty_data& dst) { }
+	static inline void free(const empty_data& data) { }
+};
+
+constexpr bool init(const empty_data& data) { return true; }
+constexpr bool init(const empty_data& data, const empty_data& src) { return true; }
+
+
 namespace nel {
 
 using namespace core;
@@ -62,6 +72,10 @@ struct socket_type {
 
 	inline bool operator == (const socket_type& other) const {
 		return handle == other.handle;
+	}
+
+	inline bool operator != (const socket_type& other) const {
+		return handle != other.handle;
 	}
 
 	static inline bool is_empty(const socket_type& key) {
@@ -264,6 +278,7 @@ struct socket_listener {
 				if (!add_client_socket(connection)) {
 					shutdown(connection.handle, 2); continue;
 				}
+
 				callback(connection);
 			} else {
 				/* there is an event on a client connection */
@@ -361,6 +376,7 @@ struct socket_listener {
 				if (!add_client_socket(connection)) {
 					shutdown(connection.handle, 2); continue;
 				}
+
 				callback(connection);
 			} else {
 				/* there is an event on a client connection */
@@ -423,34 +439,23 @@ inline bool read(T& value, socket_type& in) {
 /**
  * Reads `length` elements from `in` and writes them to the native array
  * `values`. This function does not perform endianness transformations.
+ *
+ * **NOTE:** `length` should be non-zero. Otherwise, `recv` may wait
+ * indefinitely for incoming data.
+ *
  * \param in a handle to a socket.
  * \tparam T satisfies [is_fundamental](http://en.cppreference.com/w/cpp/types/is_fundamental).
  */
 template<typename T, typename std::enable_if<std::is_fundamental<T>::value>::type* = nullptr>
-inline bool read(T* values, socket_type& in, unsigned int length) {
+inline bool read(T* values, socket_type& in, unsigned int length)
+{
+#if !defined(NDEBUG)
+	if (length == 0) {
+		fprintf(stderr, "read WARNING: 'length' is zero.\n");
+		return true;
+	}
+#endif
 	return (recv(in.handle, (char*) values, sizeof(T) * length, MSG_WAITALL) > 0);
-}
-
-/**
- * Writes `sizeof(T)` bytes to `out` from the memory referenced by `value`.
- * This function does not perform endianness transformations.
- * \param out a handle to a socket.
- * \tparam T satisfies [is_fundamental](http://en.cppreference.com/w/cpp/types/is_fundamental).
- */
-template<typename T, typename std::enable_if<std::is_fundamental<T>::value>::type* = nullptr>
-inline bool write(const T& value, socket_type& out) {
-	return (send(out.handle, (const char*) &value, sizeof(T), 0) > 0);
-}
-
-/**
- * Writes `length` elements to `out` from the native array `values`. This
- * function does not perform endianness transformations.
- * \param out a handle to a socket.
- * \tparam T satisfies [is_fundamental](http://en.cppreference.com/w/cpp/types/is_fundamental).
- */
-template<typename T, typename std::enable_if<std::is_fundamental<T>::value>::type* = nullptr>
-inline bool write(const T* values, socket_type& out, unsigned int length) {
-	return (send(out.handle, (const char*) values, sizeof(T) * length, 0) > 0);
 }
 
 inline void network_error(const char* message) {
@@ -466,8 +471,8 @@ enum class server_state {
 	STARTED = 2
 };
 
-template<typename ProcessMessageCallback, typename... CallbackArgs>
-void run_worker(socket_listener& listener, hash_set<socket_type>& connections,
+template<typename ConnectionData, typename ProcessMessageCallback, typename... CallbackArgs>
+void run_worker(socket_listener& listener, hash_map<socket_type, ConnectionData>& connections,
 		std::mutex& connection_set_lock, server_state& state,
 		ProcessMessageCallback process_message, CallbackArgs&&... callback_args)
 {
@@ -482,17 +487,21 @@ void run_worker(socket_listener& listener, hash_set<socket_type>& connections,
 			/* the other end of the socket was closed by the client */
 			listener.remove_socket(connection);
 			connection_set_lock.lock();
-			connections.remove(connection);
+			bool contains; unsigned int index;
+			free(connections.get(connection, contains, index));
+			connections.remove_at(index);
 			connection_set_lock.unlock();
 			shutdown(connection.handle, 2);
 		} else {
 			/* there is a data waiting to be read, so read it */
-			process_message(connection, std::forward<CallbackArgs>(callback_args)...);
+			process_message(connection, connections, std::forward<CallbackArgs>(callback_args)...);
 
 			/* continue listening on this socket */
 			if (!listener.update_socket(connection)) {
 				connection_set_lock.lock();
-				connections.remove(connection);
+				bool contains; unsigned int index;
+				free(connections.get(connection, contains, index));
+				connections.remove_at(index);
 				connection_set_lock.unlock();
 				shutdown(connection.handle, 2);
 			}
@@ -523,12 +532,14 @@ inline void cleanup_server(server_state& state,
 	cleanup_server<Success>(state, init_cv, init_lock);
 }
 
-template<typename ProcessMessageCallback, typename... CallbackArgs>
+template<typename ConnectionData = empty_data, typename ProcessMessageCallback,
+	typename NewConnectionCallback, typename... CallbackArgs>
 bool run_server(socket_type& sock, uint16_t server_port,
 		unsigned int connection_queue_capacity, unsigned int worker_count,
 		server_state& state, std::condition_variable& init_cv, std::mutex& init_lock,
-		hash_set<socket_type>& connections, std::mutex& connection_set_lock,
-		ProcessMessageCallback process_message, CallbackArgs&&... callback_args)
+		hash_map<socket_type, ConnectionData>& connections, std::mutex& connection_set_lock,
+		ProcessMessageCallback process_message, NewConnectionCallback new_connection_callback,
+		CallbackArgs&&... callback_args)
 {
 #if defined(_WIN32)
 	WSADATA wsa_state;
@@ -600,7 +611,13 @@ bool run_server(socket_type& sock, uint16_t server_port,
 	while (state != server_state::STOPPING) {
 		listener.accept(sock, [&](socket_type& connection) {
 			connection_set_lock.lock();
-			connections.add(connection, alloc_socket_keys);
+			bool contains; unsigned int index;
+			connections.check_size();
+			ConnectionData& data = connections.get(connection, contains, index);
+			connections.table.keys[index] = connection;
+			connections.table.size++;
+			init(data);
+			new_connection_callback(connection, data, std::forward<CallbackArgs>(callback_args)...);
 			connection_set_lock.unlock();
 		});
 	}
@@ -612,8 +629,8 @@ bool run_server(socket_type& sock, uint16_t server_port,
 			workers[i].join();
 		} catch (...) { }
 	}
-	for (socket_type& connection : connections)
-		shutdown(connection.handle, 2);
+	for (auto connection : connections)
+		shutdown(connection.key.handle, 2);
 	cleanup_server<true>(state, init_cv, init_lock, sock);
 	delete[] workers;
 	return true;

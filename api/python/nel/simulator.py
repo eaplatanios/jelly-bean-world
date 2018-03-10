@@ -6,8 +6,11 @@ from nel import simulator_c
 
 from .item import IntensityFunction, InteractionFunction
 
-__all__ = ['MovementConflictPolicy', 'SimulatorConfig', 'Simulator']
+__all__ = ['MPIError', 'MovementConflictPolicy', 'SimulatorConfig', 'Simulator']
 
+
+class MPIError(Exception):
+  pass
 
 class MovementConflictPolicy(Enum):
   """Policy used to resolve the conflict when two or more agents request to
@@ -118,18 +121,21 @@ class Simulator(object):
           self._handle, port, conn_queue_capacity, num_workers)
       self._time = 0
     elif server_address != None:
-      # connect to a remote server
-      self._client_handle = simulator_c.start_client(server_address, port, self._step_callback)
-      self._time = simulator_c.time(self._handle, self._client_handle)
       if load_filepath != None:
         # load agents from file
         self._load_agents(load_filepath)
+      # connect to a remote server
+      agent_ids = list(self.agents.keys())
+      agent_values = list(self.agents.values())
+      (self._time, self._client_handle, agent_states) = simulator_c.start_client(server_address, port, self._step_callback, agent_ids)
+      for i in range(len(agent_ids)):
+        agent = agent_values[i]
+        (agent._position, agent._scent, agent._vision, agent._items) = agent_states[i]
     else:
       # load local server or simulator from file
       if load_filepath == None:
         raise ValueError('"load_filepath" must be non-None if "sim_config" and "server_address" are None.')
-      self._handle = simulator_c.load(load_filepath + str(load_time), self._step_callback, save_frequency, save_filepath)
-      self._time = simulator_c.time(self._handle, self._client_handle)
+      (self._time, self._handle) = simulator_c.load(load_filepath + str(load_time), self._step_callback, save_frequency, save_filepath)
       # remove the time from the end of the filepath to get the original save_filepath
       self._load_agents(load_filepath)
       if is_server:
@@ -137,8 +143,8 @@ class Simulator(object):
           self._handle, port, conn_queue_capacity, num_workers)
 
   def __del__(self):
-    """Deletes this simulator and deallocates all 
-    associated memory. This simulator cannot be used 
+    """Deletes this simulator and deallocates all
+    associated memory. This simulator cannot be used
     again after it's been deleted."""
     if self._client_handle != None:
       simulator_c.stop_client(self._client_handle)
@@ -156,8 +162,7 @@ class Simulator(object):
     Returns:
       The new agent's ID.
     """
-    id = simulator_c.add_agent(self._handle, self._client_handle)
-    (py_agent._position, py_agent._scent, py_agent._vision, py_agent._items) = self._agent_states([id])[0]
+    (py_agent._position, py_agent._scent, py_agent._vision, py_agent._items, id) = simulator_c.add_agent(self._handle, self._client_handle)
     self.agents[id] = py_agent
     return id
 
@@ -176,23 +181,15 @@ class Simulator(object):
     return simulator_c.move(self._handle,
       self._client_handle, agent._id, direction.value, num_steps)
 
-  def _agent_states(self, agent_ids):
-    return simulator_c.agent_states(self._handle, self._client_handle, agent_ids)
-
-  def _step_callback(self, saved):
+  def _step_callback(self, agent_states, saved):
     self._time += 1
-    self._refresh_agent_states()
+    for agent_state in agent_states:
+      (position, scent, vision, items, id) = agent_state
+      agent = self.agents[id]
+      (agent._position, agent._scent, agent._vision, agent._items) = (position, scent, vision, items)
     if saved:
       self._save_agents()
     self._on_step()
-
-  def _refresh_agent_states(self):
-    agent_ids = list(self.agents.keys())
-    agent_values = list(self.agents.values())
-    states = self._agent_states(agent_ids)
-    for i in range(len(agent_ids)):
-      agent = agent_values[i]
-      (agent._position, agent._scent, agent._vision, agent._items) = states[i]
 
   def time(self):
     return self._time
@@ -209,7 +206,6 @@ class Simulator(object):
         agent = agent_class(self, load_filepath=load_filepath + str(self._time) + '.agent' + str(agent_id))
         agents[agent_id] = agent
         agent._id = agent_id
-    self._refresh_agent_states()
 
   def _save_agents(self):
     with open(self._save_filepath + str(self._time) + '.agent_info', 'w') as fout:

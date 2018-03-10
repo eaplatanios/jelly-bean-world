@@ -787,8 +787,9 @@ class simulator {
     /* Agents managed by this simulator. */
     array<agent_state*> agents;
 
-    /* Lock for the agents array, used to prevent simultaneous updates. */
-    std::mutex agent_array_lock;
+    /* Lock for the agents array and their state (not including their requested
+       actions), used to prevent simultaneous updates. */
+    std::mutex agent_states_lock;
 
     /* A map from positions to a list of agents that request to move there. */
     hash_map<position, array<agent_state*>> requested_moves;
@@ -818,8 +819,7 @@ public:
             config.intensity_fn, config.intensity_fn_args,
             config.interaction_fn, config.interaction_fn_args),
         agents(16), requested_moves(32, alloc_position_keys),
-        acted_agent_count(0),
-        data(data), time(0)
+        acted_agent_count(0), data(data), time(0)
     {
         if (!init(scent_model, (double) config.diffusion_param,
                 (double) config.decay_param, config.patch_size, config.deleted_item_lifetime)) {
@@ -836,30 +836,30 @@ public:
     /** 
      * Adds a new agent to this simulator and returns its initial state.
      * 
-     * \returns The ID of the new agent, or UINT64_MAX if there is an error.
+     * \returns A pair containing the ID of the new agent and its state.
      */
-    inline uint64_t add_agent() {
-        agent_array_lock.lock();
+    inline pair<uint64_t, agent_state*> add_agent() {
+        agent_states_lock.lock();
         agents.ensure_capacity(agents.length + 1);
         agent_state* new_agent = (agent_state*) malloc(sizeof(agent_state));
         uint64_t id = agents.length;
         if (new_agent == NULL) {
             fprintf(stderr, "simulator.add_agent ERROR: Insufficient memory for new agent.\n");
-            return UINT64_MAX;
+            return make_pair(UINT64_MAX, (agent_state*) NULL);
         } else if (!agents.add(new_agent)) {
             core::free(new_agent);
-            return UINT64_MAX;
+            return make_pair(UINT64_MAX, (agent_state*) NULL);
         }
-        agent_array_lock.unlock();
+        agent_states_lock.unlock();
 
         if (!init(*new_agent, world, scent_model, config, time)) {
-            agent_array_lock.lock();
+            agent_states_lock.lock();
             agents.remove((size_t) id);
             core::free(new_agent);
-            agent_array_lock.unlock();
-            return UINT64_MAX;
+            agent_states_lock.unlock();
+            return make_pair(UINT64_MAX, (agent_state*) NULL);
         }
-        return id;
+        return make_pair(id, new_agent);
     }
 
     /** 
@@ -874,12 +874,13 @@ public:
      * \param   num_steps Number of steps to take in the specified direction.
      * \returns `true` if the move was successful, and `false` otherwise.
      */
-    inline bool move(uint64_t agent_id, direction dir, unsigned int num_steps) {
+    inline bool move(uint64_t agent_id, direction dir, unsigned int num_steps)
+    {
         if (num_steps > config.max_steps_per_movement) return false;
 
-        agent_array_lock.lock();
+        agent_states_lock.lock();
         agent_state& agent = *agents[(size_t) agent_id];
-        agent_array_lock.unlock();
+        agent_states_lock.unlock();
 
         agent.lock.lock();
         if (agent.agent_acted) {
@@ -899,20 +900,20 @@ public:
         /* add the agent's move to the list of requested moves */
         request_new_position(agent);
 
-        agent_array_lock.lock();
+        agent_states_lock.lock();
         if (++acted_agent_count == agents.length)
             step(); /* advance the simulation by one time step */
-        agent_array_lock.unlock();
+        agent_states_lock.unlock();
         return true;
     }
 
     inline void get_agent_states(agent_state** states,
             uint64_t* agent_ids, unsigned int agent_count)
     {
-        agent_array_lock.lock();
+        agent_states_lock.lock();
         for (unsigned int i = 0; i < agent_count; i++)
             states[i] = agents[(size_t) agent_ids[i]];
-        agent_array_lock.unlock();
+        agent_states_lock.unlock();
     }
 
     inline SimulatorData& get_data() {
@@ -956,7 +957,7 @@ public:
             return true;
         };
 
-        std::unique_lock<std::mutex> lock(agent_array_lock);
+        std::unique_lock<std::mutex> lock(agent_states_lock);
 		position bottom_left_patch_position, top_right_patch_position;
         if (!world.get_state(bottom_left_corner, top_right_corner,
                 process_patch, bottom_left_patch_position, top_right_patch_position))
@@ -1016,12 +1017,12 @@ public:
         core::free(s.scent_model);
         core::free(s.world);
         core::free(s.data);
-        s.agent_array_lock.~mutex();
+        s.agent_states_lock.~mutex();
         s.requested_move_lock.~mutex();
     }
 
 private:
-    /* Precondition: The mutex is locked. This function releases the mutex. */
+    /* Precondition: The mutex is locked. This function does not release the mutex. */
     inline void step()
     {
         requested_move_lock.lock();
@@ -1116,8 +1117,7 @@ private:
         update_agent_scent_and_vision();
 
         /* Invoke the step callback function for each agent. */
-        agent_array_lock.unlock();
-        on_step(this, data, time);
+        on_step(this, (const array<agent_state*>&) agents, data, time);
     }
 
     inline void update_agent_scent_and_vision() {
@@ -1189,7 +1189,7 @@ bool init(simulator<SimulatorData>& sim,
         free(sim.agents); free(sim.requested_moves);
         free(sim.scent_model); return false;
     }
-    new (&sim.agent_array_lock) std::mutex();
+    new (&sim.agent_states_lock) std::mutex();
     new (&sim.requested_move_lock) std::mutex();
     return true;
 }
@@ -1273,7 +1273,7 @@ bool read(simulator<SimulatorData>& sim, Stream& in, const SimulatorData& data)
         free(sim.requested_moves); free(sim.config);
         return false;
     }
-    new (&sim.agent_array_lock) std::mutex();
+    new (&sim.agent_states_lock) std::mutex();
     new (&sim.requested_move_lock) std::mutex();
     return true;
 }
