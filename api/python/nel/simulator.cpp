@@ -86,18 +86,22 @@ struct py_client_data {
     std::mutex lock;
     std::condition_variable cv;
 
-    PyObject* callback;
+    PyObject* step_callback;
+	PyObject* lost_connection_callback;
 
     static inline void free(py_client_data& data) {
-        if (data.callback != NULL)
-            Py_DECREF(data.callback);
+        if (data.step_callback != NULL)
+            Py_DECREF(data.step_callback);
+		if (data.lost_connection_callback != NULL)
+			Py_DECREF(data.lost_connection_callback);
         data.lock.~mutex();
         data.cv.~condition_variable();
     }
 };
 
 inline bool init(py_client_data& data) {
-    data.callback = NULL;
+    data.step_callback = NULL;
+	data.lost_connection_callback = NULL;
     new (&data.lock) std::mutex();
     new (&data.cv) std::condition_variable();
     return true;
@@ -138,7 +142,7 @@ bool save(const simulator<py_simulator_data>* sim,
         filepath[i] = data.save_directory[i];
     snprintf(filepath + data.save_directory_length, length + 1, "%" PRIu64, time);
 
-    FILE* file = fopen(filepath, "wb");
+    FILE* file = open_file(filepath, "wb");
     if (file == NULL) {
         fprintf(stderr, "on_step: Unable to open '%s' for writing", filepath);
         perror(""); return false;
@@ -250,8 +254,8 @@ void on_step(const simulator<py_simulator_data>* sim,
         return;
     }
     const simulator_config& config = sim->get_config();
-    for (Py_ssize_t i = 0; i < data.agent_ids.length; i++)
-        PyList_SetItem(py_states, i, build_py_agent(*agents[data.agent_ids[i]], config, data.agent_ids[i]));
+    for (size_t i = 0; i < data.agent_ids.length; i++)
+        PyList_SetItem(py_states, i, build_py_agent(*agents[(size_t) data.agent_ids[i]], config, data.agent_ids[i]));
 
     /* call python callback */
     PyObject* py_saved = saved ? Py_True : Py_False;
@@ -317,14 +321,14 @@ void on_step(client<py_client_data>& c,
         PyGILState_Release(gstate); /* release global interpreter lock */
         return;
     }
-    for (Py_ssize_t i = 0; i < agent_ids.length; i++)
+    for (size_t i = 0; i < agent_ids.length; i++)
         PyList_SetItem(py_states, i, build_py_agent(agent_states[i], c.config, agent_ids[i]));
 
-    /* call python callback */
+    /* invoke python callback */
     PyObject* py_saved = saved ? Py_True : Py_False;
     Py_INCREF(py_saved);
     PyObject* args = Py_BuildValue("(OO)", py_states, py_saved);
-    PyObject* result = PyEval_CallObject(c.data.callback, args);
+    PyObject* result = PyEval_CallObject(c.data.step_callback, args);
     Py_DECREF(args);
     if (result != NULL)
         Py_DECREF(result);
@@ -335,6 +339,14 @@ void on_lost_connection(client<py_client_data>& c) {
     fprintf(stderr, "Client lost connection to server.\n");
     c.client_running = false;
     c.data.cv.notify_one();
+
+	/* invoke python callback */
+	PyGILState_STATE gstate;
+	gstate = PyGILState_Ensure();
+	PyObject* args = Py_BuildValue("()");
+	PyObject* result = PyEval_CallObject(c.data.lost_connection_callback, args);
+	Py_DECREF(args);
+	PyGILState_Release(gstate);
 }
 
 inline void wait_for_server(client<py_client_data>& c)
@@ -500,7 +512,7 @@ static PyObject* simulator_load(PyObject *self, PyObject *args)
     data.callback = py_callback;
     Py_INCREF(py_callback);
 
-    FILE* file = fopen(load_filepath, "rb");
+    FILE* file = open_file(load_filepath, "rb");
     if (file == NULL) {
         PyErr_SetFromErrno(PyExc_OSError);
         return NULL;
@@ -611,15 +623,16 @@ static PyObject* simulator_start_client(PyObject *self, PyObject *args)
 {
     char* server_address;
     unsigned int port;
-    PyObject* py_callback;
+    PyObject* py_step_callback;
+	PyObject* py_lost_connection_callback;
     PyObject* py_agent_ids;
-    if (!PyArg_ParseTuple(args, "sIOO", &server_address, &port, &py_callback, &py_agent_ids)) {
+    if (!PyArg_ParseTuple(args, "sIOOO", &server_address, &port, &py_step_callback, &py_lost_connection_callback, &py_agent_ids)) {
         fprintf(stderr, "Invalid argument types in the call to 'simulator_c.start_client'.\n");
         return NULL;
     }
 
-    if (!PyCallable_Check(py_callback)) {
-        PyErr_SetString(PyExc_TypeError, "Callback must be callable.\n");
+    if (!PyCallable_Check(py_step_callback) || !PyCallable_Check(py_lost_connection_callback)) {
+        PyErr_SetString(PyExc_TypeError, "Callbacks must be callable.\n");
         return NULL;
     }
 
@@ -661,8 +674,10 @@ static PyObject* simulator_start_client(PyObject *self, PyObject *args)
     }
     free(agent_states); free(agent_ids);
 
-    new_client->data.callback = py_callback;
-    Py_INCREF(py_callback);
+    new_client->data.step_callback = py_step_callback;
+	new_client->data.lost_connection_callback = py_lost_connection_callback;
+    Py_INCREF(py_step_callback);
+	Py_INCREF(py_lost_connection_callback);
     import_errors();
     return Py_BuildValue("(LOO)", simulator_time, PyLong_FromVoidPtr(new_client), py_states);
 }

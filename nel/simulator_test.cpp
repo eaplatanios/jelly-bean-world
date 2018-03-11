@@ -1,4 +1,3 @@
-
 #define _USE_MATH_DEFINES
 #include "simulator.h"
 #include "mpi.h"
@@ -43,7 +42,7 @@ async_server server;
 
 //#define MULTITHREADED
 //#define USE_MPI
-//#define TEST_SERIALIZATION
+#define TEST_SERIALIZATION
 //#define TEST_SERVER_CONNECTION_LOSS
 //#define TEST_CLIENT_CONNECTION_LOSS
 
@@ -189,8 +188,8 @@ bool test_singlethreaded(const simulator_config& config)
 #if defined(TEST_SERIALIZATION)
 		if (t % 50 == 0) {
 			char filename[1024];
-			sprintf(filename, "simulator_state%u", t);
-			FILE* file = fopen(filename, "wb");
+			snprintf(filename, 1024, "simulator_state%u", t);
+			FILE* file = open_file(filename, "wb");
 			fixed_width_stream<FILE*> out(file);
 			if (!write(sim, out))
 				fprintf(stderr, "ERROR: write failed.\n");
@@ -198,7 +197,7 @@ bool test_singlethreaded(const simulator_config& config)
 
 			/* end the simulation and restart it by reading from file */
 			free(sim);
-			file = fopen(filename, "rb");
+			file = open_file(filename, "rb");
 			fixed_width_stream<FILE*> in(file);
 			if (!read(sim, in, empty_data())) {
 				fprintf(stderr, "ERROR: read failed.\n");

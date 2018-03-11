@@ -260,9 +260,8 @@ inline bool send_step_response(
 	bool success = true;
 	for (const auto& client_connection : server.client_connections) {
 		const array<uint64_t>& agent_ids = client_connection.value.agent_ids;
-		memory_stream mem_stream = memory_stream(
-				sizeof(message_type) + sizeof(unsigned int) +
-				agent_ids.length * (sizeof(uint64_t) + sizeof(agent_state)));
+		memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(unsigned int) +
+				(unsigned int) agent_ids.length * (sizeof(uint64_t) + sizeof(agent_state)));
 		fixed_width_stream<memory_stream> out(mem_stream);
 		if (!write(message_type::STEP_RESPONSE, out)
 		 || !write(agent_ids, out)) {
@@ -272,7 +271,7 @@ inline bool send_step_response(
 
 		bool client_success = true;
 		for (uint64_t agent_id : agent_ids) {
-			if (!write(*agents[agent_id], out, config)) {
+			if (!write(*agents[(size_t) agent_id], out, config)) {
 				client_success = false;
 				break;
 			}

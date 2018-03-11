@@ -51,13 +51,16 @@ class EasterlyAgent(nel.Agent):
     pass
 
 
+# specify the item types
 items = []
 items.append(nel.Item("banana", [1.0, 1.0, 0.0], [1.0, 1.0, 0.0], True))
 
+# specify the intensity and interaction function parameters
 intensity_fn_args = [-2.0]
 interaction_fn_args = [len(items)]
 interaction_fn_args.extend([40.0, 200.0, 0.0, -40.0]) # parameters for interaction between item 0 and item 0
 
+# construct the simulator configuration
 config = nel.SimulatorConfig(max_steps_per_movement=1, vision_range=1,
   patch_size=32, gibbs_num_iter=10, items=items, agent_color=[0.0, 0.0, 1.0],
   collision_policy=nel.MovementConflictPolicy.FIRST_COME_FIRST_SERVED,
@@ -65,12 +68,15 @@ config = nel.SimulatorConfig(max_steps_per_movement=1, vision_range=1,
   intensity_fn=nel.IntensityFunction.CONSTANT, intensity_fn_args=intensity_fn_args,
   interaction_fn=nel.InteractionFunction.PIECEWISE_BOX, interaction_fn_args=interaction_fn_args)
 
+# create a local simulator
 sim = nel.Simulator(sim_config=config)
 
+# add one agent to the simulation
 agent = EasterlyAgent(sim)
 
+# start the main loop
 for t in range(10000):
-  sim._move(agent._id, agent.next_move(), 1)
+  sim.move(agent, agent.next_move(), 1)
 ```
 
 See [api/python/test/simulator_test.py](api/python/test/simulator_test.py) for
@@ -102,16 +108,12 @@ The following is a simple example where a simulator is constructed locally
 (within the same process) and a single agent continuously moves east.
 
 ```c++
+#include "network.h"
 #include "simulator.h"
 
 using namespace nel;
 
-struct empty_data {
-  static inline void free(empty_data& data) { }
-};
-
-constexpr bool init(empty_data& data, const empty_data& src) { return true; }
-
+/** A helper function to set interaction function parameters. */
 inline void set_interaction_args(float* args, unsigned int item_type_count,
     unsigned int first_item_type, unsigned int second_item_type,
     float first_cutoff, float second_cutoff, float first_value, float second_value)
@@ -122,9 +124,10 @@ inline void set_interaction_args(float* args, unsigned int item_type_count,
   args[4 * (first_item_type * item_type_count + second_item_type) + 4] = second_value;
 }
 
-void on_step(const simulator<empty_data>* sim, empty_data& data, uint64_t time) { }
+void on_step(const simulator<empty_data>* sim, const array<agent_state*>& agents, empty_data& data, uint64_t time) { }
 
 int main(int argc, const char** argv) {
+  /* construct the simulator configuration */
   simulator_config config;
   config.max_steps_per_movement = 1;
   config.scent_dimension = 3;
@@ -149,6 +152,7 @@ int main(int argc, const char** argv) {
   config.item_types[0].automatically_collected = true;
   config.item_types.length = 1;
 
+  /* specify the intensity and interaction function parameters */
   config.intensity_fn_arg_count = (unsigned int) config.item_types.length;
   config.interaction_fn_arg_count = (unsigned int) (4 * config.item_types.length * config.item_types.length + 1);
   config.intensity_fn = constant_intensity_fn;
@@ -159,20 +163,23 @@ int main(int argc, const char** argv) {
   config.interaction_fn_args[0] = (float) config.item_types.length;
   set_interaction_args(config.interaction_fn_args, (unsigned int) config.item_types.length, 0, 0, 40.0f, 200.0f, 0.0f, -40.0f);
 
+  /* create a local simulator */
   simulator<empty_data>& sim = *((simulator<empty_data>*) alloca(sizeof(simulator<empty_data>)));
   if (!init(sim, config, empty_data())) {
     fprintf(stderr, "ERROR: Unable to initialize simulator.\n");
     return EXIT_FAILURE;
   }
 
-  uint64_t agent_id = sim.add_agent();
-  if (agent_id == UINT64_MAX) {
+  /* add one agent to the simulation */
+  pair<uint64_t, agent_state*> agent = sim.add_agent();
+  if (agent.key == UINT64_MAX) {
     fprintf(stderr, "ERROR: Unable to add new agent.\n");
     return EXIT_FAILURE;
   }
 
+  /* the main simulation loop */
   for (unsigned int t = 0; t < 10000; t++) {
-    if (!sim.move(agent_id, direction::RIGHT, 1)) {
+    if (!sim.move(agent.key, direction::RIGHT, 1)) {
       fprintf(stderr, "ERROR: Unable to move agent.\n");
       return EXIT_FAILURE;
     }

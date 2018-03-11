@@ -198,13 +198,20 @@ struct socket_listener {
 		DWORD bytes_transferred;
 		OVERLAPPED* overlapped;
 		bool result = GetQueuedCompletionStatus(listener,
-			&bytes_transferred, &completion_key, &overlapped, INFINITE);
+				&bytes_transferred, &completion_key, &overlapped, INFINITE);
 		core::free(overlapped);
 		if (!is_running()) {
 			return true;
-		} else if (!result || completion_key == NULL) {
+		} else if (completion_key == NULL) {
 			listener_error("run_worker ERROR: Error waiting for IO completion packet");
 			return false;
+		} else if (!result) {
+			DWORD error = GetLastError();
+			if (error != ERROR_NETNAME_DELETED) {
+				listener_error("run_worker ERROR: Error waiting for IO completion packet");
+				return false;
+			}
+			/* the client closed the connection */
 		}
 		connection = (SOCKET) completion_key;
 		return true;
@@ -483,7 +490,7 @@ void run_worker(socket_listener& listener, hash_map<socket_type, ConnectionData>
 		if (state == server_state::STOPPING) return;
 
 		uint8_t next;
-		if (recv(connection.handle, (char*) &next, sizeof(next), MSG_PEEK) == 0) {
+		if (recv(connection.handle, (char*)&next, sizeof(next), MSG_PEEK) <= 0) {
 			/* the other end of the socket was closed by the client */
 			listener.remove_socket(connection);
 			connection_set_lock.lock();

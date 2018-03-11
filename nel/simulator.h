@@ -63,42 +63,42 @@ inline bool write(const movement_conflict_policy& policy, Stream& out) {
 }
 
 struct item_properties {
-	string name;
+    string name;
 
-	float* scent;
-	float* color;
+    float* scent;
+    float* color;
 
     bool automatically_collected;
 
-	static inline void free(item_properties& properties) {
-		core::free(properties.name);
-		core::free(properties.scent);
-		core::free(properties.color);
-	}
+    static inline void free(item_properties& properties) {
+        core::free(properties.name);
+        core::free(properties.scent);
+        core::free(properties.color);
+    }
 };
 
 inline bool init(
-		item_properties& properties, const item_properties& src,
-		unsigned int scent_dimension, unsigned int color_dimension)
+        item_properties& properties, const item_properties& src,
+        unsigned int scent_dimension, unsigned int color_dimension)
 {
-	properties.name = src.name;
-	properties.scent = (float*) malloc(sizeof(float) * scent_dimension);
-	if (properties.scent == NULL) {
-		fprintf(stderr, "init ERROR: Insufficient memory for item_properties.scent.\n");
-		return false;
-	}
-	properties.color = (float*) malloc(sizeof(float) * color_dimension);
-	if (properties.color == NULL) {
-		fprintf(stderr, "init ERROR: Insufficient memory for item_properties.scent.\n");
-		free(properties.scent); return false;
-	}
+    properties.name = src.name;
+    properties.scent = (float*) malloc(sizeof(float) * scent_dimension);
+    if (properties.scent == NULL) {
+        fprintf(stderr, "init ERROR: Insufficient memory for item_properties.scent.\n");
+        return false;
+    }
+    properties.color = (float*) malloc(sizeof(float) * color_dimension);
+    if (properties.color == NULL) {
+        fprintf(stderr, "init ERROR: Insufficient memory for item_properties.scent.\n");
+        free(properties.scent); return false;
+    }
 
-	for (unsigned int i = 0; i < scent_dimension; i++)
-		properties.scent[i] = src.scent[i];
-	for (unsigned int i = 0; i < color_dimension; i++)
-		properties.color[i] = src.color[i];
+    for (unsigned int i = 0; i < scent_dimension; i++)
+        properties.scent[i] = src.scent[i];
+    for (unsigned int i = 0; i < color_dimension; i++)
+        properties.color[i] = src.color[i];
     properties.automatically_collected = src.automatically_collected;
-	return true;
+    return true;
 }
 
 template<typename Stream>
@@ -107,16 +107,16 @@ inline bool read(item_properties& properties, Stream& in,
 {
     if (!read(properties.name, in)) return false;
 
-	properties.scent = (float*) malloc(sizeof(float) * scent_dimension);
-	if (properties.scent == NULL) {
-		fprintf(stderr, "read ERROR: Insufficient memory for item_properties.scent.\n");
-		free(properties.name); return false;
-	}
-	properties.color = (float*) malloc(sizeof(float) * color_dimension);
-	if (properties.color == NULL) {
-		fprintf(stderr, "read ERROR: Insufficient memory for item_properties.scent.\n");
-		free(properties.name); free(properties.scent); return false;
-	}
+    properties.scent = (float*) malloc(sizeof(float) * scent_dimension);
+    if (properties.scent == NULL) {
+        fprintf(stderr, "read ERROR: Insufficient memory for item_properties.scent.\n");
+        free(properties.name); return false;
+    }
+    properties.color = (float*) malloc(sizeof(float) * color_dimension);
+    if (properties.color == NULL) {
+        fprintf(stderr, "read ERROR: Insufficient memory for item_properties.scent.\n");
+        free(properties.name); free(properties.scent); return false;
+    }
 
     if (!read(properties.scent, in, scent_dimension)
      || !read(properties.color, in, color_dimension)
@@ -138,16 +138,16 @@ inline bool write(const item_properties& properties, Stream& out,
 }
 
 struct simulator_config {
-	/* agent capabilities */
-	unsigned int max_steps_per_movement;
-	unsigned int scent_dimension;
-	unsigned int color_dimension;
-	unsigned int vision_range;
+    /* agent capabilities */
+    unsigned int max_steps_per_movement;
+    unsigned int scent_dimension;
+    unsigned int color_dimension;
+    unsigned int vision_range;
 
-	/* world properties */
-	unsigned int patch_size;
-	unsigned int gibbs_iterations;
-	array<item_properties> item_types;
+    /* world properties */
+    unsigned int patch_size;
+    unsigned int gibbs_iterations;
+    array<item_properties> item_types;
     float* agent_color;
     movement_conflict_policy collision_policy;
 
@@ -155,15 +155,15 @@ struct simulator_config {
     float decay_param, diffusion_param;
     unsigned int deleted_item_lifetime;
 
-	intensity_function intensity_fn;
-	interaction_function interaction_fn;
+    intensity_function intensity_fn;
+    interaction_function interaction_fn;
 
     float* intensity_fn_args;
     float* interaction_fn_args;
     unsigned int intensity_fn_arg_count;
     unsigned int interaction_fn_arg_count;
 
-	simulator_config() : item_types(8), agent_color(NULL),
+    simulator_config() : item_types(8), agent_color(NULL),
         intensity_fn_args(NULL), interaction_fn_args(NULL) { }
 
     simulator_config(const simulator_config& src) : item_types(src.item_types.length) {
@@ -195,7 +195,7 @@ struct simulator_config {
     }
 
     static inline void free(simulator_config& config) {
-		config.free_helper();
+        config.free_helper();
         core::free(config.item_types);
     }
 
@@ -253,7 +253,7 @@ private:
 
     inline void free_helper() {
         for (item_properties& properties : item_types)
-			core::free(properties);
+            core::free(properties);
         if (agent_color != NULL)
             core::free(agent_color);
         if (intensity_fn_args != NULL)
@@ -402,6 +402,7 @@ bool read(patch_data& data, Stream& in, array<agent_state*>& agents) {
         data.agents[i] = agents[index];
     }
     data.agents.length = agent_count;
+    new (&data.patch_lock) std::mutex();
     return true;
 }
 
@@ -605,7 +606,7 @@ inline bool init(
             if (agent.current_position == neighbor->current_position)
             {
                 /* there is already an agent at this position */
-				FILE* out = stderr;
+                FILE* out = stderr;
                 core::print("init ERROR: An agent already occupies position ", out);
                 print(agent.current_position, out); core::print(".\n", out);
                 free(agent.current_scent); free(agent.current_vision);
@@ -925,8 +926,8 @@ public:
     }
 
     bool get_map(
-			position bottom_left_corner,
-			position top_right_corner,
+            position bottom_left_corner,
+            position top_right_corner,
             hash_map<position, patch_state>& patches)
     {
         auto process_patch = [&](const patch_type& patch, position patch_position)
@@ -937,7 +938,7 @@ public:
             if (!init(state, config.patch_size,
                     config.scent_dimension, config.color_dimension,
                     (unsigned int) patch.items.length,
-					(unsigned int) patch.data.agents.length))
+                    (unsigned int) patch.data.agents.length))
                 return false;
             patches.table.keys[bucket] = patch_position;
             patches.table.size++;
@@ -958,7 +959,7 @@ public:
         };
 
         std::unique_lock<std::mutex> lock(agent_states_lock);
-		position bottom_left_patch_position, top_right_patch_position;
+        position bottom_left_patch_position, top_right_patch_position;
         if (!world.get_state(bottom_left_corner, top_right_corner,
                 process_patch, bottom_left_patch_position, top_right_patch_position))
             return false;
@@ -1098,13 +1099,13 @@ private:
         }
 
 #if !defined(NDEBUG)
-		/* check for collisions, if there aren't supposed to be any */
-		if (config.collision_policy != movement_conflict_policy::NO_COLLISIONS) {
-			for (unsigned int i = 0; i < agents.length; i++)
-				for (unsigned int j = i + 1; j < agents.length; j++)
-					if (agents[i]->current_position == agents[j]->current_position)
-						fprintf(stderr, "simulator.step WARNING: Agents %u and %u are at the same position.\n", i, j);
-		}
+        /* check for collisions, if there aren't supposed to be any */
+        if (config.collision_policy != movement_conflict_policy::NO_COLLISIONS) {
+            for (unsigned int i = 0; i < agents.length; i++)
+                for (unsigned int j = i + 1; j < agents.length; j++)
+                    if (agents[i]->current_position == agents[j]->current_position)
+                        fprintf(stderr, "simulator.step WARNING: Agents %u and %u are at the same position.\n", i, j);
+        }
 #endif
 
         /* reset the requested moves */

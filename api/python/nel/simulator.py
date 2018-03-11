@@ -77,7 +77,8 @@ class Simulator(object):
   def __init__(
       self, on_step_callback=None, sim_config=None,
       is_server=False, server_address=None, port=54353,
-      conn_queue_capacity=256, num_workers=8, save_frequency=1000,
+      conn_queue_capacity=256, num_workers=8,
+	  on_lost_connection_callback=None, save_frequency=1000,
       save_filepath=None, load_filepath=None, load_time=-1):
     """Creates a new simulator.
 
@@ -93,6 +94,8 @@ class Simulator(object):
       self._on_step = lambda *args: None
     else:
       self._on_step = on_step_callback
+    if on_lost_connection_callback == None:
+      on_lost_connection_callback = lambda *args: None
 
     if save_frequency <= 0:
       raise ValueError('"save_frequency" must be strictly greater than zero.')
@@ -127,7 +130,8 @@ class Simulator(object):
       # connect to a remote server
       agent_ids = list(self.agents.keys())
       agent_values = list(self.agents.values())
-      (self._time, self._client_handle, agent_states) = simulator_c.start_client(server_address, port, self._step_callback, agent_ids)
+      (self._time, self._client_handle, agent_states) = simulator_c.start_client(
+		  server_address, port, self._step_callback, on_lost_connection_callback, agent_ids)
       for i in range(len(agent_ids)):
         agent = agent_values[i]
         (agent._position, agent._scent, agent._vision, agent._items) = agent_states[i]
@@ -198,7 +202,7 @@ class Simulator(object):
     return simulator_c.map(self._handle, self._client_handle, bottom_left, top_right)
 
   def _load_agents(self, load_filepath):
-    with open(load_filepath + str(self._time) + '.agent_info', 'r') as fin:
+    with open(load_filepath + str(self._time) + '.agent_info', 'rb') as fin:
       for line in fin:
         tokens = line.split(sep=' ')
         agent_id = int(tokens[0])
@@ -208,7 +212,7 @@ class Simulator(object):
         agent._id = agent_id
 
   def _save_agents(self):
-    with open(self._save_filepath + str(self._time) + '.agent_info', 'w') as fout:
+    with open(self._save_filepath + str(self._time) + '.agent_info', 'wb') as fout:
       for agent_id, agent in agents.items():
         agent.save(self._save_filepath + str(self._time) + '.agent' + str(agent_id))
         fout.write(str(agent_id) + ' ' + agent.__module__ + '.' + agent.__name__ + '\n')
