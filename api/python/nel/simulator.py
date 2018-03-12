@@ -308,9 +308,9 @@ class Simulator(object):
     with open(load_filepath + str(load_time) + '.agent_info', 'rb') as fin:
       for line_bytes in fin:
         line = line_bytes.decode('utf-8')
-        tokens = line.split(sep=' ')
+        tokens = line.split()
         agent_id = int(tokens[0])
-        agent_class = locate(tokens[1][:-1])
+        agent_class = locate(tokens[1])
         agent = agent_class(self, load_filepath=load_filepath + str(load_time) + '.agent' + str(agent_id))
         self.agents[agent_id] = agent
         agent._id = agent_id
