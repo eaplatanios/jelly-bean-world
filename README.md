@@ -83,6 +83,22 @@ See [api/python/test/simulator_test.py](api/python/test/simulator_test.py) for
 an example with more types of items as well as a visualization using the
 `MapVisualizer` class.
 
+It is straightforward to create the simulator in *server mode*, where other
+clients can connect to it:
+```python
+sim = nel.Simulator(sim_config=config, is_server=True)
+```
+
+To connect to existing server (i.e. create the simulator in *client mode*), for
+example running on `localhost`:
+```python
+sim = nel.Simulator(server_address="localhost")
+```
+
+See [api/python/test/server_test.py](api/python/test/server_test.py) and
+[api/python/test/client_test.py](api/python/test/client_test.py) for an example
+of simulators running in server and client modes (using MPI to communicate).
+
 ### Agent class
 
 Agents have a very simple interface. They have an abstract `next_move` method

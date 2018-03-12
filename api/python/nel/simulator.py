@@ -3,6 +3,7 @@ from __future__ import absolute_import, division, print_function
 from enum import Enum
 from pydoc import locate
 from nel import simulator_c
+import os
 
 from .item import IntensityFunction, InteractionFunction
 
@@ -78,12 +79,68 @@ class Simulator(object):
       self, on_step_callback=None, sim_config=None,
       is_server=False, server_address=None, port=54353,
       conn_queue_capacity=256, num_workers=8,
-	  on_lost_connection_callback=None, save_frequency=1000,
+	    on_lost_connection_callback=None, save_frequency=1000,
       save_filepath=None, load_filepath=None, load_time=-1):
-    """Creates a new simulator.
+    """This constructor may be used to either: (1) create a new simulator
+    locally (local mode), (2) create a new simulator server in the current
+    process (server mode), or (3) connect to a remote simulator server (client
+    mode). This constructor may also be used to load a simulator from a file,
+    and run it in either local mode or server mode.
+
+    To construct a new simulator in local mode, a configuration must be
+    specified with `sim_config`, `is_server` must be `False`, `server_address`
+    must be unspecified, and `load_filepath` must be unspecified (the latter
+    three arguments are default).
+
+    To construct a new simulator in server mode, `sim_config` must be
+    specified, `is_server` must be `True`, `server_address` must be
+    unspecified, and `load_filepath` must be unspecified (the latter two
+    arguments are default). The arguments `port`, `conn_queue_capacity`, and
+    `num_workers` may be used to change aspects of the server.
+
+    To connect to an existing simulator server (i.e. construct the simulator in
+    client mode), `sim_config` must be unspecified, but `server_address` must
+    be specified. If provided, `on_lost_connection_callback` is called if the
+    client loses its connection to the server.
+
+    To load a simulator from a file, `sim_config` must be unspecified,
+    `load_filepath` is set to the name of file to load **excluding** the
+    simulation time. The simulation time to load must be specified with
+    `load_time`. In client mode, the agents are loaded from the given filepath.
 
     Arguments:
-      sim_config      Configuration for the new simulator.
+      on_step_callback    (all modes) The callback invoked when the simulator
+                          completes a step.
+      sim_config          (local and server modes) Configuration for the new
+                          simulator.
+      is_server           Indicates whether this simulation is to be run as a
+                          server.
+      server_address      (client mode) The address of the simulator server to
+                          connect to.
+      port                (server mode) The port of the simulator server.
+      conn_queue_capacity (server mode) The maximum number of simultaneous
+                          connection attempts that the server will attempt to
+                          process.
+      num_workers         (server mode) The number of worker threads that will
+                          be used to process incoming client messages.
+      on_lost_connection_callback (client mode) The function that is called
+                          when the client loses its connection with the server.
+      save_frequency      (local and server modes) Indicates how often the
+                          simulator and the agents should be saved to
+                          `save_filepath`. Note that if `save_filepath` is
+                          unspecified, this parameter has no effect.
+      save_filepath       (all modes) The path where the simulator and agents
+                          are saved (in client mode, only agents are saved).
+                          The directory containing this path is created if it
+                          doesn't already exist.
+      load_filepath       (all modes) The path from which the simulator and
+                          agents are loaded (in client mode, only agents are
+                          loaded). This **should not** contain the simulation
+                          time. Instead, the time should be specified via
+                          `load_time`.
+      load_time           (all modes) The simulation time to load. This is used
+                          in conjunction with `load_filepath` to determine the
+                          precise filenames to load.
     """
     self._handle = None
     self._server_handle = None
@@ -96,6 +153,18 @@ class Simulator(object):
       self._on_step = on_step_callback
     if on_lost_connection_callback == None:
       on_lost_connection_callback = lambda *args: None
+
+    if save_filepath != None:
+      # make the save directory if it doesn't exist
+      directory = os.path.dirname(save_filepath)
+      try:
+        os.makedirs(directory)
+      except OSError:
+        if not os.path.exists(directory):
+          raise
+      # check that the save directory is writable
+      if not os.access(directory, os.W_OK):
+        raise IOError('The path "' + save_filepath + '" is not writable.')
 
     if save_frequency <= 0:
       raise ValueError('"save_frequency" must be strictly greater than zero.')
@@ -126,7 +195,7 @@ class Simulator(object):
     elif server_address != None:
       if load_filepath != None:
         # load agents from file
-        self._load_agents(load_filepath)
+        self._load_agents(load_filepath, load_time)
       # connect to a remote server
       agent_ids = list(self.agents.keys())
       agent_values = list(self.agents.values())
@@ -139,9 +208,12 @@ class Simulator(object):
       # load local server or simulator from file
       if load_filepath == None:
         raise ValueError('"load_filepath" must be non-None if "sim_config" and "server_address" are None.')
-      (self._time, self._handle) = simulator_c.load(load_filepath + str(load_time), self._step_callback, save_frequency, save_filepath)
-      # remove the time from the end of the filepath to get the original save_filepath
-      self._load_agents(load_filepath)
+      self._load_agents(load_filepath, load_time)
+      (self._time, self._handle, agent_states) = simulator_c.load(load_filepath + str(load_time), self._step_callback, save_frequency, save_filepath)
+      for agent_state in agent_states:
+        (position, scent, vision, items, id) = agent_state
+        agent = self.agents[id]
+        (agent._position, agent._scent, agent._vision, agent._items) = (position, scent, vision, items)
       if is_server:
         self._server_handle = simulator_c.start_server(
           self._handle, port, conn_queue_capacity, num_workers)
@@ -158,7 +230,7 @@ class Simulator(object):
       simulator_c.delete(self._handle)
 
   def _add_agent(self, py_agent):
-    """Adds a new agent to this simulator.
+    """Adds a new agent to this simulator and retrieves its state.
 
     Arguments:
       py_agent: Python agent to be added to this simulator.
@@ -181,11 +253,28 @@ class Simulator(object):
       agent:     The agent intending to move.
       direction: Direction along which to move.
       num_steps: Number of steps to take in the specified direction.
+
+    Returns:
+      `True`, if successful; `False`, otherwise.
     """
     return simulator_c.move(self._handle,
       self._client_handle, agent._id, direction.value, num_steps)
 
+  def get_agents(self):
+    """Retrieves a list of the agents governed by this Simulator. This does not
+    include the agents governed by other clients."""
+    return list(self.agents.values())
+
   def _step_callback(self, agent_states, saved):
+    """The callback invoked when the simulator has advanced time.
+
+    Arguments:
+      agent_states: A list of tuples containing the states of each agent
+                    governed by this Simulator. This does not include agents
+                    governed by other clients.
+      saved:        A boolean indicating whether the simulation was saved this
+                    turn.
+    """
     self._time += 1
     for agent_state in agent_states:
       (position, scent, vision, items, id) = agent_state
@@ -196,26 +285,43 @@ class Simulator(object):
     self._on_step()
 
   def time(self):
+    """Returns the current simulation time."""
     return self._time
 
   def _map(self, bottom_left, top_right):
+    """Returns a list of tuples, each containing the state information of a
+    patch in the map. Only the patches visible in the bounding box defined by
+    `bottom_left` and `top_right` are returned.
+
+    Arguments:
+      bottom_left: A tuple of integers representing the bottom-left corner of
+                   the bounding box containing the patches to retrieve.
+      top_right:   A tuple of integers representing the top_right corner of the
+                   bounding box containing the patches to retrieve.
+
+    Returns:
+      A list of tuples, where each tuple contains the state of a patch.
+    """
     return simulator_c.map(self._handle, self._client_handle, bottom_left, top_right)
 
-  def _load_agents(self, load_filepath):
-    with open(load_filepath + str(self._time) + '.agent_info', 'rb') as fin:
-      for line in fin:
+  def _load_agents(self, load_filepath, load_time):
+    with open(load_filepath + str(load_time) + '.agent_info', 'rb') as fin:
+      for line_bytes in fin:
+        line = line_bytes.decode('utf-8')
         tokens = line.split(sep=' ')
         agent_id = int(tokens[0])
-        agent_class = locate(tokens[1])
-        agent = agent_class(self, load_filepath=load_filepath + str(self._time) + '.agent' + str(agent_id))
-        agents[agent_id] = agent
+        agent_class = locate(tokens[1][:-1])
+        agent = agent_class(self, load_filepath=load_filepath + str(load_time) + '.agent' + str(agent_id))
+        self.agents[agent_id] = agent
         agent._id = agent_id
 
   def _save_agents(self):
     with open(self._save_filepath + str(self._time) + '.agent_info', 'wb') as fout:
-      for agent_id, agent in agents.items():
+      for agent_id, agent in self.agents.items():
         agent.save(self._save_filepath + str(self._time) + '.agent' + str(agent_id))
-        fout.write(str(agent_id) + ' ' + agent.__module__ + '.' + agent.__name__ + '\n')
+        agent_type = type(agent)
+        line = str(agent_id) + ' ' + agent_type.__module__ + '.' + agent_type.__name__ + '\n'
+        fout.write(line.encode('utf-8'))
 
 if __name__ == '__main__':
   # TODO: Parse command line arguments and construct a simulator config.

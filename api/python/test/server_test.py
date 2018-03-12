@@ -40,7 +40,7 @@ while True:
 	if not waiting:
 		waiting = True
 		for agent in agents:
-			result = sim.move(agent, agent.next_move(), 1)
+			sim.move(agent, agent.next_move(), 1)
 	if default_timer() - start_time > 1.0:
 		elapsed += default_timer() - start_time
 		print(str((sim.time() - sim_start_time) / elapsed) + " simulation steps per second.")

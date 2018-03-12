@@ -30,7 +30,29 @@ struct py_simulator_data
     /* agents owned by the simulator */
     array<uint64_t> agent_ids;
 
-    py_simulator_data() : agent_ids(16) { }
+    py_simulator_data(const char* save_filepath,
+            unsigned int save_filepath_length,
+            unsigned int save_frequency,
+            async_server* server,
+            PyObject* callback) :
+        save_frequency(save_frequency), server(server),
+        callback(callback), agent_ids(16)
+    {
+        if (save_filepath == NULL) {
+            save_directory = NULL;
+        } else {
+            save_directory = (char*) malloc(sizeof(char) * save_filepath_length);
+            if (save_directory == NULL) {
+                fprintf(stderr, "py_simulator_data ERROR: Out of memory.\n");
+                exit(EXIT_FAILURE);
+            }
+            save_directory_length = save_filepath_length;
+            for (unsigned int i = 0; i < save_filepath_length; i++)
+                save_directory[i] = save_filepath[i];
+        }
+        Py_INCREF(callback);
+    }
+
     ~py_simulator_data() { free_helper(); }
 
     static inline void free(py_simulator_data& data) {
@@ -144,7 +166,7 @@ bool save(const simulator<py_simulator_data>* sim,
 
     FILE* file = open_file(filepath, "wb");
     if (file == NULL) {
-        fprintf(stderr, "on_step: Unable to open '%s' for writing", filepath);
+        fprintf(stderr, "on_step: Unable to open '%s' for writing. ", filepath);
         perror(""); return false;
     }
 
@@ -458,14 +480,9 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
         return NULL;
     }
 
-    py_simulator_data data;
-    data.save_directory = save_filepath;
-    if (save_filepath != NULL)
-        data.save_directory_length = (unsigned int) strlen(save_filepath);
-    data.save_frequency = save_frequency;
-    data.server = NULL;
-    data.callback = py_callback;
-    Py_INCREF(py_callback);
+    py_simulator_data data(save_filepath,
+            (save_filepath == NULL) ? 0 : strlen(save_filepath),
+            save_frequency, NULL, py_callback);
 
     simulator<py_simulator_data>* sim =
             (simulator<py_simulator_data>*) malloc(sizeof(simulator<py_simulator_data>));
@@ -499,41 +516,56 @@ static PyObject* simulator_load(PyObject *self, PyObject *args)
     simulator<py_simulator_data>* sim =
             (simulator<py_simulator_data>*) malloc(sizeof(simulator<py_simulator_data>));
     if (sim == NULL) {
-        PyErr_NoMemory();
-        return NULL;
+        PyErr_NoMemory(); return NULL;
     }
 
-    py_simulator_data data;
-    data.save_directory = save_filepath;
-    if (save_filepath != NULL)
-        data.save_directory_length = (unsigned int) strlen(save_filepath);
-    data.save_frequency = save_frequency;
-    data.server = NULL;
-    data.callback = py_callback;
-    Py_INCREF(py_callback);
+    py_simulator_data data(save_filepath,
+            (save_filepath == NULL) ? 0 : strlen(save_filepath),
+            save_frequency, NULL, py_callback);
 
     FILE* file = open_file(load_filepath, "rb");
     if (file == NULL) {
         PyErr_SetFromErrno(PyExc_OSError);
-        return NULL;
+        free(sim); return NULL;
     }
     size_t agent_id_count;
     fixed_width_stream<FILE*> in(file);
     if (!read(*sim, in, data)) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to load simulator.");
-        free(sim); fclose(file);
-        return NULL;
-    } else if (!read(agent_id_count, in)
-            || !data.agent_ids.ensure_capacity(agent_id_count)
-            || !read(data.agent_ids.data, in, agent_id_count))
+        free(sim); fclose(file); return NULL;
+    }
+    py_simulator_data& sim_data = sim->get_data();
+    if (!read(agent_id_count, in)
+            || !sim_data.agent_ids.ensure_capacity(agent_id_count)
+            || !read(sim_data.agent_ids.data, in, agent_id_count))
     {
         PyErr_SetString(PyExc_RuntimeError, "Failed to load agent IDs.");
-        free(*sim); free(sim); fclose(file);
-        return NULL;
+        free(*sim); free(sim); fclose(file); return NULL;
     }
+    sim_data.agent_ids.length = agent_id_count;
     fclose(file);
+
+    /* parse the list of agent IDs from Python */
+    agent_state** agent_states = (agent_state**) malloc(sizeof(agent_state*) * agent_id_count);
+    if (agent_states == NULL) {
+        PyErr_NoMemory();
+        free(*sim); free(sim); fclose(file); return NULL;
+    }
+
+    sim->get_agent_states(agent_states, sim_data.agent_ids.data, (unsigned int) agent_id_count);
+
+    const simulator_config& config = sim->get_config();
+    PyObject* py_states = PyList_New((Py_ssize_t) agent_id_count);
+    if (py_states == NULL) {
+        free(agent_states); free(*sim);
+        free(sim); fclose(file); return NULL;
+    }
+    for (size_t i = 0; i < agent_id_count; i++)
+        PyList_SetItem(py_states, (Py_ssize_t) i, build_py_agent(*agent_states[i], config, sim_data.agent_ids[i]));
+    free(agent_states);
+
     import_errors();
-    return Py_BuildValue("(LO)", sim->time, PyLong_FromVoidPtr(sim));
+    return Py_BuildValue("(LOO)", sim->time, PyLong_FromVoidPtr(sim), py_states);
 }
 
 /**

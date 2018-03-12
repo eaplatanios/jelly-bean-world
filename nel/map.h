@@ -592,7 +592,7 @@ bool write(const map<PerPatchData>& world, Stream& out,
 {
 	/* write the PRNG state into a stringstream buffer */
 	std::stringstream buffer;
-	buffer << engine;
+	buffer << world.rng;
 	std::string data = buffer.str();
 	if (!write(data.length(), out)
 	 || !write(data.c_str(), out, (unsigned int) data.length()))
