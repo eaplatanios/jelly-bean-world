@@ -18,6 +18,9 @@ enum class message_type : uint64_t {
 	STEP_RESPONSE = 6
 };
 
+/**
+ * Reads a message_type from `in` and stores the result in `type`.
+ */
 template<typename Stream>
 inline bool read(message_type& type, Stream& in) {
 	uint64_t v;
@@ -26,11 +29,17 @@ inline bool read(message_type& type, Stream& in) {
 	return true;
 }
 
+/**
+ * Writes the given message_type `type` to the stream `out`.
+ */
 template<typename Stream>
 inline bool write(const message_type& type, Stream& out) {
 	return write((uint64_t) type, out);
 }
 
+/**
+ * Prints the given message_type `type` to the stream `out`.
+ */
 template<typename Stream>
 inline bool print(const message_type& type, Stream& out) {
 	switch (type) {
@@ -47,6 +56,11 @@ inline bool print(const message_type& type, Stream& out) {
 	return false;
 }
 
+/**
+ * A structure that keeps track of additional state for each connection in
+ * `async_server`. For now, it just keeps track of the agent IDs governed by
+ * each connected client.
+ */
 struct connection_data {
 	array<uint64_t> agent_ids;
 
@@ -61,10 +75,19 @@ struct connection_data {
 	}
 };
 
+/**
+ * Initializes a new empty connection_data structure in `connection`.
+ */
 inline bool init(connection_data& connection) {
 	return array_init(connection.agent_ids, 8);
 }
 
+/**
+ * A structure containing the state of a simulator server that runs
+ * asynchronously on a separate thread. The `init_server` function is
+ * responsible for setting up the TCP sockets and dispatching the server
+ * thread.
+ */
 struct async_server {
 	std::thread server_thread;
 	socket_type server_socket;
@@ -89,6 +112,11 @@ private:
 	}
 };
 
+/**
+ * Initializes the given async_server `new_server`. The `init_server` function
+ * is responsible for setting up the TCP sockets and dispatching the server
+ * thread.
+ */
 inline bool init(async_server& new_server) {
 	if (!hash_map_init(new_server.client_connections, 1024, alloc_socket_keys))
 		return false;
@@ -97,6 +125,9 @@ inline bool init(async_server& new_server) {
 	return true;
 }
 
+/**
+ * Writes the bytes in `data` of length `length` to the TCP socket in `socket`.
+ */
 inline bool send_message(socket_type& socket, const void* data, unsigned int length) {
 	return send(socket.handle, (const char*) data, length, 0) != 0;
 }
@@ -249,6 +280,15 @@ inline bool write_extra_data(Stream& out,
 	return write(data, out) && write_extra_data(out, std::forward<ExtraData>(extra_data)...);
 }
 
+/**
+ * Sends a step response to every client connected to the given `server`. This
+ * function should be called whenever the simulator advances time.
+ *
+ * \param extra_data Any additional state to be sent to every client at the end
+ * 		of the step response. For each argument of type `T`, a function
+ * 		`bool write(const T&, fixed_width_stream<memory_stream>&)` should be
+ * 		defined.
+ */
 template<typename... ExtraData>
 inline bool send_step_response(
 		async_server& server,
@@ -285,6 +325,20 @@ inline bool send_step_response(
 	return success;
 }
 
+/**
+ * Sets up the TCP sockets for `new_server` and dispatches the thread on which
+ * the server will run.
+ *
+ * \param new_server The async_server structure containing the state of the new
+ * 		server.
+ * \param sim The simulator governed by the new server.
+ * \param server_port The port to listen for new connections.
+ * \param connection_queue_capacity The maximum number of simultaneous new
+ * 		connections that can be handled by the server.
+ * \param worker_count The number of worker threads to dispatch. They are
+ * 		tasked with processing incoming message from clients.
+ * \returns `true` if successful; `false` otherwise.
+ */
 template<typename SimulatorData>
 bool init_server(
 		async_server& new_server, simulator<SimulatorData>& sim, uint16_t server_port,
@@ -313,6 +367,19 @@ bool init_server(
 	return true;
 }
 
+/**
+ * Sets up the TCP sockets for `new_server` and starts the server **on this
+ * thread**. That is, the function will not return unless the server shuts
+ * down.
+ *
+ * \param sim The simulator governed by the new server.
+ * \param server_port The port to listen for new connections.
+ * \param connection_queue_capacity The maximum number of simultaneous new
+ * 		connections that can be handled by the server.
+ * \param worker_count The number of worker threads to dispatch. They are
+ * 		tasked with processing incoming message from clients.
+ * \returns `true` if successful; `false` otherwise.
+ */
 template<typename SimulatorData>
 inline bool init_server(simulator<SimulatorData>& sim, uint16_t server_port,
 		unsigned int connection_queue_capacity, unsigned int worker_count)
@@ -326,6 +393,9 @@ inline bool init_server(simulator<SimulatorData>& sim, uint16_t server_port,
 			server_process_message<SimulatorData>, process_new_connection<SimulatorData>, sim);
 }
 
+/**
+ * Shuts down the asynchronous server given by `server`. 
+ */
 void stop_server(async_server& server) {
 	server.state = server_state::STOPPING;
 	close(server.server_socket);
@@ -337,6 +407,13 @@ void stop_server(async_server& server) {
 }
 
 
+/**
+ * A structure that contains the state of a client, which may connect to a
+ * simulator server.
+ *
+ * \tparam ClientData A generic type that enables the storage of additional
+ * 		state information in each client object.
+ */
 template<typename ClientData>
 struct client {
 	socket_type connection;
@@ -352,6 +429,9 @@ struct client {
 	}
 };
 
+/**
+ * Initializes a new unconnected client in `new_client`.
+ */
 template<typename ClientData>
 inline bool init(client<ClientData>& new_client) {
 	if (!init(new_client.config)) {
@@ -364,12 +444,30 @@ inline bool init(client<ClientData>& new_client) {
 	return true;
 }
 
+/**
+ * Sends an `add_agent` message to the server from the client `c`. Once the
+ * server responds, the function
+ * `on_add_agent(ClientType&, uint64_t, agent_state&)` will be invoked, where
+ * the first argument is `c`, the second is the ID of the new agent
+ * (which will be UINT64_MAX upon error), and the third is the state of the new
+ * agent.
+ *
+ * \returns `true` if the sending is successful; `false` otherwise.
+ */
 template<typename ClientType>
 bool send_add_agent(ClientType& c) {
 	message_type message = message_type::ADD_AGENT;
 	return send_message(c.connection, &message, sizeof(message));
 }
 
+/**
+ * Sends an `move` message to the server from the client `c`. Once the server
+ * responds, the function `on_move(ClientType&, uint64_t, bool)` will be
+ * invoked, where the first argument is `c`, the second is `agent_id`, and the
+ * third is whether the move was successfully enqueued by the server.
+ *
+ * \returns `true` if the sending is successful; `false` otherwise.
+ */
 template<typename ClientType>
 bool send_move(ClientType& c, uint64_t agent_id, direction dir, unsigned int num_steps) {
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(dir) + sizeof(num_steps));
@@ -381,6 +479,20 @@ bool send_move(ClientType& c, uint64_t agent_id, direction dir, unsigned int num
 		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
 }
 
+/**
+ * Sends an `get_map` message to the server from the client `c`. Once the
+ * server responds, the function
+ * `on_get_map(ClientType&, hash_map<position, patch_state>*)` will be invoked,
+ * where the first argument is `c`, and the second is a pointer to a map
+ * containing the state information of the retrieved patches. Memory ownership
+ * of the hash_map is passed to `on_get_map`.
+ *
+ * \param bottom_left The bottom-left corner of the bounding box containing the
+ * 		patches we wish to retrieve.
+ * \param top_right The top-right corner of the bounding box containing the
+ * 		patches we wish to retrieve.
+ * \returns `true` if the sending is successful; `false` otherwise.
+ */
 template<typename ClientType>
 bool send_get_map(ClientType& c, position bottom_left, position top_right) {
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + 2 * sizeof(position));
@@ -426,6 +538,7 @@ inline bool receive_get_map_response(ClientType& c) {
 	} else if (!read(*patches, in, alloc_position_keys, scribe, c.config)) {
 		free(patches); return false;
 	}
+	/* ownership of `patches` is passed to the callee */
 	on_get_map(c, patches);
 	return true;
 }
@@ -488,7 +601,24 @@ void run_response_listener(ClientType& c) {
 	}
 }
 
-/* returns the simulator time if successful, UINT64_MAX otherwise */
+/**
+ * Attempts to connect the given client `new_client` to the server at
+ * `server_address:server_port`. A separate thread will be dispatched to listen
+ * for responses from the server. `stop_client` should be used to disconnect
+ * from the server and stop the listener thread.
+ *
+ * \param new_client The client with which to attempt the connection.
+ * \param server_address A null-terminated string containing the server
+ * 		address.
+ * \param server_port A null-terminated string containing the server port.
+ * \param agent_ids An array of agent IDs governed by this client, of length
+ * 		`agent_count`.
+ * \param agent_states An array of length `agent_count` to which this function
+ * 		will write the states of the agents whose IDs are given by the parallel
+ * 		array `agent_ids`.
+ * \param agent_count The lengths of `agent_ids` and `agent_states`.  
+ * \returns The simulator time if successful; `UINT64_MAX` otherwise.
+ */
 template<typename ClientData>
 uint64_t init_client(client<ClientData>& new_client,
 		const char* server_address, const char* server_port,
@@ -546,7 +676,24 @@ uint64_t init_client(client<ClientData>& new_client,
 	else return simulator_time;
 }
 
-/* returns the simulator time if successful, UINT64_MAX otherwise */
+/**
+ * Attempts to connect the given client `new_client` to the server at
+ * `server_address:server_port`. A separate thread will be dispatched to listen
+ * for responses from the server. `stop_client` should be used to disconnect
+ * from the server and stop the listener thread.
+ *
+ * \param new_client The client with which to attempt the connection.
+ * \param server_address A null-terminated string containing the server
+ * 		address.
+ * \param server_port The server port.
+ * \param agent_ids An array of agent IDs governed by this client, of length
+ * 		`agent_count`.
+ * \param agent_states An array of length `agent_count` to which this function
+ * 		will write the states of the agents whose IDs are given by the parallel
+ * 		array `agent_ids`.
+ * \param agent_count The lengths of `agent_ids` and `agent_states`.  
+ * \returns The simulator time if successful; `UINT64_MAX` otherwise.
+ */
 template<typename ClientData>
 inline uint64_t init_client(client<ClientData>& new_client,
 		const char* server_address, uint16_t server_port,
@@ -561,6 +708,9 @@ inline uint64_t init_client(client<ClientData>& new_client,
 	return init_client(new_client, server_address, port_str, agent_ids, agent_states, agent_count);
 }
 
+/**
+ * Disconnects the given client `c` from the server.
+ */
 template<typename ClientData>
 void stop_client(client<ClientData>& c) {
 	c.client_running = false;

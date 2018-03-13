@@ -12,13 +12,26 @@ namespace nel {
 
 using namespace core;
 
+/**
+ * A pointer to the AddAgentError Python class. The function `import_errors`
+ * must be called before this is useable.
+ */
 static PyObject* add_agent_error;
+
+/**
+ * A pointer to the MPIError Python class. The function `import_errors` must be
+ * called before this is useable.
+ */
 static PyObject* mpi_error;
 
-enum class simulator_type {
-    C = 0, MPI = 1
-};
 
+/**
+ * A struct containing additional state information for the simulator. This
+ * information includes a pointer to the `async_server` object, if the
+ * simulator is run as a server, a pointer to the Python callback function,
+ * the list of agent IDs owned by this simulator (as opposed to other clients),
+ * and information for periodically saving the simulator to file.
+ */
 struct py_simulator_data
 {
     char* save_directory;
@@ -69,6 +82,14 @@ private:
     }
 };
 
+/**
+ * Initializes `data` by copying the contents from `src`.
+ *
+ * \param   data      The `py_simulator_data` structure to initialize.
+ * \param   src       The source `py_simulator_data` structure that will be
+ *                    copied to initialize `data`.
+ * \returns `true` if successful; and `false` otherwise.
+ */
 inline bool init(py_simulator_data& data, const py_simulator_data& src)
 {
     if (!array_init(data.agent_ids, src.agent_ids.capacity))
@@ -94,6 +115,12 @@ inline bool init(py_simulator_data& data, const py_simulator_data& src)
     return true;
 }
 
+/**
+ * A struct containing additional state information for the client. This
+ * information includes responses from the server, pointers to Python callback
+ * functions, and variables for synchronizing communication between the client
+ * response listener thread and the Python thread.
+ */
 struct py_client_data {
     /* storing the server responses */
     union response {
@@ -103,7 +130,6 @@ struct py_client_data {
     } response;
 
     /* for synchronization */
-    bool waiting_for_step;
     bool waiting_for_server;
     std::mutex lock;
     std::condition_variable cv;
@@ -129,6 +155,15 @@ inline bool init(py_client_data& data) {
     return true;
 }
 
+/**
+ * Converts the given Python list of floating points to an native array of
+ * floats. The native array and its size are returned as a `core::pair`. If an
+ * error occurs, the native array will be returned as `NULL`.
+ *
+ * \param   arg     Pointer to the Python list of floats.
+ * \returns A pair containing a pointer to the native array of floats and its
+ *          length. The pointer is `NULL` upon error.
+ */
 static pair<float*, Py_ssize_t> PyArg_ParseFloatList(PyObject* arg) {
     if (!PyList_Check(arg)) {
         PyErr_SetString(PyExc_ValueError, "Expected float list, but got invalid argument.");
@@ -145,8 +180,15 @@ static pair<float*, Py_ssize_t> PyArg_ParseFloatList(PyObject* arg) {
     return make_pair(items, len);
 }
 
-bool save(const simulator<py_simulator_data>* sim,
-        const py_simulator_data& data, uint64_t time)
+/**
+ * Saves the simulator given by the specified pointer `sim` to the filepath
+ * specified by the `py_simulator_data` structure inside `sim`.
+ *
+ * \param   sim     The simulator to save.
+ * \param   time    The simulation time of `sim`.
+ * \returns `true` if successful; and `false` otherwise.
+ */
+bool save(const simulator<py_simulator_data>* sim, uint64_t time)
 {
     int length = snprintf(NULL, 0, "%" PRIu64, time);
     if (length < 0) {
@@ -154,6 +196,7 @@ bool save(const simulator<py_simulator_data>* sim,
         return false;
     }
 
+    const py_simulator_data& data = sim->get_data();
     char* filepath = (char*) malloc(sizeof(char) * (data.save_directory_length + length + 1));
     if (filepath == NULL) {
         fprintf(stderr, "on_step ERROR: Insufficient memory for filepath.\n");
@@ -178,6 +221,29 @@ bool save(const simulator<py_simulator_data>* sim,
     return result;
 }
 
+/**
+ * Constructs the Python objects `py_position`, `py_scent`, `py_vision`, and
+ * `py_items` and stores the state of the given `agent`.
+ *
+ * \param   agent       The agent whose state is copied into the Python
+ *                      objects.
+ * \param   config      The configuration of the simulator containing `agent`.
+ * \param   py_position An output numpy array of type int64 that will contain
+ *                      the position of `agent`.
+ * \param   py_scent    An output numpy array of type float that will contain
+ *                      the current perceived scent of `agent`. This array will
+ *                      have length equal to `config.scent_dimension`.
+ * \param   py_vision   The output numpy array of type float that will contain
+ *                      the current perceived vision of `agent`. This array
+ *                      will have shape
+ *                      `(2*config.vision_range + 1, 2*config.vision_range + 1, config.color_dimension)`.
+ * \param   py_items    The output numpy array of type uint64 that will contain
+ *                      the counts of the collected items. This array is
+ *                      parallel to the array of `item_types` in `config`.
+ * \returns `true` if successful; and `false` otherwise. Upon failure,
+ *          `py_position`, `py_scent`, `py_vision`, and `py_items` are
+ *          uninitialized.
+ */
 static inline bool build_py_agent(
         const agent_state& agent,
         const simulator_config& config,
@@ -230,6 +296,17 @@ static inline bool build_py_agent(
     return true;
 }
 
+/**
+ * Constructs a Python tuple containing the position, current scent perception,
+ * current visual perception, the collected item counts, and the ID of the
+ * given `agent`.
+ *
+ * \param   agent    The agent whose state to copy into the Python objects.
+ * \param   config   The configuration of the simulator containing `agent`.
+ * \param   agent_id The ID of `agent` in the simulator.
+ * \returns A pointer to the constructed Python tuple, if successful; `NULL`
+ *          otherwise.
+ */
 static PyObject* build_py_agent(
         const agent_state& agent,
         const simulator_config& config,
@@ -242,6 +319,16 @@ static PyObject* build_py_agent(
     return Py_BuildValue("(OOOOO)", py_position, py_scent, py_vision, py_items, PyLong_FromUnsignedLongLong(agent_id));
 }
 
+/**
+ * Constructs a Python tuple containing the position, current scent perception,
+ * current visual perception, and the collected item counts of the given
+ * `agent`.
+ *
+ * \param   agent    The agent whose state to copy into the Python objects.
+ * \param   config   The configuration of the simulator containing `agent`.
+ * \returns A pointer to the constructed Python tuple, if successful; `NULL`
+ *          otherwise.
+ */
 static PyObject* build_py_agent(
         const agent_state& agent,
         const simulator_config& config)
@@ -253,14 +340,26 @@ static PyObject* build_py_agent(
     return Py_BuildValue("(OOOO)", py_position, py_scent, py_vision, py_items);
 }
 
+/**
+ * The callback function invoked by the simulator when time is advanced. This
+ * function is only called if the simulator is run in locally or as a server.
+ * This function first checks if the simulator should be saved to file. Next,
+ * in server mode, the simulator sends a step response message to all connected
+ * clients. Finally, it constructs a Python list of agent states and invokes
+ * the Python callback in `data.callback`.
+ *
+ * \param   sim     The simulator invoking this function.
+ * \param   agents  The underlying array of all agents in `sim`.
+ * \param   time    The new simulation time of `sim`.
+ */
 void on_step(const simulator<py_simulator_data>* sim,
-        const array<agent_state*>& agents,
-        py_simulator_data& data, uint64_t time)
+        const array<agent_state*>& agents, uint64_t time)
 {
     bool saved = false;
+    const py_simulator_data& data = sim->get_data();
     if (data.save_directory != NULL && time % data.save_frequency == 0) {
         /* save the simulator to a local file */
-        saved = save(sim, data, time);
+        saved = save(sim, time);
     } if (data.server != NULL) {
         /* this simulator is a server, so send a step response to every client */
         if (!send_step_response(*data.server, agents, sim->get_config(), saved))
@@ -290,10 +389,23 @@ void on_step(const simulator<py_simulator_data>* sim,
     PyGILState_Release(gstate); /* release global interpreter lock */
 }
 
+
 /**
  * Client callback functions.
  */
 
+/**
+ * The callback invoked when the client receives an add_agent response from the
+ * server. This function copies the agent state into a Python object, stores
+ * it in `c.data.response.agent_states`, and wakes up the Python thread (which
+ * should be waiting in the `simulator_add_agent` function) so that it can
+ * return the response back to Python.
+ *
+ * \param   c         The client that received the response.
+ * \param   agent_id  The ID of the new agent. This is equal to `UINT64_MAX` if
+ *                    the server returned an error.
+ * \param   new_agent The state of the new agent.
+ */
 void on_add_agent(client<py_client_data>& c,
         uint64_t agent_id, const agent_state& new_agent)
 {
@@ -308,6 +420,18 @@ void on_add_agent(client<py_client_data>& c,
     c.data.cv.notify_one();
 }
 
+/**
+ * The callback invoked when the client receives a move response from the
+ * server. This function copies the result into `c.data.response.move_result`
+ * and wakes up the Python thread (which should be waiting in the
+ * `simulator_move` function) so that it can return the response back to
+ * Python.
+ *
+ * \param   c               The client that received the response.
+ * \param   agent_id        The ID of the agent that requested to move.
+ * \param   request_success Indicates whether the move request was successfully
+ *                          enqueued by the simulator server.
+ */
 void on_move(client<py_client_data>& c, uint64_t agent_id, bool request_success) {
     std::unique_lock<std::mutex> lck(c.data.lock);
     c.data.waiting_for_server = false;
@@ -315,6 +439,16 @@ void on_move(client<py_client_data>& c, uint64_t agent_id, bool request_success)
     c.data.cv.notify_one();
 }
 
+/**
+ * The callback invoked when the client receives a get_map response from the
+ * server. This function moves the result into `c.data.response.map` and wakes
+ * up the Python thread (which should be waiting in the `simulator_map`
+ * function) so that it can return the response back to Python.
+ *
+ * \param   c       The client that received the response.
+ * \param   map     A map from patch positions to `patch_state` structures
+ *                  containing the state information in each patch.
+ */
 void on_get_map(client<py_client_data>& c,
         hash_map<position, patch_state>* map)
 {
@@ -324,14 +458,21 @@ void on_get_map(client<py_client_data>& c,
     c.data.cv.notify_one();
 }
 
+/**
+ * The callback invoked when the client receives a step response from the
+ * server. This function constructs a Python list of agent states governed by
+ * this client and invokes the Python function `c.data.step_callback`.
+ *
+ * \param   c            The client that received the response.
+ * \param   agent_ids    An array of agent IDs governed by the client.
+ * \param   agent_states An array, parallel to `agent_ids`, containing the
+ *                       state information of each agent at the beginning of
+ *                       the new time step in the simulation.
+ */
 void on_step(client<py_client_data>& c,
         const array<uint64_t>& agent_ids,
         const agent_state* agent_states)
 {
-    std::unique_lock<std::mutex> lck(c.data.lock);
-    c.data.waiting_for_step = false;
-    c.data.cv.notify_one();
-
     bool saved;
     if (!read(saved, c.connection)) return;
 
@@ -357,6 +498,10 @@ void on_step(client<py_client_data>& c,
     PyGILState_Release(gstate); /* release global interpreter lock */
 }
 
+/**
+ * The callback invoked when the client loses the connection to the server.
+ * \param   c       The client whose connection to the server was lost.
+ */
 void on_lost_connection(client<py_client_data>& c) {
     fprintf(stderr, "Client lost connection to server.\n");
     c.client_running = false;
@@ -371,6 +516,13 @@ void on_lost_connection(client<py_client_data>& c) {
 	PyGILState_Release(gstate);
 }
 
+/**
+ * This functions waits for a response from the server, and for one of the
+ * above client callback functions to be invoked. Since this waiting is a
+ * blocking operation, it releases the Python global interpreter lock, and
+ * re-acquires it before returning.
+ * \param   c       The client expecting a response from the server.
+ */
 inline void wait_for_server(client<py_client_data>& c)
 {
     /* release the global interpreter lock */
@@ -404,7 +556,42 @@ static inline void import_errors() {
  * Creates a new simulator and returns a handle to it.
  *
  * \param   self    Pointer to the Python object calling this method.
- * \param   args    
+ * \param   args    A Python tuple containing the arguments to this function:
+ *                  - (int) The maximum movement distance per turn for all
+ *                  agents.
+ *                  - (int) The scent dimension.
+ *                  - (int) The color dimension for visual perception.
+ *                  - (int) The range of vision for all agents.
+ *                  - (int) The patch size.
+ *                  - (int) The number of Gibbs sampling iterations when
+ *                    initializing items in new patches.
+ *                  - (list) A list of the item types.
+ *                  - (list of floats) The color of all agents.
+ *                  - (int) The movement conflict resolution policy.
+ *                  - (float) The scent decay parameter.
+ *                  - (float) The scent diffusion parameter.
+ *                  - (int) The duration of time for which removed items are
+ *                    remembered by the simulation in order to compute their
+ *                    scent contribution.
+ *                  - (int) The ID of the intensity function.
+ *                  - (list of floats) The arguments to the intensity function.
+ *                  - (int) The ID of the interaction function.
+ *                  - (list of floats) The arguments to the interaction
+ *                    function.
+ *                  - (function) The function to invoke when the simulator
+ *                    advances time.
+ *                  - (int) The frequency by which the simulator is saved to
+ *                    file.
+ *                  - (string) The filepath to save the simulator (the
+ *                    simulator time will be appended to this filepath when
+ *                    saving).
+ *
+ *                  The list of item types must contain tuples containing:
+ *                  - (string) The name.
+ *                  - (list of floats) The item scent.
+ *                  - (list of floats) The item color.
+ *                  - (bool) Whether the item is automatically collected by
+ *                    agents.
  * \returns Pointer to the new simulator.
  */
 static PyObject* simulator_new(PyObject *self, PyObject *args)
@@ -497,6 +684,27 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
     return PyLong_FromVoidPtr(sim);
 }
 
+/**
+ * Loads a simulator from file.
+ *
+ * \param   self    Pointer to the Python object calling this method.
+ * \param   args    A Python tuple containing the arguments to this function:
+ *                  - (string) The full path to the file from which to load the
+ *                    simulator.
+ *                  - (function) The callback to invoke whenever the simulator
+ *                    advances time.
+ *                  - (int) The frequency by which the simulator is saved to
+ *                    file.
+ *                  - (string) The filepath to save the simulator (the
+ *                    simulator time will be appended to this filepath when
+ *                    saving).
+ * \returns A Python tuple containing:
+ *          - The simulation time.
+ *          - A pointer to the loaded simulator.
+ *          - A list of tuples containing the states of the agents governed by
+ *            this simulator (not including agents governed by other clients).
+ *            See `build_py_agent` for details on the contents of each tuple.
+ */
 static PyObject* simulator_load(PyObject *self, PyObject *args)
 {
     char* load_filepath;
@@ -569,9 +777,8 @@ static PyObject* simulator_load(PyObject *self, PyObject *args)
 }
 
 /**
- * Deletes a simulator and frees all memory allocated for that 
- * simulator.
- * 
+ * Deletes a simulator and frees all memory allocated for that simulator.
+ *
  * \param   self    Pointer to the Python object calling this method.
  * \param   args    Arguments:
  *                  - Handle to the native simulator object as a PyLong.
@@ -596,10 +803,10 @@ static PyObject* simulator_delete(PyObject *self, PyObject *args) {
  * \param   self    Pointer to the Python object calling this method.
  * \param   args    Arguments:
  *                  - Handle to the native simulator object as a PyLong.
- *                  - Server port (integer).
- *                  - Connection queue capacity (integer).
- *                  - Worker count (integer).
- * \returns Handle to the simulator server thread.
+ *                  - (int) Server port.
+ *                  - (int) Maximum number of new simultaneous connections.
+ *                  - (int) Number of threads to process server messages.
+ * \returns Handle to the simulator server.
  */
 static PyObject* simulator_start_server(PyObject *self, PyObject *args)
 {
@@ -630,7 +837,7 @@ static PyObject* simulator_start_server(PyObject *self, PyObject *args)
 }
 
 /**
- * Stops the simulator server.
+ * Stops the simulator server and frees all associated system resources.
  *
  * \param   self    Pointer to the Python object calling this method.
  * \param   args    Arguments:
@@ -651,6 +858,27 @@ static PyObject* simulator_stop_server(PyObject *self, PyObject *args)
     return Py_None;
 }
 
+/**
+ * Starts a client and connects it to the specified simulator server.
+ *
+ * \param   self    Pointer to the Python object calling this method.
+ * \param   args    Arguments:
+ *                  - (string) The server address.
+ *                  - (int) The server port.
+ *                  - (function) The Python function to invoke whenever the
+ *                    simulator advances time.
+ *                  - (function) The Python function to invoke if the client
+ *                    loses its connection to the server.
+ *                  - (list of ints) The IDs of the agents governed by this
+ *                    client (this should be an empty list if the client
+ *                    hasn't added agents yet).
+ * \returns A Python tuple containing:
+ *          - The simulation time.
+ *          - A handle to the client.
+ *          - A list of tuples containing the states of the agents governed by
+ *            this simulator (not including agents governed by other clients).
+ *            See `build_py_agent` for details on the contents of each tuple.
+ */
 static PyObject* simulator_start_client(PyObject *self, PyObject *args)
 {
     char* server_address;
@@ -714,6 +942,14 @@ static PyObject* simulator_start_client(PyObject *self, PyObject *args)
     return Py_BuildValue("(LOO)", simulator_time, PyLong_FromVoidPtr(new_client), py_states);
 }
 
+/**
+ * Stops the specified client and frees all associated system resources.
+ *
+ * \param   self    Pointer to the Python object calling this method.
+ * \param   args    Arguments:
+ *                  - Handle to the native client object as a PyLong.
+ * \returns None.
+ */
 static PyObject* simulator_stop_client(PyObject *self, PyObject *args)
 {
     PyObject* py_client_handle;
@@ -732,12 +968,16 @@ static PyObject* simulator_stop_client(PyObject *self, PyObject *args)
 /** 
  * Adds a new agent to an existing simulator and returns a pointer to its 
  * state.
- * 
+ *
  * \param   self    Pointer to the Python object calling this method.
  * \param   args    Arguments:
  *                  - Handle to the native simulator object as a PyLong.
- *                  - Handle to the native client object as a PyLong.
- * \returns Pointer to the new agent's state.
+ *                  - Handle to the native client object as a PyLong. If this
+ *                    is None, `add_agent` is directly invoked on the simulator
+ *                    object. Otherwise, the client sends an add_agent message
+ *                    to the server and waits for its response.
+ * \returns Pointer to a tuple containing the new agent's state. See
+ *          `build_py_agent` for details on the contents of this tuple.
  */
 static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
     PyObject* py_sim_handle;
@@ -786,14 +1026,17 @@ static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
     }
 }
 
-/** 
+/**
  * Attempt to move the agent in the simulation environment. If the agent
  * already has an action queued for this turn, this attempt will fail.
- * 
+ *
  * \param   self    Pointer to the Python object calling this method.
  * \param   args    Arguments:
  *                  - Handle to the native simulator object as a PyLong.
- *                  - Handle to the native client object as a PyLong.
+ *                  - Handle to the native client object as a PyLong. If this
+ *                    is None, `move` is directly invoked on the simulator
+ *                    object. Otherwise, the client sends a move message to the
+ *                    server and waits for its response.
  *                  - Agent ID.
  *                  - Move direction encoded as an integer:
  *                      UP = 0,
@@ -801,7 +1044,8 @@ static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
  *                      LEFT = 2,
  *                      RIGHT = 3.
  *                  - Number of steps.
- * \returns `true` if the move command is successfully queued; `false` otherwise.
+ * \returns `True` if the move command is successfully queued; `False`
+ *          otherwise.
  */
 static PyObject* simulator_move(PyObject *self, PyObject *args) {
     PyObject* py_sim_handle;
@@ -852,6 +1096,31 @@ static PyObject* simulator_move(PyObject *self, PyObject *args) {
     }
 }
 
+/**
+ * Constructs a Python list containing tuples, where each tuple contains the
+ * state information of a patch in the given hash_map of patches.
+ *
+ * \param   patches A hash_map from patch positions to `patch_state` objects.
+ * \param   config  The configuration of the simulator in which the patches
+ *                  reside.
+ * \returns A Python list containing tuples, where each tuple corresponds to a
+ *          patch in `patches`, containing:
+ *          - (tuple of 2 ints) The patch position.
+ *          - (bool) Whether the patch is fixed.
+ *          - (numpy array of floats) The scent at each cell in the patch. This
+ *            array has shape `(n, n, config.scent_dimension)`.
+ *          - (numpy array of floats) The color at each cell in the patch. This
+ *            array has shape `(n, n, config.color_dimension)`.
+ *          - (list) The list of items in this patch.
+ *          - (list) The list of agents in this patch. The list contains tuples
+ *            of 2 ints, which indicate the position of each agent.
+ *
+ *          The list of items contains a tuple for each item, where each tuple
+ *          contains:
+ *          - (int) The ID of the item type (which is an index into the array
+ *            `config.item_types`).
+ *          - (tuple of 2 ints) The position of the item.
+ */
 static PyObject* build_py_map(
         const hash_map<position, patch_state>& patches,
         const simulator_config& config)
@@ -891,6 +1160,24 @@ static PyObject* build_py_map(
     return list;
 }
 
+/**
+ * Retrieves the state of the map within the specified bounding box.
+ *
+ * \param   self    Pointer to the Python object calling this method.
+ * \param   args    Arguments:
+ *                  - Handle to the native simulator object as a PyLong.
+ *                  - Handle to the native client object as a PyLong. If this
+ *                    is None, `get_map` is directly invoked on the simulator
+ *                    object. Otherwise, the client sends a get_map message to
+ *                    the server and waits for its response.
+ *                  - (tuple of 2 ints) The bottom-left corner of the bounding
+ *                    box containing the patches to retrieve.
+ *                  - (tuple of 2 ints) The top-right corner of the bounding
+ *                    box containing the patches to retrieve.
+ * \returns A Python list of tuples, where each tuple contains the state
+ *          information of a patch within the bounding box. See `build_py_map`
+ *          for details on the contents of each tuple.
+ */
 static PyObject* simulator_map(PyObject *self, PyObject *args) {
     PyObject* py_sim_handle;
     PyObject* py_client_handle;

@@ -140,7 +140,7 @@ inline void set_interaction_args(float* args, unsigned int item_type_count,
   args[4 * (first_item_type * item_type_count + second_item_type) + 4] = second_value;
 }
 
-void on_step(const simulator<empty_data>* sim, const array<agent_state*>& agents, empty_data& data, uint64_t time) { }
+void on_step(const simulator<empty_data>* sim, const array<agent_state*>& agents, uint64_t time) { }
 
 int main(int argc, const char** argv) {
   /* construct the simulator configuration */
@@ -206,6 +206,31 @@ int main(int argc, const char** argv) {
 
 See [nel/simulator_test.cpp](nel/simulator_test.cpp) for an example with more
 types of items, as well as a multithreaded example and an MPI example.
+
+To setup an MPI server for a simulator `sim`, the `init_server` function in
+[nel/mpi.h](nel/mpi.h) may be used:
+```c++
+  /* NOTE: this blocks during the lifetime of the server */
+  if (!init_server(sim, 54353, 256, 8)) { /* process error */ }
+```
+
+To set up an asynchronous MPI server (where `init_server` will not block), the
+`async_server` class in [nel/mpi.h](nel/mpi.h) is used:
+```c++
+  async_server new_server;
+  if (!init_server(new_server, sim, 54353, 256, 8)) { /* process error */ }
+```
+
+To connect to an existing server, for example at `localhost:54353`, we use the
+`client` class defined in [nel/mpi.h](nel/mpi.h):
+```c++
+  client<empty_data> new_client;
+  if (!init_client(new_client, "localhost", 54353, NULL, NULL, 0)) { /* process error */ }
+```
+The commands may be sent to the server using the functions `send_add_agent`,
+`send_move`, etc. When the client receives responses from the server, the
+functions `on_add_agent`, `on_move`, etc will be invoked, which must be defined
+by the user.
 
 ## Design
 

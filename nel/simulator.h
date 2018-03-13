@@ -18,6 +18,9 @@ struct agent_state;
 /** Represents all possible directions of motion in the environment. */
 enum class direction : uint8_t { UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3 };
 
+/**
+ * Reads the given direction `dir` from the input stream `in`.
+ */
 template<typename Stream>
 inline bool read(direction& dir, Stream& in) {
     uint8_t c;
@@ -26,11 +29,17 @@ inline bool read(direction& dir, Stream& in) {
     return true;
 }
 
+/**
+ * Writes the given direction `dir` to the output stream `out`.
+ */
 template<typename Stream>
 inline bool write(const direction& dir, Stream& out) {
     return write((uint8_t) dir, out);
 }
 
+/**
+ * Prints the given direction `dir` to the output stream `out`.
+ */
 template<typename Stream>
 inline bool print(const direction& dir, Stream& out) {
     switch (dir) {
@@ -43,12 +52,19 @@ inline bool print(const direction& dir, Stream& out) {
     return false;
 }
 
+/**
+ * An enum representing the simulator policy for resolving the case when
+ * multiple agents request to move into the same position.
+ */
 enum class movement_conflict_policy : uint8_t {
     NO_COLLISIONS = 0,
     FIRST_COME_FIRST_SERVED = 1,
     RANDOM = 2
 };
 
+/**
+ * Reads the given movement_conflict_policy `policy` from the stream `in`.
+ */
 template<typename Stream>
 inline bool read(movement_conflict_policy& policy, Stream& in) {
     uint8_t c;
@@ -57,11 +73,17 @@ inline bool read(movement_conflict_policy& policy, Stream& in) {
     return true;
 }
 
+/**
+ * Writes the given movement_conflict_policy `policy` to the stream `out`.
+ */
 template<typename Stream>
 inline bool write(const movement_conflict_policy& policy, Stream& out) {
     return write((uint8_t) policy, out);
 }
 
+/**
+ * A structure containing the properties of an item type.
+ */
 struct item_properties {
     string name;
 
@@ -77,6 +99,9 @@ struct item_properties {
     }
 };
 
+/**
+ * Initializes the given item_properties `properties` by copying from `src`.
+ */
 inline bool init(
         item_properties& properties, const item_properties& src,
         unsigned int scent_dimension, unsigned int color_dimension)
@@ -101,6 +126,9 @@ inline bool init(
     return true;
 }
 
+/**
+ * Reads the given item_properties structure `properties` from the stream `in`.
+ */
 template<typename Stream>
 inline bool read(item_properties& properties, Stream& in,
         unsigned int scent_dimension, unsigned int color_dimension)
@@ -127,6 +155,9 @@ inline bool read(item_properties& properties, Stream& in,
     return true;
 }
 
+/**
+ * Writes the given item_properties structure `properties` to the stream `out`.
+ */
 template<typename Stream>
 inline bool write(const item_properties& properties, Stream& out,
         unsigned int scent_dimension, unsigned int color_dimension)
@@ -137,6 +168,9 @@ inline bool write(const item_properties& properties, Stream& out,
         && write(properties.automatically_collected, out);
 }
 
+/**
+ * Represents the configuration of a simulator. 
+ */
 struct simulator_config {
     /* agent capabilities */
     unsigned int max_steps_per_movement;
@@ -265,6 +299,11 @@ private:
     friend bool init(simulator_config&, const simulator_config&);
 };
 
+/**
+ * Initializes the given simulator_config with a NULL `agent_color`,
+ * `intensity_fn_args`, `interaction_fn_args`, and an empty `item_types`. This
+ * function does not initialize any other fields.
+ */
 inline bool init(simulator_config& config) {
     config.agent_color = NULL;
     config.intensity_fn_args = NULL;
@@ -272,6 +311,9 @@ inline bool init(simulator_config& config) {
     return array_init(config.item_types, 8);
 }
 
+/**
+ * Initializes the given simulator_config `config` by copying from `src`.
+ */
 inline bool init(simulator_config& config, const simulator_config& src)
 {
     if (!array_init(config.item_types, src.item_types.length)) {
@@ -282,6 +324,9 @@ inline bool init(simulator_config& config, const simulator_config& src)
     return true;
 }
 
+/**
+ * Reads the given simulator_config `config` from the input stream `in`.
+ */
 template<typename Stream>
 bool read(simulator_config& config, Stream& in) {
     if (!read(config.max_steps_per_movement, in)
@@ -343,6 +388,9 @@ bool read(simulator_config& config, Stream& in) {
     return true;
 }
 
+/**
+ * Writes the given simulator_config `config` to the output stream `out`.
+ */
 template<typename Stream>
 bool write(const simulator_config& config, Stream& out) {
     return write(config.max_steps_per_movement, out)
@@ -365,6 +413,11 @@ bool write(const simulator_config& config, Stream& out) {
         && write(config.interaction_fn_args, out, config.interaction_fn_arg_count);
 }
 
+/**
+ * A structure that is used to store additional state information in the map
+ * structure. So far, this structure stores an array of agents that inhabit the
+ * associated patch, as well as a lock for accessing this array.
+ */
 struct patch_data {
     std::mutex patch_lock;
     array<agent_state*> agents;
@@ -381,6 +434,9 @@ struct patch_data {
     }
 };
 
+/**
+ * Initializes the given patch_data `data`, where `agents` is empty.
+ */
 inline bool init(patch_data& data) {
     if (!array_init(data.agents, 4))
         return false;
@@ -388,6 +444,9 @@ inline bool init(patch_data& data) {
     return true;
 }
 
+/**
+ * Reads the given patch_data `data` structure from the input stream `in`.
+ */
 template<typename Stream>
 bool read(patch_data& data, Stream& in, array<agent_state*>& agents) {
     size_t agent_count;
@@ -406,6 +465,9 @@ bool read(patch_data& data, Stream& in, array<agent_state*>& agents) {
     return true;
 }
 
+/**
+ * Writes the given patch_data `data` structure to the output stream `out`.
+ */
 template<typename Stream>
 bool write(const patch_data& data, Stream& out,
         hash_map<const agent_state*, unsigned int>& agents)
@@ -632,6 +694,9 @@ inline bool init(
     return true;
 }
 
+/**
+ * Reads the given agent_state `agent` from the input stream `in`. 
+ */
 template<typename Stream>
 inline bool read(agent_state& agent, Stream& in, const simulator_config& config)
 {
@@ -665,6 +730,9 @@ inline bool read(agent_state& agent, Stream& in, const simulator_config& config)
      return true;
 }
 
+/**
+ * Writes the given agent_state `agent` to the output stream `out`. 
+ */
 template<typename Stream>
 inline bool write(const agent_state& agent, Stream& out, const simulator_config& config)
 {
@@ -737,6 +805,11 @@ struct patch_state {
     }
 };
 
+/**
+ * Initializes the memory of the given patch_state `patch`. This function does
+ * not initialize the contents of any of the fields, except for `scent` and
+ * `vision`, which are initialized to zeros.
+ */
 inline bool init(patch_state& patch, unsigned int n,
         unsigned int scent_dimension, unsigned int color_dimension,
         unsigned int item_count, unsigned int agent_count)
@@ -746,6 +819,9 @@ inline bool init(patch_state& patch, unsigned int n,
     return patch.init_helper(n, scent_dimension, color_dimension, item_count, agent_count);
 }
 
+/**
+ * Reads the given patch_state `patch` from the input stream `in`.
+ */
 template<typename Stream>
 bool read(patch_state& patch, Stream& in, const simulator_config& config) {
     unsigned int n = config.patch_size;
@@ -758,6 +834,9 @@ bool read(patch_state& patch, Stream& in, const simulator_config& config) {
         && read(patch.agents, in, patch.agent_count);
 }
 
+/**
+ * Writes the given patch_state `patch` to the output stream `out`.
+ */
 template<typename Stream>
 bool write(const patch_state& patch, Stream& out, const simulator_config& config) {
     unsigned int n = config.patch_size;
@@ -771,7 +850,7 @@ bool write(const patch_state& patch, Stream& out, const simulator_config& config
 
 /**
  * Simulator that forms the core of our experimentation framework.
- * 
+ *
  * \tparam  SimulatorData   Type to store additional state in the simulation.
  */
 template<typename SimulatorData>
@@ -811,6 +890,10 @@ class simulator {
     typedef patch<patch_data> patch_type;
 
 public:
+    /**
+     * Constructs a new simulator with the given simulator_config `conf` and
+     * SimulatorData `data`, calling the copy constructor for `data`.
+     */
     simulator(const simulator_config& conf,
             const SimulatorData& data) :
         config(conf),
@@ -835,7 +918,7 @@ public:
     uint64_t time;
 
     /** 
-     * Adds a new agent to this simulator and returns its initial state.
+     * Adds a new agent to this simulator and returns its ID and initial state.
      * 
      * \returns A pair containing the ID of the new agent and its state.
      */
@@ -908,6 +991,15 @@ public:
         return true;
     }
 
+    /**
+     * Retrieves an array of pointers to agent_state structures, storing them
+     * in `states`, which is parallel to the specified `agent_ids` array, and
+     * has length `agent_count`.
+     *
+     * \param states The output array of agent_state pointers.
+     * \param agent_ids The array of agent IDs whose states to retrieve.
+     * \param agent_count The length of `states` and `agent_ids`.
+     */
     inline void get_agent_states(agent_state** states,
             uint64_t* agent_ids, unsigned int agent_count)
     {
@@ -917,14 +1009,40 @@ public:
         agent_states_lock.unlock();
     }
 
+    /**
+     * Returns a SimulatorData reference associated with this simulator.
+     */
     inline SimulatorData& get_data() {
         return data;
     }
 
+    /**
+     * Returns a SimulatorData reference associated with this simulator.
+     */
+    inline const SimulatorData& get_data() const {
+        return data;
+    }
+
+    /**
+     * Returns the simulator configuration used to construct this simulator.
+     */
     inline const simulator_config& get_config() const {
         return config;
     }
 
+    /**
+     * Retrieves the set of patches of the map within the bounding box defined
+     * by `bottom_left_corner` and `top_right_corner`. The patches are stored
+     * in the map `patches`.
+     *
+     * \param bottom_left_corner The bottom-left corner of the bounding box in
+     *      which to retrieve the map patches.
+     * \param top_right_corner The top-right corner of the bounding box in
+     *      which to retrieve the map patches.
+     * \param patches The output map from patch position to patch_state
+     *      structures which will contain the state of the retrieved patches.
+     * \returns `true` if successful; `false` otherwise.
+     */
     bool get_map(
             position bottom_left_corner,
             position top_right_corner,
@@ -1118,7 +1236,7 @@ private:
         update_agent_scent_and_vision();
 
         /* Invoke the step callback function for each agent. */
-        on_step(this, (const array<agent_state*>&) agents, data, time);
+        on_step((const simulator<SimulatorData>*) this, (const array<agent_state*>&) agents, time);
     }
 
     inline void update_agent_scent_and_vision() {
@@ -1161,6 +1279,14 @@ private:
     template<typename A, typename B> friend bool write(const simulator<A>&, B&);
 };
 
+/**
+ * Constructs a new simulator with the given simulator_config `config` and
+ * SimulatorData `data`, calling the
+ * `bool init(SimulatorData&, const SimulatorData&)` function to initialize
+ * `data`.
+ *
+ * \returns `true` if successful; `false` otherwise.
+ */
 template<typename SimulatorData>
 bool init(simulator<SimulatorData>& sim, 
         const simulator_config& config,
@@ -1212,6 +1338,13 @@ inline bool write(const agent_state* agent, Stream& out,
     return write(agent_indices.get(agent), out);
 }
 
+/**
+ * Reads the given simulator `sim` from the input stream `in`. The
+ * SimulatorData of `sim` is not read from `in`. Rather, it is initialized by
+ * the given `data` argument.
+ *
+ * \returns `true` if successful; `false` otherwise.
+ */
 template<typename SimulatorData, typename Stream>
 bool read(simulator<SimulatorData>& sim, Stream& in, const SimulatorData& data)
 {
@@ -1279,7 +1412,14 @@ bool read(simulator<SimulatorData>& sim, Stream& in, const SimulatorData& data)
     return true;
 }
 
-/* NOTE: this function assumes the variables in the simulator are not modified during writing */
+/**
+ * Writes the given simulator `sim` to the output stream `out`.
+ *
+ * **NOTE:** this function assumes the variables in the simulator are not
+ *      modified during writing.
+ *
+ * \returns `true` if successful; `false` otherwise.
+ */
 template<typename SimulatorData, typename Stream>
 bool write(const simulator<SimulatorData>& sim, Stream& out)
 {

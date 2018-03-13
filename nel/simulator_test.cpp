@@ -125,10 +125,8 @@ void run_agent(simulator<empty_data>& sim, unsigned int id,
 	}
 }
 
-void on_step(
-		const simulator<empty_data>* sim,
-		const array<agent_state*>& agents,
-		empty_data& data, uint64_t time)
+void on_step(const simulator<empty_data>* sim,
+		const array<agent_state*>& agents, uint64_t time)
 {
 	sim_time++;
 
