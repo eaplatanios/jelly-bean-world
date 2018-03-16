@@ -16,28 +16,6 @@ inline bool print(const item& item, Stream& out, const item_position_printer& pr
 	return print(item.location, out);
 }
 
-float intensity(const position& world_position, unsigned int type, float* args) {
-	return args[type];
-}
-
-float interaction(
-		const position& first_position, const position& second_position,
-		unsigned int first_type, unsigned int second_type, float* args)
-{
-	unsigned int item_type_count = (unsigned int) args[0];
-	float first_cutoff = args[4 * (first_type * item_type_count + second_type) + 1];
-	float second_cutoff = args[4 * (first_type * item_type_count + second_type) + 2];
-	float first_value = args[4 * (first_type * item_type_count + second_type) + 3];
-	float second_value = args[4 * (first_type * item_type_count + second_type) + 4];
-
-	uint64_t squared_length = (first_position - second_position).squared_length();
-	if (squared_length < first_cutoff)
-		return first_value;
-	else if (squared_length < second_cutoff)
-		return second_value;
-	else return 0.0;
-}
-
 int main(int argc, const char** argv) {
 	static constexpr int n = 32;
 	float intensity_per_item[] = { -2.0f };

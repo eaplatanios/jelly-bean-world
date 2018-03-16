@@ -42,7 +42,7 @@ async_server server;
 
 //#define MULTITHREADED
 //#define USE_MPI
-#define TEST_SERIALIZATION
+//#define TEST_SERIALIZATION
 //#define TEST_SERVER_CONNECTION_LOSS
 //#define TEST_CLIENT_CONNECTION_LOSS
 

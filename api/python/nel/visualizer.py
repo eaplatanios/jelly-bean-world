@@ -29,7 +29,7 @@ class MapVisualizer(object):
 		self._ylim = [bottom_left[1], top_right[1]]
 		self._fig, self._ax = plt.subplots()
 		self._fig.tight_layout()
-		self._fig.set_size_inches((10, 10))
+		self._fig.set_size_inches((9, 9))
 
 	def draw(self):
 		map = self._sim._map((int(floor(self._xlim[0])), int(floor(self._ylim[0]))), (int(ceil(self._xlim[1])), int(ceil(self._ylim[1]))))
@@ -39,7 +39,7 @@ class MapVisualizer(object):
 		self._ax.set_ylim(self._ylim)
 		for patch in map:
 			(patch_position, fixed, scent, vision, items, agents) = patch
-			color = (0, 0, 0, 1) if fixed else (0, 0, 0, 0.3)
+			color = (0, 0, 0, 0.3) if fixed else (0, 0, 0, 0.1)
 
 			vertical_lines = np.empty((n + 1, 2, 2))
 			vertical_lines[:,0,0] = patch_position[0]*n + np.arange(n + 1) - 0.5

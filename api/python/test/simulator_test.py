@@ -63,7 +63,7 @@ if __name__ == "__main__":
 			sim.move(agent, agent.next_move(), 1)
 
 	# construct the visualizer and start the main loop
-	painter = nel.MapVisualizer(sim, config, (-30, -30), (150, 150))
+	painter = nel.MapVisualizer(sim, config, (-70, -70), (70, 70))
 	start_time = default_timer()
 	elapsed = 0.0
 	sim_start_time = sim.time()

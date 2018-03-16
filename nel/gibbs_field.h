@@ -167,11 +167,6 @@ public:
 	}
 
 private:
-	template<typename RNGType>
-	inline unsigned int sample_uniform(RNGType& rng, unsigned int n) {
-		return rng() % n;
-	}
-
 	/* NOTE: we assume `neighborhood[0]` refers to the patch at the given `patch_position` */
 	template<typename RNGType>
 	inline void sample_cell(RNGType& rng,
@@ -204,7 +199,7 @@ private:
 
 		log_probabilities[item_type_count] = 0.0;
 		normalize_exp(log_probabilities, item_type_count + 1);
-		float random = (float) rng() / engine.max();
+		float random = (float) rng() / rng.max();
 		unsigned int sampled_item_type = select_categorical(
 				log_probabilities, random, item_type_count + 1);
 
