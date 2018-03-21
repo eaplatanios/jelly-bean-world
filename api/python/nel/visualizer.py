@@ -31,6 +31,10 @@ class MapVisualizer(object):
 		self._fig.tight_layout()
 		self._fig.set_size_inches((9, 9))
 
+	def set_viewbox(bottom_left, top_right):
+		self._xlim = [bottom_left[0], top_right[0]]
+		self._ylim = [bottom_left[1], top_right[1]]
+
 	def draw(self):
 		map = self._sim._map((int(floor(self._xlim[0])), int(floor(self._ylim[0]))), (int(ceil(self._xlim[1])), int(ceil(self._ylim[1]))))
 		n = self._config.patch_size

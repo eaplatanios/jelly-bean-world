@@ -1096,11 +1096,18 @@ public:
                         if (!contains) continue;
 
                         /* for every item in 'patch', add its scent/vision contribution to 'neighbor' */
-                        for (const item& item : patch->items)
+                        for (unsigned int i = 0; i < patch->items.length; i++) {
+                            const item& item = patch->items[i];
+
+                            /* check if the item is too old; if so, ignore it */
+                            if (item.deletion_time > 0 && time >= item.deletion_time + config.deleted_item_lifetime)
+                                continue;
+
                             for (unsigned int a = 0; a < config.patch_size; a++)
                                 for (unsigned int b = 0; b < config.patch_size; b++)
                                     compute_scent_contribution(scent_model, item, world_position + position(a, b), time,
                                             config, neighbor.scent + ((a*config.patch_size + b)*config.scent_dimension));
+                        }
                     }
                 }
 
