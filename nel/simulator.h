@@ -494,8 +494,8 @@ void compute_scent_contribution(
     position relative_position = item.location - pos;
 
     /* if the item is within scent range, add its contribution */
-    if (abs(relative_position.x) < scent_model.radius
-        && abs(relative_position.y) < scent_model.radius)
+    if ((unsigned int) abs(relative_position.x) < scent_model.radius
+     && (unsigned int) abs(relative_position.y) < scent_model.radius)
     {
         unsigned int creation_t = config.deleted_item_lifetime - 1;
         if (item.creation_time > 0)
@@ -585,8 +585,8 @@ struct agent_state {
                 /* if the item is in the visual field, add its color to the appropriate pixel */
                 position relative_position = item.location - current_position;
                 if (item.deletion_time == 0
-                 && abs(relative_position.x) <= config.vision_range
-                 && abs(relative_position.y) <= config.vision_range) {
+                 && (unsigned int) abs(relative_position.x) <= config.vision_range
+                 && (unsigned int) abs(relative_position.y) <= config.vision_range) {
                     add_color(relative_position, config.vision_range,
                             config.item_types[item.item_type].color, config.color_dimension);
                 }
@@ -598,8 +598,8 @@ struct agent_state {
                 position relative_position = agent->current_position - current_position;
 
                 /* if the neighbor is in the visual field, add its color to the appropriate pixel */
-                if (abs(relative_position.x) <= config.vision_range
-                 && abs(relative_position.y) <= config.vision_range) {
+                if ((unsigned int) abs(relative_position.x) <= config.vision_range
+                 && (unsigned int) abs(relative_position.y) <= config.vision_range) {
                     add_color(relative_position, config.vision_range,
                             config.agent_color, config.color_dimension);
                 }

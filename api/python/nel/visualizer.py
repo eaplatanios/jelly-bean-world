@@ -12,14 +12,20 @@ try:
 except ImportError:
 	modules_loaded = False
 
-__all__ = ['MapVisualizer']
+__all__ = ['MapVisualizerError', 'MapVisualizer']
 
 AGENT_RADIUS = 0.4
 ITEM_RADIUS = 0.4
 MAXIMUM_SCENT = 0.9
 
+_FIGURE_COUNTER = 1
+
+class MapVisualizerError(Exception):
+  pass
+
 class MapVisualizer(object):
 	def __init__(self, sim, sim_config, bottom_left, top_right):
+		global _FIGURE_COUNTER
 		if not modules_loaded:
 			raise ImportError("numpy and matplotlib are required to use MapVisualizer.")
 		plt.ion()
@@ -27,7 +33,9 @@ class MapVisualizer(object):
 		self._config = sim_config
 		self._xlim = [bottom_left[0], top_right[0]]
 		self._ylim = [bottom_left[1], top_right[1]]
-		self._fig, self._ax = plt.subplots()
+		self._fignum = 'MapVisualizer Figure ' + str(_FIGURE_COUNTER)
+		_FIGURE_COUNTER += 1
+		self._fig, self._ax = plt.subplots(num=self._fignum)
 		self._fig.tight_layout()
 		self._fig.set_size_inches((9, 9))
 
@@ -36,6 +44,8 @@ class MapVisualizer(object):
 		self._ylim = [bottom_left[1], top_right[1]]
 
 	def draw(self):
+		if not plt.fignum_exists(self._fignum):
+			raise MapVisualizerError('The figure is closed')
 		map = self._sim._map((int(floor(self._xlim[0])), int(floor(self._ylim[0]))), (int(ceil(self._xlim[1])), int(ceil(self._ylim[1]))))
 		n = self._config.patch_size
 		self._ax.clear()

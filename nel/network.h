@@ -124,7 +124,7 @@ struct socket_listener {
 	WSABUF buffer_wrapper;
 	char buffer[4];
 
-	constexpr bool add_server_socket(socket_type& socket) { return true; }
+	inline bool add_server_socket(socket_type& socket) { return true; }
 
 	inline bool add_client_socket(socket_type& socket) {
 		if (CreateIoCompletionPort((HANDLE) socket.handle, listener, (ULONG_PTR) socket.handle, 0) == NULL) {
@@ -150,7 +150,7 @@ struct socket_listener {
 		return true;
 	}
 
-	constexpr bool remove_socket(socket_type& socket) const { return true; }
+	inline bool remove_socket(socket_type& socket) const { return true; }
 
 	template<typename AcceptedConnectionCallback>
 	inline bool accept(socket_type& server_socket, AcceptedConnectionCallback callback)
@@ -250,11 +250,11 @@ struct socket_listener {
 	inline bool add_server_socket(socket_type& socket) { return add_socket<true>(socket); }
 	inline bool add_client_socket(socket_type& socket) { return add_socket<false>(socket); }
 
-	inline bool update_client_socket(socket_type& socket) {
+	inline bool update_socket(socket_type& socket) {
 		return add_socket<false>(socket, "socket_listener.update_socket ERROR: Failed to modify listen event");
 	}
 
-	constexpr bool remove_socket(socket_type& socket) const {
+	inline bool remove_socket(socket_type& socket) const {
 		return true;
 	}
 
@@ -269,15 +269,14 @@ struct socket_listener {
 		for (int i = 0; i < event_count; i++) {
 			socket_type socket = (int) events[i].ident;
 
-			if (!server_running) {
-				return true;
-			} else if (socket == server_socket) {
+			if (socket == server_socket) {
 				/* there's a new connection on the server socket */
 				sockaddr_storage client_address;
 				socklen_t address_size = sizeof(client_address);
 				socket_type connection = ::accept(server_socket.handle, (sockaddr*) &client_address, &address_size);
 				if (!connection.is_valid()) {
-					errno = connection.handle;
+					if (errno == EINVAL)
+						return true; /* the server is shutting down */
 					perror("socket_listener.accept ERROR: Error establishing connection with client");
 					return false;
 				}

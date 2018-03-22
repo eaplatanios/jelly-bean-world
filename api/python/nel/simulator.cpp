@@ -513,6 +513,8 @@ void on_lost_connection(client<py_client_data>& c) {
 	PyObject* args = Py_BuildValue("()");
 	PyObject* result = PyEval_CallObject(c.data.lost_connection_callback, args);
 	Py_DECREF(args);
+    if (result != NULL)
+        Py_DECREF(result);
 	PyGILState_Release(gstate);
 }
 
@@ -1086,13 +1088,9 @@ static PyObject* simulator_move(PyObject *self, PyObject *args) {
         /* wait for response from server */
         wait_for_server(*client_handle);
 
-        if (client_handle->data.response.move_result) {
-            Py_INCREF(Py_True);
-            return Py_True;
-        } else {
-            Py_INCREF(Py_False);
-            return Py_False;
-        }
+        PyObject* result = (client_handle->data.response.move_result ? Py_True : Py_False);
+        Py_INCREF(result);
+        return result;
     }
 }
 

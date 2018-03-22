@@ -1,6 +1,6 @@
 from distutils.core import setup, Extension
 from distutils.command.build_ext import build_ext
-from platform import system
+from os import environ
 import numpy as np
 
 extra_compile_args = {
@@ -8,17 +8,19 @@ extra_compile_args = {
     'unix' : ['-std=c++11', '-Ofast', '-DNDEBUG', '-fomit-frame-pointer', '-fno-stack-protector', '-mtune=native', '-march=native']}
 extra_link_args = {
     'msvc' : ['ws2_32.lib']}
-extra_os_args = {
-    'Darwin' : ['-stdlib=libc++']}
 
-os = system()
+# on Mac, if gcc is used, '-Qunused-arguments' will throw an error
+if 'CFLAGS' in environ:
+  environ['CFLAGS'] = environ['CFLAGS'].replace('-Qunused-arguments', '')
+if 'CPPFLAGS' in environ:
+  environ['CPPFLAGS'] = environ['CPPFLAGS'].replace('-Qunused-arguments', '')
 
 class build_ext_subclass(build_ext):
   def build_extensions(self):
     c = self.compiler.compiler_type
     if c in extra_compile_args:
       for e in self.extensions:
-        e.extra_compile_args = extra_compile_args[c] + (extra_os_args[os] if (os in extra_os_args) else [])
+        e.extra_compile_args = extra_compile_args[c]
     if c in extra_link_args:
       for e in self.extensions:
         e.extra_link_args = extra_link_args[c]
