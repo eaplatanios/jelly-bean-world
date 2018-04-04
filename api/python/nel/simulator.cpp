@@ -559,6 +559,7 @@ static inline void import_errors() {
  *
  * \param   self    Pointer to the Python object calling this method.
  * \param   args    A Python tuple containing the arguments to this function:
+ *                  - (int) The seed for the pseudorandom number generator.
  *                  - (int) The maximum movement distance per turn for all
  *                  agents.
  *                  - (int) The scent dimension.
@@ -601,6 +602,7 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
     simulator_config config;
     PyObject* py_items;
     PyObject* py_agent_color;
+    unsigned int seed;
     unsigned int collision_policy;
     unsigned int py_intensity_fn;
     unsigned int py_interaction_fn;
@@ -610,7 +612,7 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
     unsigned int save_frequency;
     char* save_filepath;
     if (!PyArg_ParseTuple(
-      args, "IIIIIIOOIffIIOIOOIz", &config.max_steps_per_movement, &config.scent_dimension,
+      args, "IIIIIIIOOIffIIOIOOIz", &seed, &config.max_steps_per_movement, &config.scent_dimension,
       &config.color_dimension, &config.vision_range, &config.patch_size, &config.gibbs_iterations,
       &py_items, &py_agent_color, &collision_policy, &config.decay_param, &config.diffusion_param,
       &config.deleted_item_lifetime,
@@ -678,7 +680,7 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
     if (sim == NULL) {
         PyErr_NoMemory();
         return NULL;
-    } else if (!init(*sim, config, data)) {
+    } else if (!init(*sim, config, data, seed)) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to initialize simulator.");
         return NULL;
     }
