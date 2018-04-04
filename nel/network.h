@@ -124,7 +124,7 @@ struct socket_listener {
 	WSABUF buffer_wrapper;
 	char buffer[4];
 
-	inline bool add_server_socket(socket_type& socket) { return true; }
+	inline bool add_server_socket(socket_type& socket) const { return true; }
 
 	inline bool add_client_socket(socket_type& socket) {
 		if (CreateIoCompletionPort((HANDLE) socket.handle, listener, (ULONG_PTR) socket.handle, 0) == NULL) {
