@@ -895,13 +895,14 @@ public:
      * SimulatorData `data`, calling the copy constructor for `data`.
      */
     simulator(const simulator_config& conf,
-            const SimulatorData& data) :
+            const SimulatorData& data,
+            uint_fast32_t seed) :
         config(conf),
         world(config.patch_size,
             (unsigned int) config.item_types.length,
             config.gibbs_iterations,
             config.intensity_fn, config.intensity_fn_args,
-            config.interaction_fn, config.interaction_fn_args),
+            config.interaction_fn, config.interaction_fn_args, seed),
         agents(16), requested_moves(32, alloc_position_keys),
         acted_agent_count(0), data(data), time(0)
     {
@@ -911,6 +912,18 @@ public:
             exit(EXIT_FAILURE);
         }
     }
+
+    /**
+     * Constructs a new simulator with the given simulator_config `conf` and
+     * SimulatorData `data`, calling the copy constructor for `data`.
+     */
+    simulator(const simulator_config& conf,
+            const SimulatorData& data) :
+#if !defined(NDEBUG)
+        simulator(conf, data, 0) { }
+#else
+        simulator(conf, data, (uint_fast32_t) milliseconds()) { }
+#endif
 
     ~simulator() { free_helper(); }
 
@@ -1281,7 +1294,7 @@ private:
         }
     }
 
-    template<typename A> friend bool init(simulator<A>&, const simulator_config&, const A&);
+    template<typename A> friend bool init(simulator<A>&, const simulator_config&, const A&, uint_fast32_t);
     template<typename A, typename B> friend bool read(simulator<A>&, B&, const A&);
     template<typename A, typename B> friend bool write(const simulator<A>&, B&);
 };
@@ -1297,7 +1310,8 @@ private:
 template<typename SimulatorData>
 bool init(simulator<SimulatorData>& sim, 
         const simulator_config& config,
-        const SimulatorData& data)
+        const SimulatorData& data,
+        uint_fast32_t seed)
 {
     sim.time = 0;
     sim.acted_agent_count = 0;
@@ -1318,7 +1332,7 @@ bool init(simulator<SimulatorData>& sim,
             (unsigned int) sim.config.item_types.length,
             sim.config.gibbs_iterations,
             sim.config.intensity_fn, sim.config.intensity_fn_args,
-            sim.config.interaction_fn, sim.config.interaction_fn_args)) {
+            sim.config.interaction_fn, sim.config.interaction_fn_args, seed)) {
         free(sim.config); free(sim.data);
         free(sim.agents); free(sim.requested_moves);
         free(sim.scent_model); return false;
@@ -1326,6 +1340,27 @@ bool init(simulator<SimulatorData>& sim,
     new (&sim.agent_states_lock) std::mutex();
     new (&sim.requested_move_lock) std::mutex();
     return true;
+}
+
+/**
+ * Constructs a new simulator with the given simulator_config `config` and
+ * SimulatorData `data`, calling the
+ * `bool init(SimulatorData&, const SimulatorData&)` function to initialize
+ * `data`.
+ *
+ * \returns `true` if successful; `false` otherwise.
+ */
+template<typename SimulatorData>
+inline bool init(simulator<SimulatorData>& sim, 
+        const simulator_config& config,
+        const SimulatorData& data)
+{
+#if !defined(NDEBUG)
+    uint_fast32_t seed = 0;
+#else
+    uint_fast32_t seed = (uint_fast32_t) milliseconds();
+#endif
+    return init(sim, config, data, seed);
 }
 
 template<typename Stream>

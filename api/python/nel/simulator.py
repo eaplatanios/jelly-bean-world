@@ -28,7 +28,8 @@ class SimulatorConfig(object):
   def __init__(self, max_steps_per_movement,
       vision_range, patch_size, gibbs_num_iter, items, agent_color,
       collision_policy, decay_param, diffusion_param, deleted_item_lifetime,
-      intensity_fn, intensity_fn_args, interaction_fn, interaction_fn_args):
+      intensity_fn, intensity_fn_args, interaction_fn, interaction_fn_args,
+      seed=0):
     """Creates a new simulator configuration.
 
     Arguments:
@@ -44,6 +45,8 @@ class SimulatorConfig(object):
       interaction_fn:         Item interaction function used in the Gibbs sampler 
                               for map generation.
       interaction_fn_args:    Arguments to the item interaction function.
+      seed:                   The initial seed for the pseudorandom number
+                              generator.
     """
     assert len(items) > 0, 'A non-empty list of items must be provided.'
     self.max_steps_per_movement = max_steps_per_movement
@@ -65,6 +68,7 @@ class SimulatorConfig(object):
     self.intensity_fn_args = intensity_fn_args
     self.interaction_fn = interaction_fn
     self.interaction_fn_args = interaction_fn_args
+    self.seed = seed
 
 
 class Simulator(object):
@@ -177,7 +181,7 @@ class Simulator(object):
         raise ValueError('"load_filepath" must be None if "sim_config" is specified.')
       elif server_address != None:
         raise ValueError('"server_address" must be None if "sim_config" is specified.')
-      self._handle = simulator_c.new(
+      self._handle = simulator_c.new(sim_config.seed,
         sim_config.max_steps_per_movement, sim_config.scent_num_dims,
         sim_config.color_num_dims, sim_config.vision_range, sim_config.patch_size,
         sim_config.gibbs_num_iter,

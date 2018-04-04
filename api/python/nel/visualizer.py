@@ -39,7 +39,7 @@ class MapVisualizer(object):
 		self._fig.tight_layout()
 		self._fig.set_size_inches((9, 9))
 
-	def set_viewbox(bottom_left, top_right):
+	def set_viewbox(self, bottom_left, top_right):
 		self._xlim = [bottom_left[0], top_right[0]]
 		self._ylim = [bottom_left[1], top_right[1]]
 

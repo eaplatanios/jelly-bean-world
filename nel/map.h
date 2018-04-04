@@ -129,19 +129,30 @@ struct map {
 public:
 	map(unsigned int n, unsigned int item_type_count, unsigned int gibbs_iterations,
 			intensity_function intensity_fn, float* intensity_fn_args, 
-			interaction_function interaction_fn, float* interaction_fn_args) :
+			interaction_function interaction_fn, float* interaction_fn_args, uint_fast32_t seed) :
 		patches(1024, alloc_position_keys), 
 		intensity_fn(intensity_fn), interaction_fn(interaction_fn), 
 		intensity_fn_args(intensity_fn_args), interaction_fn_args(interaction_fn_args), 
 		n(n), item_type_count(item_type_count), gibbs_iterations(gibbs_iterations),
 		cache(*this, n, item_type_count, is_stationary(intensity_fn), is_stationary(interaction_fn))
 	{
+		rng.seed(seed);
 #if !defined(NDEBUG)
 		rng.seed(0);
 #else
-		rng.seed((unsigned int) time(NULL));
+		rng.seed(milliseconds());
 #endif
 	}
+
+	map(unsigned int n, unsigned int item_type_count, unsigned int gibbs_iterations,
+			intensity_function intensity_fn, float* intensity_fn_args, 
+			interaction_function interaction_fn, float* interaction_fn_args) :
+		map(n, item_type_count, gibbs_iterations, intensity_fn, intensity_fn_args, interaction_fn, interaction_fn_args,
+#if !defined(NDEBUG)
+			0) { }
+#else
+			milliseconds()) { }
+#endif
 
 	~map() { free_helper(); }
 
@@ -523,7 +534,8 @@ template<typename PerPatchData>
 inline bool init(map<PerPatchData>& world, unsigned int n,
 		unsigned int item_type_count, unsigned int gibbs_iterations,
 		intensity_function intensity_fn, float* intensity_fn_args, 
-		interaction_function interaction_fn, float* interaction_fn_args)
+		interaction_function interaction_fn, float* interaction_fn_args,
+		uint_fast32_t seed)
 {
 	if (!hash_map_init(world.patches, 1024, alloc_position_keys))
 		return false;
@@ -540,12 +552,23 @@ inline bool init(map<PerPatchData>& world, unsigned int n,
 		return false;
 	}
 
-#if !defined(NDEBUG)
-	new (&world.rng) std::minstd_rand(0);
-#else
-	new (&world.rng) std::minstd_rand((unsigned int) time(NULL));
-#endif
+	new (&world.rng) std::minstd_rand(seed);
 	return true;
+}
+
+template<typename PerPatchData>
+inline bool init(map<PerPatchData>& world, unsigned int n,
+		unsigned int item_type_count, unsigned int gibbs_iterations,
+		intensity_function intensity_fn, float* intensity_fn_args, 
+		interaction_function interaction_fn, float* interaction_fn_args)
+{
+#if !defined(NDEBUG)
+	uint_fast32_t seed = 0;
+#else
+	uint_fast32_t seed = (uint_fast32_t) milliseconds();
+#endif
+	return init(world, n, item_type_count, gibbs_iterations, intensity_fn,
+			intensity_fn_args, interaction_fn, interaction_fn_args, seed);
 }
 
 template<typename PerPatchData, typename Stream, typename PatchReader>
