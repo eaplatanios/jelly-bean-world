@@ -40,10 +40,12 @@ class SimulatorConfig(object):
                               sampling each patch of the map.
       items:                  List of items to include in this world.
       intensity_fn:           Item intensity function used in the Gibbs sampler 
-                              for map generation.
+                              for map generation. See class `IntensityFunction`
+                              for further details.
       intensity_fn_args:      Arguments to the item intensity function.
       interaction_fn:         Item interaction function used in the Gibbs sampler 
-                              for map generation.
+                              for map generation. See class `InteractionFunction`
+                              for further details.
       interaction_fn_args:    Arguments to the item interaction function.
       seed:                   The initial seed for the pseudorandom number
                               generator.
