@@ -657,11 +657,8 @@ inline bool init(
     agent.agent_acted = false;
     new (&agent.lock) std::mutex();
 
-    /* initialize the scent and vision of the current agent */
     patch<patch_data>* neighborhood[4]; position patch_positions[4];
     unsigned int index = world.get_fixed_neighborhood(agent.current_position, neighborhood, patch_positions);
-    agent.update_state(neighborhood, scent_model, config, current_time);
-
     neighborhood[index]->data.patch_lock.lock();
     if (config.collision_policy != movement_conflict_policy::NO_COLLISIONS) {
         for (const agent_state* neighbor : neighborhood[index]->data.agents) {
@@ -680,6 +677,9 @@ inline bool init(
     }
     neighborhood[index]->data.agents.add(&agent);
     neighborhood[index]->data.patch_lock.unlock();
+
+    /* initialize the scent and vision of the current agent */
+    agent.update_state(neighborhood, scent_model, config, current_time);
 
     /* update the scent and vision of nearby agents */
     for (unsigned int i = 0; i < 4; i++) {
@@ -1041,6 +1041,10 @@ public:
      */
     inline const simulator_config& get_config() const {
         return config;
+    }
+
+    inline map<patch_data>& get_world() {
+        return world;
     }
 
     /**
