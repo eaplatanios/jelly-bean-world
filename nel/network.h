@@ -152,8 +152,8 @@ struct socket_listener {
 
 	inline bool remove_socket(socket_type& socket) const { return true; }
 
-	template<typename AcceptedConnectionCallback>
-	inline bool accept(socket_type& server_socket, AcceptedConnectionCallback callback)
+	template<typename AcceptedConnectionCallback, typename... CallbackArgs>
+	inline bool accept(socket_type& server_socket, AcceptedConnectionCallback callback, CallbackArgs&&... callback_args)
 	{
 		/* listen for a new connection on the server socket */
 		sockaddr_storage client_address;
@@ -166,7 +166,7 @@ struct socket_listener {
 				return true;
 			} else {
 				errno = error;
-				perror("run_server ERROR: Error establishing connection with client");
+				perror("socket_listener.accept ERROR: Error establishing connection with client");
 				return false;
 			}
 		}
@@ -183,12 +183,12 @@ struct socket_listener {
 			int error = WSAGetLastError();
 			if (error != WSA_IO_PENDING) {
 				errno = error;
-				perror("run_server ERROR: Unable to begin receiving data from client");
+				perror("socket_listener.accept ERROR: Unable to begin receiving data from client");
 				shutdown(connection.handle, 2); return false;
 			}
 		}
 
-		callback(connection);
+		callback(connection, std::forward<CallbackArgs>(callback_args)...);
 		return true;
 	}
 
@@ -203,12 +203,12 @@ struct socket_listener {
 		if (!is_running()) {
 			return true;
 		} else if (completion_key == NULL) {
-			listener_error("run_worker ERROR: Error waiting for IO completion packet");
+			listener_error("socket_listener.listen ERROR: Error waiting for IO completion packet");
 			return false;
 		} else if (!result) {
 			DWORD error = GetLastError();
 			if (error != ERROR_NETNAME_DELETED) {
-				listener_error("run_worker ERROR: Error waiting for IO completion packet");
+				listener_error("socket_listener.listen ERROR: Error waiting for IO completion packet");
 				return false;
 			}
 			/* the client closed the connection */
@@ -258,11 +258,11 @@ struct socket_listener {
 		return true;
 	}
 
-	template<typename AcceptedConnectionCallback>
-	inline bool accept(socket_type& server_socket, AcceptedConnectionCallback callback) {
+	template<typename AcceptedConnectionCallback, typename... CallbackArgs>
+	inline bool accept(socket_type& server_socket, AcceptedConnectionCallback callback, CallbackArgs&&... callback_args) {
 		int event_count = kevent(listener, NULL, 0, events, EVENT_QUEUE_CAPACITY, NULL);
 		if (event_count == -1) {
-			listener_error("socket_listener.listen ERROR: Error listening for incoming network activity");
+			listener_error("socket_listener.accept ERROR: Error listening for incoming network activity");
 			return false;
 		}
 
@@ -285,7 +285,7 @@ struct socket_listener {
 					shutdown(connection.handle, 2); continue;
 				}
 
-				callback(connection);
+				callback(connection, std::forward<CallbackArgs>(callback_args)...);
 			} else {
 				/* there is an event on a client connection */
 				std::unique_lock<std::mutex> lck(event_queue_lock);
@@ -356,8 +356,8 @@ struct socket_listener {
 		return true;
 	}
 
-	template<typename AcceptedConnectionCallback>
-	inline bool accept(socket_type& server_socket, AcceptedConnectionCallback callback) {
+	template<typename AcceptedConnectionCallback, typename... CallbackArgs>
+	inline bool accept(socket_type& server_socket, AcceptedConnectionCallback callback, CallbackArgs&&... callback_args) {
 		int event_count = epoll_wait(listener, events, EVENT_QUEUE_CAPACITY, -1);
 		if (event_count == -1) {
 			listener_error("socket_listener.accept ERROR: Error listening for incoming network activity");
@@ -383,7 +383,7 @@ struct socket_listener {
 					shutdown(connection.handle, 2); continue;
 				}
 
-				callback(connection);
+				callback(connection, std::forward<CallbackArgs>(callback_args)...);
 			} else {
 				/* there is an event on a client connection */
 				std::unique_lock<std::mutex> lck(event_queue_lock);
@@ -515,6 +515,46 @@ void run_worker(socket_listener& listener, hash_map<socket_type, ConnectionData>
 	}
 }
 
+template<typename ConnectionData, typename ProcessMessageCallback>
+inline std::thread start_worker(socket_listener& listener,
+		hash_map<socket_type, ConnectionData>& connections,
+		std::mutex& connection_set_lock, server_state& state,
+		ProcessMessageCallback process_message)
+{
+	return std::thread(run_worker<ConnectionData, ProcessMessageCallback>,
+			std::ref(listener), std::ref(connections), std::ref(connection_set_lock),
+			std::ref(state), process_message);
+}
+
+template<typename ConnectionData, typename ProcessMessageCallback, typename... CallbackArgs>
+inline std::thread start_worker(socket_listener& listener,
+		hash_map<socket_type, ConnectionData>& connections,
+		std::mutex& connection_set_lock, server_state& state,
+		ProcessMessageCallback process_message, CallbackArgs&&... callback_args)
+{
+	return std::thread(run_worker<ConnectionData, ProcessMessageCallback, CallbackArgs...>,
+			std::ref(listener), std::ref(connections), std::ref(connection_set_lock),
+			std::ref(state), process_message, std::ref(std::forward<CallbackArgs>(callback_args)...));
+}
+
+template<typename ConnectionData, typename NewConnectionCallback, typename... CallbackArgs>
+inline void accept_connection(socket_type& connection,
+		hash_map<socket_type, ConnectionData>& connections,
+		std::mutex& connection_set_lock,
+		NewConnectionCallback new_connection_callback,
+		CallbackArgs&&... callback_args)
+{
+	connection_set_lock.lock();
+	bool contains; unsigned int index;
+	connections.check_size();
+	ConnectionData& data = connections.get(connection, contains, index);
+	connections.table.keys[index] = connection;
+	connections.table.size++;
+	init(data);
+	new_connection_callback(connection, data, std::forward<CallbackArgs>(callback_args)...);
+	connection_set_lock.unlock();
+}
+
 template<bool Success>
 inline void cleanup_server(server_state& state,
 		std::condition_variable& init_cv, std::mutex& init_lock)
@@ -600,12 +640,8 @@ bool run_server(socket_type& sock, uint16_t server_port,
 
 	/* make the thread pool */
 	std::thread* workers = new std::thread[worker_count];
-	auto start_worker = [&]() {
-		run_worker(listener, connections, connection_set_lock, state,
-				process_message, std::forward<CallbackArgs>(callback_args)...);
-	};
 	for (unsigned int i = 0; i < worker_count; i++)
-		workers[i] = std::thread(start_worker);
+		workers[i] = start_worker(listener, connections, connection_set_lock, state, process_message, std::forward<CallbackArgs>(callback_args)...);
 
 	/* notify that the server has successfully started */
 	std::unique_lock<std::mutex> lock(init_lock);
@@ -615,17 +651,8 @@ bool run_server(socket_type& sock, uint16_t server_port,
 
 	/* the main loop */
 	while (state != server_state::STOPPING) {
-		listener.accept(sock, [&](socket_type& connection) {
-			connection_set_lock.lock();
-			bool contains; unsigned int index;
-			connections.check_size();
-			ConnectionData& data = connections.get(connection, contains, index);
-			connections.table.keys[index] = connection;
-			connections.table.size++;
-			init(data);
-			new_connection_callback(connection, data, std::forward<CallbackArgs>(callback_args)...);
-			connection_set_lock.unlock();
-		});
+		listener.accept(sock, accept_connection<ConnectionData, NewConnectionCallback, CallbackArgs...>,
+				connections, connection_set_lock, new_connection_callback, std::forward<CallbackArgs>(callback_args)...);
 	}
 
 	core::free(listener, worker_count);

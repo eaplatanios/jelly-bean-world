@@ -394,7 +394,7 @@ inline bool init_server(simulator<SimulatorData>& sim, uint16_t server_port,
 }
 
 /**
- * Shuts down the asynchronous server given by `server`. 
+ * Shuts down the asynchronous server given by `server`.
  */
 void stop_server(async_server& server) {
 	server.state = server_state::STOPPING;
@@ -616,7 +616,7 @@ void run_response_listener(ClientType& c) {
  * \param agent_states An array of length `agent_count` to which this function
  * 		will write the states of the agents whose IDs are given by the parallel
  * 		array `agent_ids`.
- * \param agent_count The lengths of `agent_ids` and `agent_states`.  
+ * \param agent_count The lengths of `agent_ids` and `agent_states`.
  * \returns The simulator time if successful; `UINT64_MAX` otherwise.
  */
 template<typename ClientData>
@@ -691,7 +691,7 @@ uint64_t init_client(client<ClientData>& new_client,
  * \param agent_states An array of length `agent_count` to which this function
  * 		will write the states of the agents whose IDs are given by the parallel
  * 		array `agent_ids`.
- * \param agent_count The lengths of `agent_ids` and `agent_states`.  
+ * \param agent_count The lengths of `agent_ids` and `agent_states`.
  * \returns The simulator time if successful; `UINT64_MAX` otherwise.
  */
 template<typename ClientData>

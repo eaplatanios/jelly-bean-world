@@ -333,8 +333,6 @@ public:
 		world_to_patch_coordinates(bottom_left_corner, bottom_left_patch_position);
 		world_to_patch_coordinates(top_right_corner, top_right_patch_position);
 
-		array<patch_type*> patches(32);
-		array<position> patch_positions(32);
 		for (int64_t x = bottom_left_patch_position.x; x <= top_right_patch_position.x; x++) {
 			for (int64_t y = bottom_left_patch_position.y; y <= top_right_patch_position.y; y++) {
 				patch_type* p = get_patch_if_exists({x, y});
