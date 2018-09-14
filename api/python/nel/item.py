@@ -7,19 +7,24 @@ __all__ = ['Item', 'IntensityFunction', 'InteractionFunction']
 class Item(object):
   """Represents an item in the world (e.g., jelly beans)."""
 
-  def __init__(self, name, scent, color, auto_collected):
+  def __init__(self, name, scent, color, required_item_counts, blocks_movement):
     """Creates a new item.
   
     Arguments:
-      name:           Name, represented as a string.
-      scent:          Scent, represented as a list of floats.
-      color:          Color, represented as a list of floats.
-      auto_collected: Whether this item is automatically collected by agents.
+      name:                 Name, represented as a string.
+      scent:                Scent, represented as a list of floats.
+      color:                Color, represented as a list of floats.
+      required_item_counts: A list whose value at index `i` indicates the
+                            minimum number of items of type `i` that need to be
+                            collected by the agent in order to automatically
+                            collect items of this type.
+      blocks_movement:      Whether this item blocks movement of agents.
     """
     self.name = name
     self.scent = scent
     self.color = color
-    self.auto_collected = auto_collected
+    self.required_item_counts = required_item_counts
+    self.blocks_movement = blocks_movement
 
 
 class IntensityFunction(Enum):

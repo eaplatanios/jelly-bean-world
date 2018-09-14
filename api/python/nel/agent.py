@@ -14,6 +14,7 @@ class Agent(object):
   def __init__(self, simulator, load_filepath):
     self._simulator = simulator
     self._position = None
+    self._direction = None
     self._scent = None
     self._vision = None
     self._items = None
@@ -24,6 +25,9 @@ class Agent(object):
 
   def position(self):
     return self._position
+
+  def direction(self):
+    return self._direction
 
   def scent(self):
     return self._scent

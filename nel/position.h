@@ -53,6 +53,14 @@ struct position {
 		return {x - p.x, y - p.y};
 	}
 
+	inline position& operator += (const position& p) {
+		x += p.x; y += p.y; return *this;
+	}
+
+	inline position& operator -= (const position& p) {
+		x -= p.x; y -= p.y; return *this;
+	}
+
 	inline bool operator == (const position& p) const {
 		return x == p.x && y == p.y;
 	}

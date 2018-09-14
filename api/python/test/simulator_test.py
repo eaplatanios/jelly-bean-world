@@ -18,9 +18,9 @@ class EasterlyAgent(nel.Agent):
 def make_config():
 	# specify the item types
 	items = []
-	items.append(nel.Item("banana", [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], False))
-	items.append(nel.Item("onion", [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], False))
-	items.append(nel.Item("jellybean", [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], True))
+	items.append(nel.Item("banana", [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [1, 0, 0], False))
+	items.append(nel.Item("onion", [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0, 1, 0], False))
+	items.append(nel.Item("jellybean", [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0, 0, 0], False))
 
 	# specify the intensity and interaction function parameters
 	intensity_fn_args = [-5.3, -5.0, -5.3]
@@ -36,7 +36,9 @@ def make_config():
 	interaction_fn_args.extend([10.0, 200.0, 0.0, -6.0])     # parameters for interaction between item 2 and item 2
 
 	# construct the simulator configuration
+	ALL_DIRECTIONS = [nel.RelativeDirection.FORWARD, nel.RelativeDirection.BACKWARD, nel.RelativeDirection.LEFT, nel.RelativeDirection.RIGHT]
 	return nel.SimulatorConfig(max_steps_per_movement=1, vision_range=1,
+		allowed_movement_directions=ALL_DIRECTIONS, allowed_turn_directions=ALL_DIRECTIONS,
 		patch_size=32, gibbs_num_iter=10, items=items, agent_color=[0.0, 0.0, 1.0],
 		collision_policy=nel.MovementConflictPolicy.FIRST_COME_FIRST_SERVED,
 		decay_param=0.4, diffusion_param=0.14, deleted_item_lifetime=2000,

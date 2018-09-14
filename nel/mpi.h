@@ -10,12 +10,14 @@ using namespace core;
 
 enum class message_type : uint64_t {
 	ADD_AGENT = 0,
-	ADD_AGENT_RESPONSE = 1,
-	MOVE = 2,
-	MOVE_RESPONSE = 3,
-	GET_MAP = 4,
-	GET_MAP_RESPONSE = 5,
-	STEP_RESPONSE = 6
+	ADD_AGENT_RESPONSE,
+	MOVE,
+	MOVE_RESPONSE,
+	TURN,
+	TURN_RESPONSE,
+	GET_MAP,
+	GET_MAP_RESPONSE,
+	STEP_RESPONSE
 };
 
 /**
@@ -45,10 +47,12 @@ inline bool print(const message_type& type, Stream& out) {
 	switch (type) {
 	case message_type::ADD_AGENT:        return core::print("ADD_AGENT", out);
 	case message_type::MOVE:             return core::print("MOVE", out);
+	case message_type::TURN:             return core::print("TURN", out);
 	case message_type::GET_MAP:          return core::print("GET_MAP", out);
 
 	case message_type::ADD_AGENT_RESPONSE:        return core::print("ADD_AGENT_RESPONSE", out);
 	case message_type::MOVE_RESPONSE:             return core::print("MOVE_RESPONSE", out);
+	case message_type::TURN_RESPONSE:             return core::print("TURN_RESPONSE", out);
 	case message_type::GET_MAP_RESPONSE:          return core::print("GET_MAP_RESPONSE", out);
 	case message_type::STEP_RESPONSE:             return core::print("STEP_RESPONSE", out);
 	}
@@ -169,6 +173,21 @@ inline bool receive_move(Stream& in, socket_type& connection, simulator<Simulato
 }
 
 template<typename Stream, typename SimulatorData>
+inline bool receive_turn(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
+	uint64_t agent_id = UINT64_MAX;
+	direction dir;
+	if (!read(agent_id, in) || !read(dir, in))
+		return false;
+	bool result = sim.turn(agent_id, dir);
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(result));
+	fixed_width_stream<memory_stream> out(mem_stream);
+
+	return write(message_type::TURN_RESPONSE, out)
+		&& write(agent_id, out) && write(result, out)
+		&& send_message(connection, mem_stream.buffer, mem_stream.position);
+}
+
+template<typename Stream, typename SimulatorData>
 inline bool receive_get_map(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
 	position bottom_left, top_right;
 	if (!read(bottom_left, in) || !read(top_right, in))
@@ -206,11 +225,14 @@ void server_process_message(socket_type& connection,
 			receive_add_agent(in, connection, connections, sim); return;
 		case message_type::MOVE:
 			receive_move(in, connection, sim); return;
+		case message_type::TURN:
+			receive_turn(in, connection, sim); return;
 		case message_type::GET_MAP:
 			receive_get_map(in, connection, sim); return;
 
 		case message_type::ADD_AGENT_RESPONSE:
 		case message_type::MOVE_RESPONSE:
+		case message_type::TURN_RESPONSE:
 		case message_type::GET_MAP_RESPONSE:
 		case message_type::STEP_RESPONSE:
 			break;
@@ -233,7 +255,7 @@ inline bool process_new_connection(socket_type& connection,
 	}
 
 	/* read the agent IDs owned by the new client */
-	unsigned int agent_count;
+	unsigned int agent_count = 0;
 	fixed_width_stream<socket_type> in(connection);
 	if (!read(agent_count, in)) {
 		fprintf(stderr, "process_new_connection ERROR: Failed to read agent_count.\n");
@@ -461,7 +483,7 @@ bool send_add_agent(ClientType& c) {
 }
 
 /**
- * Sends an `move` message to the server from the client `c`. Once the server
+ * Sends a `move` message to the server from the client `c`. Once the server
  * responds, the function `on_move(ClientType&, uint64_t, bool)` will be
  * invoked, where the first argument is `c`, the second is `agent_id`, and the
  * third is whether the move was successfully enqueued by the server.
@@ -476,6 +498,24 @@ bool send_move(ClientType& c, uint64_t agent_id, direction dir, unsigned int num
 		&& write(agent_id, out)
 		&& write(dir, out)
 		&& write(num_steps, out)
+		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
+}
+
+/**
+ * Sends a `turn` message to the server from the client `c`. Once the server
+ * responds, the function `on_turn(ClientType&, uint64_t, bool)` will be
+ * invoked, where the first argument is `c`, the second is `agent_id`, and the
+ * third is whether the turn was successfully enqueued by the server.
+ *
+ * \returns `true` if the sending is successful; `false` otherwise.
+ */
+template<typename ClientType>
+bool send_turn(ClientType& c, uint64_t agent_id, direction dir) {
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(dir));
+	fixed_width_stream<memory_stream> out(mem_stream);
+	return write(message_type::MOVE, out)
+		&& write(agent_id, out)
+		&& write(dir, out)
 		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
 }
 
@@ -523,6 +563,17 @@ inline bool receive_move_response(ClientType& c) {
 	if (!read(agent_id, in) || !read(move_success, in))
 		return false;
 	on_move(c, agent_id, move_success);
+	return true;
+}
+
+template<typename ClientType>
+inline bool receive_turn_response(ClientType& c) {
+	bool turn_success;
+	uint64_t agent_id;
+	fixed_width_stream<socket_type> in(c.connection);
+	if (!read(agent_id, in) || !read(turn_success, in))
+		return false;
+	on_turn(c, agent_id, turn_success);
 	return true;
 }
 
@@ -587,6 +638,8 @@ void run_response_listener(ClientType& c) {
 				receive_add_agent_response(c); continue;
 			case message_type::MOVE_RESPONSE:
 				receive_move_response(c); continue;
+			case message_type::TURN_RESPONSE:
+				receive_turn_response(c); continue;
 			case message_type::GET_MAP_RESPONSE:
 				receive_get_map_response(c); continue;
 			case message_type::STEP_RESPONSE:
@@ -594,6 +647,7 @@ void run_response_listener(ClientType& c) {
 
 			case message_type::ADD_AGENT:
 			case message_type::MOVE:
+			case message_type::TURN:
 			case message_type::GET_MAP:
 				break;
 		}

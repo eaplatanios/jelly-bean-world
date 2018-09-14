@@ -4,6 +4,7 @@
 #include <core/array.h>
 #include <core/utility.h>
 #include <atomic>
+#include <mutex>
 #include "map.h"
 #include "diffusion.h"
 
@@ -16,7 +17,7 @@ template<typename SimulatorData> class simulator;
 struct agent_state;
 
 /** Represents all possible directions of motion in the environment. */
-enum class direction : uint8_t { UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3 };
+enum class direction : uint8_t { UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3, COUNT };
 
 /**
  * Reads the given direction `dir` from the input stream `in`.
@@ -47,6 +48,7 @@ inline bool print(const direction& dir, Stream& out) {
     case direction::DOWN:  return core::print("DOWN", out);
     case direction::LEFT:  return core::print("LEFT", out);
     case direction::RIGHT: return core::print("RIGHT", out);
+	case direction::COUNT: break;
     }
     fprintf(stderr, "print ERROR: Unrecognized direction.\n");
     return false;
@@ -90,12 +92,15 @@ struct item_properties {
     float* scent;
     float* color;
 
-    bool automatically_collected;
+    unsigned int* required_item_counts;
+
+    bool blocks_movement;
 
     static inline void free(item_properties& properties) {
         core::free(properties.name);
         core::free(properties.scent);
         core::free(properties.color);
+        core::free(properties.required_item_counts);
     }
 };
 
@@ -104,7 +109,8 @@ struct item_properties {
  */
 inline bool init(
         item_properties& properties, const item_properties& src,
-        unsigned int scent_dimension, unsigned int color_dimension)
+        unsigned int scent_dimension, unsigned int color_dimension,
+        unsigned int item_type_count)
 {
     properties.name = src.name;
     properties.scent = (float*) malloc(sizeof(float) * scent_dimension);
@@ -117,12 +123,19 @@ inline bool init(
         fprintf(stderr, "init ERROR: Insufficient memory for item_properties.scent.\n");
         free(properties.scent); return false;
     }
+    properties.required_item_counts = (unsigned int*) malloc(sizeof(unsigned int) * item_type_count);
+    if (properties.required_item_counts == NULL) {
+        fprintf(stderr, "init ERROR: Insufficient memory for item_properties.required_item_counts.\n");
+        free(properties.scent); free(properties.color); return false;
+    }
 
     for (unsigned int i = 0; i < scent_dimension; i++)
         properties.scent[i] = src.scent[i];
     for (unsigned int i = 0; i < color_dimension; i++)
         properties.color[i] = src.color[i];
-    properties.automatically_collected = src.automatically_collected;
+    for (unsigned int i = 0; i < item_type_count; i++)
+        properties.required_item_counts[i] = src.required_item_counts[i];
+    properties.blocks_movement = src.blocks_movement;
     return true;
 }
 
@@ -131,7 +144,8 @@ inline bool init(
  */
 template<typename Stream>
 inline bool read(item_properties& properties, Stream& in,
-        unsigned int scent_dimension, unsigned int color_dimension)
+        unsigned int scent_dimension, unsigned int color_dimension,
+        unsigned int item_type_count)
 {
     if (!read(properties.name, in)) return false;
 
@@ -145,10 +159,16 @@ inline bool read(item_properties& properties, Stream& in,
         fprintf(stderr, "read ERROR: Insufficient memory for item_properties.scent.\n");
         free(properties.name); free(properties.scent); return false;
     }
+    properties.required_item_counts = (unsigned int*) malloc(sizeof(unsigned int) * item_type_count);
+    if (properties.required_item_counts == NULL) {
+        fprintf(stderr, "read ERROR: Insufficient memory for item_properties.required_item_counts.\n");
+        free(properties.scent); free(properties.color); return false;
+    }
 
     if (!read(properties.scent, in, scent_dimension)
      || !read(properties.color, in, color_dimension)
-     || !read(properties.automatically_collected, in)) {
+     || !read(properties.required_item_counts, in, item_type_count)
+     || !read(properties.blocks_movement, in)) {
         free(properties.name); free(properties.scent);
         free(properties.color); return false;
     }
@@ -160,12 +180,14 @@ inline bool read(item_properties& properties, Stream& in,
  */
 template<typename Stream>
 inline bool write(const item_properties& properties, Stream& out,
-        unsigned int scent_dimension, unsigned int color_dimension)
+        unsigned int scent_dimension, unsigned int color_dimension,
+        unsigned int item_type_count)
 {
     return write(properties.name, out)
         && write(properties.scent, out, scent_dimension)
         && write(properties.color, out, color_dimension)
-        && write(properties.automatically_collected, out);
+        && write(properties.required_item_counts, out, item_type_count)
+        && write(properties.blocks_movement, out);
 }
 
 /**
@@ -177,6 +199,8 @@ struct simulator_config {
     unsigned int scent_dimension;
     unsigned int color_dimension;
     unsigned int vision_range;
+    bool allowed_movement_directions[(size_t) direction::COUNT];
+    bool allowed_rotations[(size_t) direction::COUNT];
 
     /* world properties */
     unsigned int patch_size;
@@ -208,6 +232,10 @@ struct simulator_config {
     ~simulator_config() { free_helper(); }
 
     static inline void swap(simulator_config& first, simulator_config& second) {
+        for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
+            core::swap(first.allowed_movement_directions[i], second.allowed_movement_directions[i]);
+        for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
+            core::swap(first.allowed_rotations[i], second.allowed_rotations[i]);
         core::swap(first.max_steps_per_movement, second.max_steps_per_movement);
         core::swap(first.scent_dimension, second.scent_dimension);
         core::swap(first.color_dimension, second.color_dimension);
@@ -252,6 +280,10 @@ private:
             core::free(agent_color); core::free(intensity_fn_args); return false;
         }
 
+        for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
+            allowed_movement_directions[i] = src.allowed_movement_directions[i];
+        for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
+            allowed_rotations[i] = src.allowed_rotations[i];
         for (unsigned int i = 0; i < src.color_dimension; i++)
             agent_color[i] = src.agent_color[i];
         for (unsigned int i = 0; i < src.intensity_fn_arg_count; i++)
@@ -260,7 +292,7 @@ private:
             interaction_fn_args[i] = src.interaction_fn_args[i];
 
         for (unsigned int i = 0; i < src.item_types.length; i++) {
-            if (!init(item_types[i], src.item_types[i], src.scent_dimension, src.color_dimension)) {
+            if (!init(item_types[i], src.item_types[i], src.scent_dimension, src.color_dimension, src.item_types.length)) {
                 for (unsigned int j = 0; j < i; j++) core::free(item_types[i]);
                 core::free(intensity_fn_args); core::free(interaction_fn_args);
                 core::free(agent_color); return false;
@@ -333,10 +365,19 @@ bool read(simulator_config& config, Stream& in) {
      || !read(config.scent_dimension, in)
      || !read(config.color_dimension, in)
      || !read(config.vision_range, in)
+     || !read(config.allowed_movement_directions, in)
+     || !read(config.allowed_rotations, in)
      || !read(config.patch_size, in)
      || !read(config.gibbs_iterations, in)
-     || !read(config.item_types, in, config.scent_dimension, config.color_dimension))
+     || !read(config.item_types.length, in))
         return false;
+
+    config.item_types.data = (item_properties*) malloc(max((size_t) 1, sizeof(item_properties) * config.item_types.length));
+    if (config.item_types.data == NULL
+     || !read(config.item_types.data, in, config.item_types.length, config.scent_dimension, config.color_dimension, config.item_types.length)) {
+        fprintf(stderr, "read ERROR: Insufficient memory for simulator_config.item_types.data.\n");
+        return false;
+    }
 
     config.agent_color = (float*) malloc(sizeof(float) * config.color_dimension);
     if (config.agent_color == NULL) {
@@ -397,9 +438,12 @@ bool write(const simulator_config& config, Stream& out) {
         && write(config.scent_dimension, out)
         && write(config.color_dimension, out)
         && write(config.vision_range, out)
+        && write(config.allowed_movement_directions, out)
+        && write(config.allowed_rotations, out)
         && write(config.patch_size, out)
         && write(config.gibbs_iterations, out)
-        && write(config.item_types, out, config.scent_dimension, config.color_dimension)
+        && write(config.item_types.length, out)
+        && write(config.item_types.data, out, config.item_types.length, config.scent_dimension, config.color_dimension, config.item_types.length)
         && write(config.agent_color, out, config.color_dimension)
         && write(config.collision_policy, out)
         && write(config.decay_param, out)
@@ -516,6 +560,9 @@ struct agent_state {
     /* Current position of the agent. */
     position current_position;
 
+    /* Current direction of the agent. */
+    direction current_direction;
+
     /* Scent at the current position. */
     float* current_scent;
 
@@ -537,6 +584,11 @@ struct agent_state {
      */
     position requested_position;
 
+    /**
+     * The direction which the agent requested to rotate to this turn.
+     */
+    direction requested_direction;
+
     /** Number of items of each type in the agent's storage. */
     unsigned int* collected_items;
 
@@ -550,6 +602,20 @@ struct agent_state {
             position relative_position, unsigned int vision_range,
             const float* color, unsigned int color_dimension)
     {
+        switch (current_direction) {
+        case direction::UP: break;
+        case direction::DOWN:
+            relative_position.x *= -1;
+            relative_position.y *= -1;
+            break;
+        case direction::LEFT:
+            core::swap(relative_position.x, relative_position.y);
+            relative_position.y *= -1; break;
+        case direction::RIGHT:
+            core::swap(relative_position.x, relative_position.y);
+            relative_position.x *= -1; break;
+        case direction::COUNT: break;
+        }
         unsigned int x = (unsigned int) (relative_position.x + vision_range);
         unsigned int y = (unsigned int) (relative_position.y + vision_range);
         unsigned int offset = (x*(2*vision_range + 1) + y) * color_dimension;
@@ -618,7 +684,7 @@ struct agent_state {
 
 /**
  * Initializes an agent's state in the provided world.
- * 
+ *
  * \param   agent_state     Agent state to initialize.
  * \param   world           Map of the world in which the agent is initialized.
  * \param   scent_model     The scent diffusion model.
@@ -636,7 +702,9 @@ inline bool init(
         uint64_t& current_time)
 {
     agent.current_position = {0, 0};
+    agent.current_direction = direction::UP;
     agent.requested_position = {0, 0};
+    agent.requested_direction = direction::UP;
     agent.current_scent = (float*) malloc(sizeof(float) * config.scent_dimension);
     if (agent.current_scent == NULL) {
         fprintf(stderr, "init ERROR: Insufficient memory for agent_state.current_scent.\n");
@@ -719,10 +787,12 @@ inline bool read(agent_state& agent, Stream& in, const simulator_config& config)
     new (&agent.lock) std::mutex();
 
     if (!read(agent.current_position, in)
+     || !read(agent.current_direction, in)
      || !read(agent.current_scent, in, config.scent_dimension)
      || !read(agent.current_vision, in, (2*config.vision_range + 1) * (2*config.vision_range + 1) * config.color_dimension)
      || !read(agent.agent_acted, in)
      || !read(agent.requested_position, in)
+     || !read(agent.requested_direction, in)
      || !read(agent.collected_items, in, (unsigned int) config.item_types.length)) {
          free(agent.current_scent); free(agent.current_vision);
          free(agent.collected_items); return false;
@@ -737,10 +807,12 @@ template<typename Stream>
 inline bool write(const agent_state& agent, Stream& out, const simulator_config& config)
 {
     return write(agent.current_position, out)
+        && write(agent.current_direction, out)
         && write(agent.current_scent, out, config.scent_dimension)
         && write(agent.current_vision, out, (2*config.vision_range + 1) * (2*config.vision_range + 1) * config.color_dimension)
         && write(agent.agent_acted, out)
         && write(agent.requested_position, out)
+        && write(agent.requested_direction, out)
         && write(agent.collected_items, out, (unsigned int) config.item_types.length);
 }
 
@@ -961,19 +1033,22 @@ public:
 
     /** 
      * Moves an agent.
-     * 
+     *
      * Note that the agent is only actually moved when the simulation time step 
      * advances, and only if the agent has not already acted for the current 
      * time step.
-     * 
+     *
      * \param   agent_id  ID of the agent to move.
-     * \param   direction Direction along which to move.
+     * \param   dir       Direction along which to move, *relative* to the
+     *                    agent's current direction.
      * \param   num_steps Number of steps to take in the specified direction.
      * \returns `true` if the move was successful, and `false` otherwise.
      */
     inline bool move(uint64_t agent_id, direction dir, unsigned int num_steps)
     {
-        if (num_steps > config.max_steps_per_movement) return false;
+        if (num_steps > config.max_steps_per_movement
+         || !config.allowed_movement_directions[(size_t) dir])
+            return false;
 
         agent_states_lock.lock();
         agent_state& agent = *agents[(size_t) agent_id];
@@ -986,16 +1061,97 @@ public:
         agent.agent_acted = true;
 
         agent.requested_position = agent.current_position;
+        agent.requested_direction = agent.current_direction;
+        position diff(0, 0);
         switch (dir) {
-            case direction::UP   : agent.requested_position.y += num_steps; break;
-            case direction::DOWN : agent.requested_position.y -= num_steps; break;
-            case direction::LEFT : agent.requested_position.x -= num_steps; break;
-            case direction::RIGHT: agent.requested_position.x += num_steps; break;
+        case direction::UP   : diff.x = 0; diff.y = num_steps; break;
+        case direction::DOWN : diff.x = 0; diff.y = -num_steps; break;
+        case direction::LEFT : diff.x = -num_steps; diff.y = 0; break;
+        case direction::RIGHT: diff.x = num_steps; diff.y = 0; break;
+        case direction::COUNT: break;
+        }
+
+        switch (agent.current_direction) {
+        case direction::UP: break;
+        case direction::DOWN: diff.x *= -1; diff.y *= -1; break;
+        case direction::LEFT:
+            core::swap(diff.x, diff.y);
+            diff.x *= -1; break;
+        case direction::RIGHT:
+            core::swap(diff.x, diff.y);
+            diff.y *= -1; break;
+        case direction::COUNT: break;
+        }
+
+        agent.requested_position += diff;
+        agent.lock.unlock();
+
+        /* add the agent's move to the list of requested moves */
+        request_position(agent);
+
+        agent_states_lock.lock();
+        if (++acted_agent_count == agents.length)
+            step(); /* advance the simulation by one time step */
+        agent_states_lock.unlock();
+        return true;
+    }
+
+    /** 
+     * Turns an agent.
+     *
+     * Note that the agent is only actually turned when the simulation time
+     * step advances, and only if the agent has not already acted for the
+     * current time step.
+     *
+     * \param   agent_id ID of the agent to move.
+     * \param   dir      Direction to turn, *relative* to the agent's current
+     *                   direction.
+     * \returns `true` if the turn was successful, and `false` otherwise.
+     */
+    inline bool turn(uint64_t agent_id, direction dir)
+    {
+        if (!config.allowed_rotations[(size_t) dir])
+            return false;
+
+        agent_states_lock.lock();
+        agent_state& agent = *agents[(size_t) agent_id];
+        agent_states_lock.unlock();
+
+        agent.lock.lock();
+        if (agent.agent_acted) {
+            agent.lock.unlock(); return false;
+        }
+        agent.agent_acted = true;
+
+        agent.requested_position = agent.current_position;
+        agent.requested_direction = agent.current_direction;
+
+        switch (dir) {
+        case direction::UP: break;
+        case direction::DOWN:
+            if (agent.current_direction == direction::UP) agent.requested_direction = direction::DOWN;
+            else if (agent.current_direction == direction::DOWN) agent.requested_direction = direction::UP;
+            else if (agent.current_direction == direction::LEFT) agent.requested_direction = direction::RIGHT;
+            else if (agent.current_direction == direction::RIGHT) agent.requested_direction = direction::LEFT;
+            break;
+        case direction::LEFT:
+            if (agent.current_direction == direction::UP) agent.requested_direction = direction::LEFT;
+            else if (agent.current_direction == direction::DOWN) agent.requested_direction = direction::RIGHT;
+            else if (agent.current_direction == direction::LEFT) agent.requested_direction = direction::DOWN;
+            else if (agent.current_direction == direction::RIGHT) agent.requested_direction = direction::UP;
+            break;
+        case direction::RIGHT:
+            if (agent.current_direction == direction::UP) agent.requested_direction = direction::RIGHT;
+            else if (agent.current_direction == direction::DOWN) agent.requested_direction = direction::LEFT;
+            else if (agent.current_direction == direction::LEFT) agent.requested_direction = direction::UP;
+            else if (agent.current_direction == direction::RIGHT) agent.requested_direction = direction::DOWN;
+            break;
+        case direction::COUNT: break;
         }
         agent.lock.unlock();
 
         /* add the agent's move to the list of requested moves */
-        request_new_position(agent);
+        request_position(agent);
 
         agent_states_lock.lock();
         if (++acted_agent_count == agents.length)
@@ -1009,8 +1165,8 @@ public:
      * in `states`, which is parallel to the specified `agent_ids` array, and
      * has length `agent_count`.
      *
-     * \param states The output array of agent_state pointers.
-     * \param agent_ids The array of agent IDs whose states to retrieve.
+     * \param      states The output array of agent_state pointers.
+     * \param   agent_ids The array of agent IDs whose states to retrieve.
      * \param agent_count The length of `states` and `agent_ids`.
      */
     inline void get_agent_states(agent_state** states,
@@ -1172,8 +1328,25 @@ private:
         if (config.collision_policy == movement_conflict_policy::RANDOM) {
             for (auto entry : requested_moves) {
                 array<agent_state*>& conflicts = entry.value;
+                if (conflicts[0]->current_position == entry.key) continue; /* give preference to agents that don't move */
                 unsigned int result = sample_uniform((unsigned int) conflicts.length);
                 core::swap(conflicts[0], conflicts[result]);
+            }
+        }
+
+        /* check for items that block movement */
+        array<position> occupied_positions(16);
+        for (auto entry : requested_moves) {
+            patch_type* neighborhood[4]; position patch_positions[4];
+            unsigned int index = world.get_fixed_neighborhood(entry.key, neighborhood, patch_positions);
+            patch_type& current_patch = *neighborhood[index];
+            for (item& item : current_patch.items) {
+                if (item.location == entry.key && item.deletion_time == 0 && config.item_types[item.item_type].blocks_movement) {
+                    /* there is an item at our new position that blocks movement */
+                    array<agent_state*>& conflicts = entry.value;
+                    occupied_positions.add(conflicts[0]->current_position);
+                    conflicts[0] = NULL; /* prevent any agent from moving here */
+                }
             }
         }
 
@@ -1185,17 +1358,17 @@ private:
                 for (unsigned int i = 1; i < conflicts.length; i++)
                     occupied_positions.add(conflicts[i]->current_position);
             }
+        }
 
-            bool contains;
-            while (occupied_positions.length > 0) {
-                array<agent_state*>& conflicts = requested_moves.get(occupied_positions.pop(), contains);
-                if (!contains || conflicts[0] == NULL) {
-                    continue;
-                } else if (contains) {
-                    for (unsigned int i = 0; i < conflicts.length; i++)
-                        occupied_positions.add(conflicts[i]->current_position);
-                    conflicts[0] = NULL; /* prevent any agent from moving here */
-                }
+        bool contains;
+        while (occupied_positions.length > 0) {
+            array<agent_state*>& conflicts = requested_moves.get(occupied_positions.pop(), contains);
+            if (!contains || conflicts[0] == NULL) {
+                continue;
+            } else if (contains) {
+                for (unsigned int i = 0; i < conflicts.length; i++)
+                    occupied_positions.add(conflicts[i]->current_position);
+                conflicts[0] = NULL; /* prevent any agent from moving here */
             }
         }
 
@@ -1203,6 +1376,8 @@ private:
         acted_agent_count = 0;
         for (agent_state* agent : agents) {
             if (!agent->agent_acted) continue;
+
+            agent->current_direction = agent->requested_direction;
 
             /* check if this agent moved, in accordance with the collision policy */
             position old_patch_position;
@@ -1219,7 +1394,14 @@ private:
                 for (item& item : current_patch.items) {
                     if (item.location == agent->current_position && item.deletion_time == 0) {
                         /* there is an item at our new position */
-                        if (config.item_types[item.item_type].automatically_collected) {
+                        bool collect = true;
+                        for (unsigned int i = 0; i < config.item_types.length; i++) {
+                            if (agent->collected_items[i] < config.item_types[item.item_type].required_item_counts[i]) {
+                                collect = false; break;
+                            }
+                        }
+
+                        if (collect) {
                             /* collect this item */
                             item.deletion_time = time;
                             agent->collected_items[item.item_type]++;
@@ -1271,8 +1453,9 @@ private:
         }
     }
 
-    inline void request_new_position(agent_state& agent)
+    inline void request_position(agent_state& agent)
     {
+        /* check for collisions with other agents */
         if (config.collision_policy == movement_conflict_policy::NO_COLLISIONS)
             return;
 
@@ -1286,6 +1469,8 @@ private:
             requested_moves.table.size++;
         }
         agents.add(&agent);
+        if (agent.current_position == agent.requested_position)
+            core::swap(agents[0], agents.last());
         requested_move_lock.unlock();
     }
 

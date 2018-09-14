@@ -124,7 +124,7 @@ inline bool init(py_simulator_data& data, const py_simulator_data& src)
 struct py_client_data {
     /* storing the server responses */
     union response {
-        bool move_result;
+        bool action_result;
         PyObject* agent_states;
         hash_map<position, patch_state>* map;
     } response;
@@ -247,8 +247,11 @@ bool save(const simulator<py_simulator_data>* sim, uint64_t time)
 static inline bool build_py_agent(
         const agent_state& agent,
         const simulator_config& config,
-        PyObject*& py_position, PyObject*& py_scent,
-        PyObject*& py_vision, PyObject*& py_items)
+        PyObject*& py_position,
+        PyObject*& py_direction,
+        PyObject*& py_scent,
+        PyObject*& py_vision,
+        PyObject*& py_items)
 {
     /* first copy all arrays in 'agent' */
     int64_t* positions = (int64_t*) malloc(sizeof(int64_t) * 2);
@@ -290,6 +293,7 @@ static inline bool build_py_agent(
             (npy_intp) config.color_dimension};
     npy_intp items_dim[] = {(npy_intp) config.item_types.length};
     py_position = PyArray_SimpleNewFromData(1, pos_dim, NPY_INT64, positions);
+	py_direction = PyLong_FromSize_t((size_t) agent.current_direction);
     py_scent = PyArray_SimpleNewFromData(1, scent_dim, NPY_FLOAT, scent);
     py_vision = PyArray_SimpleNewFromData(3, vision_dim, NPY_FLOAT, vision);
     py_items = PyArray_SimpleNewFromData(1, items_dim, NPY_UINT64, items);
@@ -312,11 +316,11 @@ static PyObject* build_py_agent(
         const simulator_config& config,
         uint64_t agent_id)
 {
-    PyObject* py_position; PyObject* py_scent;
-    PyObject* py_vision; PyObject* py_items;
-    if (!build_py_agent(agent, config, py_position, py_scent, py_vision, py_items))
+    PyObject* py_position; PyObject* py_direction;
+    PyObject* py_scent; PyObject* py_vision; PyObject* py_items;
+    if (!build_py_agent(agent, config, py_position, py_direction, py_scent, py_vision, py_items))
         return NULL;
-    return Py_BuildValue("(OOOOO)", py_position, py_scent, py_vision, py_items, PyLong_FromUnsignedLongLong(agent_id));
+    return Py_BuildValue("(OOOOOO)", py_position, py_direction, py_scent, py_vision, py_items, PyLong_FromUnsignedLongLong(agent_id));
 }
 
 /**
@@ -333,11 +337,11 @@ static PyObject* build_py_agent(
         const agent_state& agent,
         const simulator_config& config)
 {
-    PyObject* py_position; PyObject* py_scent;
-    PyObject* py_vision; PyObject* py_items;
-    if (!build_py_agent(agent, config, py_position, py_scent, py_vision, py_items))
+    PyObject* py_position; PyObject* py_direction;
+    PyObject* py_scent; PyObject* py_vision; PyObject* py_items;
+    if (!build_py_agent(agent, config, py_position, py_direction, py_scent, py_vision, py_items))
         return NULL;
-    return Py_BuildValue("(OOOO)", py_position, py_scent, py_vision, py_items);
+    return Py_BuildValue("(OOOOO)", py_position, py_direction, py_scent, py_vision, py_items);
 }
 
 /**
@@ -422,7 +426,7 @@ void on_add_agent(client<py_client_data>& c,
 
 /**
  * The callback invoked when the client receives a move response from the
- * server. This function copies the result into `c.data.response.move_result`
+ * server. This function copies the result into `c.data.response.action_result`
  * and wakes up the Python thread (which should be waiting in the
  * `simulator_move` function) so that it can return the response back to
  * Python.
@@ -435,7 +439,26 @@ void on_add_agent(client<py_client_data>& c,
 void on_move(client<py_client_data>& c, uint64_t agent_id, bool request_success) {
     std::unique_lock<std::mutex> lck(c.data.lock);
     c.data.waiting_for_server = false;
-    c.data.response.move_result = request_success;
+    c.data.response.action_result = request_success;
+    c.data.cv.notify_one();
+}
+
+/**
+ * The callback invoked when the client receives a turn response from the
+ * server. This function copies the result into `c.data.response.action_result`
+ * and wakes up the Python thread (which should be waiting in the
+ * `simulator_turn` function) so that it can return the response back to
+ * Python.
+ *
+ * \param   c               The client that received the response.
+ * \param   agent_id        The ID of the agent that requested to turn.
+ * \param   request_success Indicates whether the turn request was successfully
+ *                          enqueued by the simulator server.
+ */
+void on_turn(client<py_client_data>& c, uint64_t agent_id, bool request_success) {
+    std::unique_lock<std::mutex> lck(c.data.lock);
+    c.data.waiting_for_server = false;
+    c.data.response.action_result = request_success;
     c.data.cv.notify_one();
 }
 
@@ -600,6 +623,8 @@ static inline void import_errors() {
 static PyObject* simulator_new(PyObject *self, PyObject *args)
 {
     simulator_config config;
+    PyObject* py_allowed_movement_directions;
+    PyObject* py_allowed_turn_directions;
     PyObject* py_items;
     PyObject* py_agent_color;
     unsigned int seed;
@@ -612,7 +637,8 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
     unsigned int save_frequency;
     char* save_filepath;
     if (!PyArg_ParseTuple(
-      args, "IIIIIIIOOIffIIOIOOIz", &seed, &config.max_steps_per_movement, &config.scent_dimension,
+      args, "IIOOIIIIIOOIffIIOIOOIz", &seed, &config.max_steps_per_movement,
+      &py_allowed_movement_directions, &py_allowed_turn_directions, &config.scent_dimension,
       &config.color_dimension, &config.vision_range, &config.patch_size, &config.gibbs_iterations,
       &py_items, &py_agent_color, &collision_policy, &config.decay_param, &config.diffusion_param,
       &config.deleted_item_lifetime,
@@ -625,6 +651,15 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
     if (!PyCallable_Check(py_callback)) {
         PyErr_SetString(PyExc_TypeError, "Callback must be callable.\n");
         return NULL;
+    } else if (!PyList_Check(py_items)) {
+        PyErr_SetString(PyExc_TypeError, "'items' must be a list.\n");
+        return NULL;
+    } else if (!PyList_Check(py_allowed_movement_directions)) {
+        PyErr_SetString(PyExc_TypeError, "'allowed_movement_directions' must be a list.\n");
+        return NULL;
+    } else if (!PyList_Check(py_allowed_turn_directions)) {
+        PyErr_SetString(PyExc_TypeError, "'allowed_turn_directions' must be a list.\n");
+        return NULL;
     }
 
     PyObject *py_items_iter = PyObject_GetIter(py_items);
@@ -632,14 +667,16 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
         PyErr_SetString(PyExc_ValueError, "Invalid argument types in the call to 'simulator_c.new'.");
         return NULL;
     }
+    Py_ssize_t item_type_count = PyList_Size(py_items);
     while (true) {
         PyObject *next_py_item = PyIter_Next(py_items_iter);
         if (!next_py_item) break;
         char* name;
         PyObject* py_scent;
         PyObject* py_color;
-        PyObject* automatically_collected;
-        if (!PyArg_ParseTuple(next_py_item, "sOOO", &name, &py_scent, &py_color, &automatically_collected)) {
+        PyObject* py_required_item_counts;
+        PyObject* blocks_movement;
+        if (!PyArg_ParseTuple(next_py_item, "sOOOO", &name, &py_scent, &py_color, &py_required_item_counts, &blocks_movement)) {
             fprintf(stderr, "Invalid argument types for item property in call to 'simulator_c.new'.\n");
             return NULL;
         }
@@ -647,9 +684,21 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
         init(new_item.name, name);
         new_item.scent = PyArg_ParseFloatList(py_scent).key;
         new_item.color = PyArg_ParseFloatList(py_color).key;
-        new_item.automatically_collected = (automatically_collected == Py_True);
+        new_item.required_item_counts = (unsigned int*) malloc(sizeof(unsigned int) * item_type_count);
+        for (Py_ssize_t i = 0; i < item_type_count; i++)
+            new_item.required_item_counts[i] = PyLong_AsUnsignedLongLong(PyList_GetItem(py_required_item_counts, i));
+        new_item.blocks_movement = (blocks_movement == Py_True);
         config.item_types.length += 1;
     }
+
+    Py_ssize_t allowed_movement_direction_count = PyList_Size(py_allowed_movement_directions);
+    Py_ssize_t allowed_turn_direction_count = PyList_Size(py_allowed_turn_directions);
+    memset(config.allowed_movement_directions, 0, sizeof(bool) * (size_t) direction::COUNT);
+    memset(config.allowed_rotations, 0, sizeof(bool) * (size_t) direction::COUNT);
+    for (Py_ssize_t i = 0; i < allowed_movement_direction_count; i++)
+        config.allowed_movement_directions[PyLong_AsUnsignedLongLong(PyList_GetItem(py_allowed_movement_directions, i))] = true;
+    for (Py_ssize_t i = 0; i < allowed_turn_direction_count; i++)
+        config.allowed_rotations[PyLong_AsUnsignedLongLong(PyList_GetItem(py_allowed_turn_directions, i))] = true;
 
     config.agent_color = PyArg_ParseFloatList(py_agent_color).key;
     config.collision_policy = (movement_conflict_policy) collision_policy;
@@ -1043,8 +1092,8 @@ static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
  *                    server and waits for its response.
  *                  - Agent ID.
  *                  - Move direction encoded as an integer:
- *                      UP = 0,
- *                      DOWN = 1,
+ *                      FORWARD = 0,
+ *                      BACKWARD = 1,
  *                      LEFT = 2,
  *                      RIGHT = 3.
  *                  - Number of steps.
@@ -1090,7 +1139,71 @@ static PyObject* simulator_move(PyObject *self, PyObject *args) {
         /* wait for response from server */
         wait_for_server(*client_handle);
 
-        PyObject* result = (client_handle->data.response.move_result ? Py_True : Py_False);
+        PyObject* result = (client_handle->data.response.action_result ? Py_True : Py_False);
+        Py_INCREF(result);
+        return result;
+    }
+}
+
+/**
+ * Attempt to turn the agent in the simulation environment. If the agent
+ * already has an action queued for this turn, this attempt will fail.
+ *
+ * \param   self    Pointer to the Python object calling this method.
+ * \param   args    Arguments:
+ *                  - Handle to the native simulator object as a PyLong.
+ *                  - Handle to the native client object as a PyLong. If this
+ *                    is None, `turn` is directly invoked on the simulator
+ *                    object. Otherwise, the client sends a turn message to the
+ *                    server and waits for its response.
+ *                  - Agent ID.
+ *                  - Turn direction encoded as an integer:
+ *                      NO_CHANGE = 0,
+ *                      REVERSE = 1,
+ *                      LEFT = 2,
+ *                      RIGHT = 3.
+ * \returns `True` if the turn command is successfully queued; `False`
+ *          otherwise.
+ */
+static PyObject* simulator_turn(PyObject *self, PyObject *args) {
+    PyObject* py_sim_handle;
+    PyObject* py_client_handle;
+    unsigned long long agent_id;
+    unsigned int dir;
+    if (!PyArg_ParseTuple(args, "OOKI", &py_sim_handle, &py_client_handle, &agent_id, &dir))
+        return NULL;
+    if (py_client_handle == Py_None) {
+        /* the simulation is local, so call turn directly */
+        simulator<py_simulator_data>* sim_handle =
+                (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
+
+        /* release the global interpreter lock */
+        PyThreadState* python_thread = PyEval_SaveThread();
+        bool result = sim_handle->turn(agent_id, (direction) dir);
+
+        /* re-acquire the global interpreter lock and return */
+        PyEval_RestoreThread(python_thread);
+        PyObject* py_result = (result ? Py_True : Py_False);
+        Py_INCREF(py_result); return py_result;
+    } else {
+        /* this is a client, so send a turn message to the server */
+        client<py_client_data>* client_handle =
+                (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
+        if (!client_handle->client_running) {
+            PyErr_SetString(mpi_error, "Connection to the server was lost.");
+            return NULL;
+        }
+
+        client_handle->data.waiting_for_server = true;
+        if (!send_turn(*client_handle, agent_id, (direction) dir)) {
+            PyErr_SetString(PyExc_RuntimeError, "Unable to send turn request.");
+            return NULL;
+        }
+
+        /* wait for response from server */
+        wait_for_server(*client_handle);
+
+        PyObject* result = (client_handle->data.response.action_result ? Py_True : Py_False);
         Py_INCREF(result);
         return result;
     }
@@ -1240,6 +1353,7 @@ static PyMethodDef SimulatorMethods[] = {
     {"stop_client",  nel::simulator_stop_client, METH_VARARGS, "Stops the simulator client."},
     {"add_agent",  nel::simulator_add_agent, METH_VARARGS, "Adds an agent to the simulator and returns its ID."},
     {"move",  nel::simulator_move, METH_VARARGS, "Attempts to move the agent in the simulation environment."},
+    {"turn",  nel::simulator_turn, METH_VARARGS, "Attempts to turn the agent in the simulation environment."},
     {"map",  nel::simulator_map, METH_VARARGS, "Returns a list of patches within a given bounding box."},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };

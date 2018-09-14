@@ -41,7 +41,7 @@ FILE* out = stderr;
 async_server server;
 
 //#define MULTITHREADED
-//#define USE_MPI
+#define USE_MPI
 //#define TEST_SERIALIZATION
 //#define TEST_SERVER_CONNECTION_LOSS
 //#define TEST_CLIENT_CONNECTION_LOSS
@@ -257,7 +257,7 @@ struct client_data {
 	uint64_t agent_id;
 	const hash_map<position, patch_state>* map;
 
-	bool move_result, waiting_for_step;
+	bool action_result, waiting_for_step;
 	position pos;
 };
 
@@ -274,7 +274,15 @@ void on_move(client<client_data>& c, uint64_t agent_id, bool request_success) {
 	unsigned int id = c.data.index;
 	std::unique_lock<std::mutex> lck(locks[id]);
 	waiting_for_server[id] = false;
-	c.data.move_result = request_success;
+	c.data.action_result = request_success;
+	conditions[id].notify_one();
+}
+
+void on_turn(client<client_data>& c, uint64_t agent_id, bool request_success) {
+	unsigned int id = c.data.index;
+	std::unique_lock<std::mutex> lck(locks[id]);
+	waiting_for_server[id] = false;
+	c.data.action_result = request_success;
 	conditions[id].notify_one();
 }
 
@@ -338,7 +346,7 @@ inline bool mpi_try_move(
 	wait_for_server(conditions[i], locks[i], waiting_for_server[i], c.client_running);
 	if (!c.client_running) return true;
 
-	if (!c.data.move_result) {
+	if (!c.data.action_result) {
 		print_lock.lock();
 		print("ERROR: Unable to move agent ", out);
 		print(i, out); print(" from ", out);
@@ -468,6 +476,10 @@ int main(int argc, const char** argv)
 	config.scent_dimension = 3;
 	config.color_dimension = 3;
 	config.vision_range = 10;
+	for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
+		config.allowed_movement_directions[i] = true;
+	for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
+		config.allowed_rotations[i] = true;
 	config.patch_size = 32;
 	config.gibbs_iterations = 10;
 	config.agent_color = (float*) calloc(config.color_dimension, sizeof(float));
@@ -482,21 +494,26 @@ int main(int argc, const char** argv)
 	config.item_types[0].name = "banana";
 	config.item_types[0].scent = (float*) calloc(config.scent_dimension, sizeof(float));
 	config.item_types[0].color = (float*) calloc(config.color_dimension, sizeof(float));
+	config.item_types[0].required_item_counts = (unsigned int*) calloc(config.color_dimension, sizeof(unsigned int));
 	config.item_types[0].scent[1] = 1.0f;
 	config.item_types[0].color[1] = 1.0f;
-	config.item_types[0].automatically_collected = false;
+	config.item_types[0].required_item_counts[0] = 1;
+	config.item_types[0].blocks_movement = false;
 	config.item_types[1].name = "onion";
 	config.item_types[1].scent = (float*) calloc(config.scent_dimension, sizeof(float));
 	config.item_types[1].color = (float*) calloc(config.color_dimension, sizeof(float));
+	config.item_types[1].required_item_counts = (unsigned int*) calloc(config.color_dimension, sizeof(unsigned int));
 	config.item_types[1].scent[0] = 1.0f;
 	config.item_types[1].color[0] = 1.0f;
-	config.item_types[1].automatically_collected = false;
+	config.item_types[1].required_item_counts[1] = 1;
+	config.item_types[1].blocks_movement = false;
 	config.item_types[2].name = "jellybean";
 	config.item_types[2].scent = (float*) calloc(config.scent_dimension, sizeof(float));
 	config.item_types[2].color = (float*) calloc(config.color_dimension, sizeof(float));
+	config.item_types[2].required_item_counts = (unsigned int*) calloc(config.color_dimension, sizeof(unsigned int));
 	config.item_types[2].scent[2] = 1.0f;
 	config.item_types[2].color[2] = 1.0f;
-	config.item_types[2].automatically_collected = true;
+	config.item_types[2].blocks_movement = false;
 	config.item_types.length = 3;
 
 	config.intensity_fn_arg_count = (unsigned int) config.item_types.length;

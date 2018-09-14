@@ -16,6 +16,8 @@ struct item {
 
 	/* a time of 0 indicates the item always existed */
 	uint64_t creation_time;
+
+	/* a time of 0 indicates the item was never deleted */
 	uint64_t deletion_time;
 
 	static inline void move(const item& src, item& dst) {

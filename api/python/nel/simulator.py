@@ -3,6 +3,7 @@ from __future__ import absolute_import, division, print_function
 from enum import Enum
 from pydoc import locate
 from nel import simulator_c
+from .direction import Direction
 import os
 
 from .item import IntensityFunction, InteractionFunction
@@ -25,33 +26,42 @@ class MovementConflictPolicy(Enum):
 class SimulatorConfig(object):
   """Represents a configuration for a simulator."""
 
-  def __init__(self, max_steps_per_movement,
-      vision_range, patch_size, gibbs_num_iter, items, agent_color,
-      collision_policy, decay_param, diffusion_param, deleted_item_lifetime,
-      intensity_fn, intensity_fn_args, interaction_fn, interaction_fn_args,
-      seed=0):
+  def __init__(self, max_steps_per_movement, allowed_movement_directions,
+      allowed_turn_directions, vision_range, patch_size, gibbs_num_iter, items,
+      agent_color, collision_policy, decay_param, diffusion_param,
+      deleted_item_lifetime, intensity_fn, intensity_fn_args, interaction_fn,
+      interaction_fn_args, seed=0):
     """Creates a new simulator configuration.
 
     Arguments:
-      max_steps_per_movement: Maximum steps allowed for each agent move action.
-      vision_range:           Vision range of each agent.
-      patch_size:             Size of each patch used by the map generator.
-      gibbs_num_iter:         Number of Gibbs sampling iterations performed for 
-                              sampling each patch of the map.
-      items:                  List of items to include in this world.
-      intensity_fn:           Item intensity function used in the Gibbs sampler 
-                              for map generation. See class `IntensityFunction`
-                              for further details.
-      intensity_fn_args:      Arguments to the item intensity function.
-      interaction_fn:         Item interaction function used in the Gibbs sampler 
-                              for map generation. See class `InteractionFunction`
-                              for further details.
-      interaction_fn_args:    Arguments to the item interaction function.
-      seed:                   The initial seed for the pseudorandom number
-                              generator.
+      max_steps_per_movement:      Maximum steps allowed for each agent move
+                                   action.
+      allowed_movement_directions: A list of RelativeDirections that the each
+                                   agent is permitted to move.
+      allowed_turn_directions:     A list of RelativeDirections that the each
+                                   agent is permitted to turn.
+      vision_range:                Vision range of each agent.
+      patch_size:                  Size of each patch used by the map
+                                   generator.
+      gibbs_num_iter:              Number of Gibbs sampling iterations
+                                   performed for sampling each patch of the
+                                   map.
+      items:                       List of items to include in this world.
+      intensity_fn:                Item intensity function used in the Gibbs
+                                   sampler for map generation. See class
+                                   `IntensityFunction` for further details.
+      intensity_fn_args:           Arguments to the item intensity function.
+      interaction_fn:              Item interaction function used in the Gibbs
+                                   sampler for map generation. See class
+                                   `InteractionFunction` for further details.
+      interaction_fn_args:         Arguments to the item interaction function.
+      seed:                        The initial seed for the pseudorandom number
+                                   generator.
     """
     assert len(items) > 0, 'A non-empty list of items must be provided.'
     self.max_steps_per_movement = max_steps_per_movement
+    self.allowed_movement_directions = allowed_movement_directions
+    self.allowed_turn_directions = allowed_turn_directions
     self.scent_num_dims = len(items[0].scent)
     self.color_num_dims = len(items[0].color)
     self.vision_range = vision_range
@@ -62,6 +72,7 @@ class SimulatorConfig(object):
     assert len(agent_color) == self.color_num_dims, 'Agent color must have the same dimension as item colors'
     assert all([len(i.scent) == self.scent_num_dims for i in items]), 'All items must use the same dimensionality for the scent vector.'
     assert all([len(i.color) == self.color_num_dims for i in items]), 'All items must use the same dimensionality for the color vector.'
+    assert all([len(i.required_item_counts) == len(items) for i in items]), 'The `required_item_counts` field must be the same dimension as `items`'
     self.collision_policy = collision_policy
     self.decay_param = decay_param
     self.diffusion_param = diffusion_param
@@ -184,10 +195,11 @@ class Simulator(object):
       elif server_address != None:
         raise ValueError('"server_address" must be None if "sim_config" is specified.')
       self._handle = simulator_c.new(sim_config.seed,
-        sim_config.max_steps_per_movement, sim_config.scent_num_dims,
+        sim_config.max_steps_per_movement, [d.value for d in sim_config.allowed_movement_directions],
+        [d.value for d in sim_config.allowed_turn_directions], sim_config.scent_num_dims,
         sim_config.color_num_dims, sim_config.vision_range, sim_config.patch_size,
         sim_config.gibbs_num_iter,
-        [(i.name, i.scent, i.color, i.auto_collected) for i in sim_config.items],
+        [(i.name, i.scent, i.color, i.required_item_counts, i.blocks_movement) for i in sim_config.items],
         sim_config.agent_color, sim_config.collision_policy.value,
         sim_config.decay_param, sim_config.diffusion_param,
         sim_config.deleted_item_lifetime,
@@ -206,10 +218,11 @@ class Simulator(object):
       agent_ids = list(self.agents.keys())
       agent_values = list(self.agents.values())
       (self._time, self._client_handle, agent_states) = simulator_c.start_client(
-		  server_address, port, self._step_callback, on_lost_connection_callback, agent_ids)
+          server_address, port, self._step_callback, on_lost_connection_callback, agent_ids)
       for i in range(len(agent_ids)):
+        (position, direction, scent, vision, items) = agent_states[i]
         agent = agent_values[i]
-        (agent._position, agent._scent, agent._vision, agent._items) = agent_states[i]
+        (agent._position, agent._direction, agent._scent, agent._vision, agent._items) = (position, Direction(direction), scent, vision, items)
     else:
       # load local server or simulator from file
       if load_filepath == None:
@@ -217,9 +230,9 @@ class Simulator(object):
       self._load_agents(load_filepath, load_time)
       (self._time, self._handle, agent_states) = simulator_c.load(load_filepath + str(load_time), self._step_callback, save_frequency, save_filepath)
       for agent_state in agent_states:
-        (position, scent, vision, items, id) = agent_state
+        (position, direction, scent, vision, items, id) = agent_state
         agent = self.agents[id]
-        (agent._position, agent._scent, agent._vision, agent._items) = (position, scent, vision, items)
+        (agent._position, agent._direction, agent._scent, agent._vision, agent._items) = (position, Direction(direction), scent, vision, items)
       if is_server:
         self._server_handle = simulator_c.start_server(
           self._handle, port, conn_queue_capacity, num_workers)
@@ -235,17 +248,18 @@ class Simulator(object):
     if self._handle != None:
       simulator_c.delete(self._handle)
 
-  def _add_agent(self, py_agent):
+  def _add_agent(self, agent):
     """Adds a new agent to this simulator and retrieves its state.
 
     Arguments:
-      py_agent: Python agent to be added to this simulator.
+      agent: Python agent to be added to this simulator.
 
     Returns:
       The new agent's ID.
     """
-    (py_agent._position, py_agent._scent, py_agent._vision, py_agent._items, id) = simulator_c.add_agent(self._handle, self._client_handle)
-    self.agents[id] = py_agent
+    (position, direction, scent, vision, items, id) = simulator_c.add_agent(self._handle, self._client_handle)
+    self.agents[id] = agent
+    (agent._position, agent._direction, agent._scent, agent._vision, agent._items) = (position, Direction(direction), scent, vision, items)
     return id
 
   def move(self, agent, direction, num_steps):
@@ -257,7 +271,7 @@ class Simulator(object):
 
     Arguments:
       agent:     The agent intending to move.
-      direction: Direction along which to move.
+      direction: RelativeDirection to move.
       num_steps: Number of steps to take in the specified direction.
 
     Returns:
@@ -265,6 +279,24 @@ class Simulator(object):
     """
     return simulator_c.move(self._handle,
       self._client_handle, agent._id, direction.value, num_steps)
+
+  def turn(self, agent, direction, num_steps):
+    """Turns the specified agent in the simulated environment.
+
+    Note that the agent is not turned until the simulator advances by a 
+    time step and issues a notification about that event. The simulator 
+    only advances the time step once all agents have requested to perform an
+    action.
+
+    Arguments:
+      agent:     The agent intending to move.
+      direction: Direction to turn.
+
+    Returns:
+      `True`, if successful; `False`, otherwise.
+    """
+    return simulator_c.turn(self._handle,
+      self._client_handle, agent._id, direction.value)
 
   def get_agents(self):
     """Retrieves a list of the agents governed by this Simulator. This does not
@@ -283,9 +315,9 @@ class Simulator(object):
     """
     self._time += 1
     for agent_state in agent_states:
-      (position, scent, vision, items, id) = agent_state
+      (position, direction, scent, vision, items, id) = agent_state
       agent = self.agents[id]
-      (agent._position, agent._scent, agent._vision, agent._items) = (position, scent, vision, items)
+      (agent._position, agent._direction, agent._scent, agent._vision, agent._items) = (position, Direction(direction), scent, vision, items)
     if saved:
       self._save_agents()
     self._on_step()
@@ -328,10 +360,3 @@ class Simulator(object):
         agent_type = type(agent)
         line = str(agent_id) + ' ' + agent_type.__module__ + '.' + agent_type.__name__ + '\n'
         fout.write(line.encode('utf-8'))
-
-if __name__ == '__main__':
-  # TODO: Parse command line arguments and construct a simulator config.
-  # TODO: Start server.
-  # TODO: Keep this process alive while the server is running and stop the 
-  #       server when it's killed.
-  print('TODO')
