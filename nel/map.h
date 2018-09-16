@@ -128,7 +128,7 @@ public:
 #if !defined(NDEBUG)
 		rng.seed(0);
 #else
-		rng.seed(milliseconds());
+		rng.seed((uint_fast32_t) milliseconds());
 #endif
 	}
 
@@ -137,7 +137,7 @@ public:
 #if !defined(NDEBUG)
 			0) { }
 #else
-			milliseconds()) { }
+			(uint_fast32_t) milliseconds()) { }
 #endif
 
 	~map() { free_helper(); }
@@ -277,22 +277,16 @@ public:
 		}
 
 		unsigned int half_n = n / 2;
-		unsigned int x, y;
-		for (x = 0; x < half_n; x++) {
-			for (y = 0; y < half_n; y++) {
-				/* bottom-left quadrant */
-				process_neighborhood_function(x, y, bottom_left_neighborhood, bottom_left_neighbor_count);
-			} for (; y < n; y++) {
-				/* top-left quadrant */
-				process_neighborhood_function(x, y, top_left_neighborhood, top_left_neighbor_count);
-			}
-		} for (; x < n; x++) {
-			for (y = 0; y < half_n; y++) {
-				/* bottom-right quadrant */
-				process_neighborhood_function(x, y, bottom_right_neighborhood, bottom_right_neighbor_count);
-			} for (; y < n; y++) {
-				/* top-right quadrant */
-				process_neighborhood_function(x, y, top_right_neighborhood, top_right_neighbor_count);
+		for (unsigned int i = 0; i < n * n; i++) {
+			switch (rng() % 4) {
+			case 0:
+				process_neighborhood_function(rng() % half_n, rng() % half_n, bottom_left_neighborhood, bottom_left_neighbor_count);
+			case 1:
+				process_neighborhood_function(rng() % half_n, (rng() % half_n) + half_n, top_left_neighborhood, top_left_neighbor_count);
+			case 2:
+				process_neighborhood_function((rng() % half_n) + half_n, rng() % half_n, bottom_right_neighborhood, bottom_right_neighbor_count);
+			case 3:
+				process_neighborhood_function((rng() % half_n) + half_n, (rng() % half_n) + half_n, top_right_neighborhood, top_right_neighbor_count);
 			}
 		}
 	}

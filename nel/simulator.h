@@ -176,7 +176,7 @@ inline bool init(
         properties.interaction_fn_arg_counts[i] = src.interaction_fn_arg_counts[i];
         properties.interaction_fn_args[i] = (float*) malloc(max((size_t) 1, sizeof(float) * src.interaction_fn_arg_counts[i]));
         if (properties.interaction_fn_args[i] == NULL) {
-            fprintf(stderr, "init ERROR: Insufficient memory for item_properties.interaction_fn_args.\n");
+            fprintf(stderr, "init ERROR: Insufficient memory for item_properties.interaction_fn_args[%u].\n", i);
             for (unsigned int j = 0; j < i; j++) free(properties.interaction_fn_args[j]);
             free(properties.scent); free(properties.color);
             free(properties.required_item_counts); free(properties.interaction_fns);
@@ -258,8 +258,11 @@ inline bool read(item_properties& properties, Stream& in,
     }
 
     properties.intensity_fn_args = (float*) malloc(max((size_t) 1, sizeof(float) * properties.intensity_fn_arg_count));
-    if (properties.intensity_fn_args == NULL) {
+    if (properties.intensity_fn_args == NULL
+     || !read(properties.intensity_fn_args, in, properties.intensity_fn_arg_count))
+    {
         fprintf(stderr, "read ERROR: Insufficient memory for item_properties.intensity_fn_args.\n");
+        if (properties.intensity_fn_args != NULL) free(properties.intensity_fn_args);
         free(properties.scent); free(properties.color);
         free(properties.required_item_counts); free(properties.interaction_fns);
         free(properties.interaction_fn_args); free(properties.interaction_fn_arg_counts);
@@ -299,7 +302,8 @@ inline bool write(const item_properties& properties, Stream& out,
      || !write(properties.intensity_fn, out)
      || !write(properties.intensity_fn_arg_count, out)
      || !write(properties.interaction_fns, out, item_type_count)
-     || !write(properties.interaction_fn_arg_counts, out, item_type_count))
+     || !write(properties.interaction_fn_arg_counts, out, item_type_count)
+     || !write(properties.intensity_fn_args, out, properties.intensity_fn_arg_count))
         return false;
 
     for (unsigned int i = 0; i < item_type_count; i++)
@@ -380,9 +384,9 @@ private:
             agent_color[i] = src.agent_color[i];
 
         for (unsigned int i = 0; i < src.item_types.length; i++) {
-            if (!init(item_types[i], src.item_types[i], src.scent_dimension, src.color_dimension, src.item_types.length)) {
+            if (!init(item_types[i], src.item_types[i], src.scent_dimension, src.color_dimension, (unsigned int) src.item_types.length)) {
                 for (unsigned int j = 0; j < i; j++)
-                    core::free(item_types[i], src.item_types.length);
+                    core::free(item_types[i], (unsigned int) src.item_types.length);
                 core::free(agent_color); return false;
             }
         }
@@ -403,7 +407,7 @@ private:
 
     inline void free_helper() {
         for (item_properties& properties : item_types)
-            core::free(properties, item_types.length);
+            core::free(properties, (unsigned int) item_types.length);
         if (agent_color != NULL)
             core::free(agent_color);
     }
@@ -452,7 +456,7 @@ bool read(simulator_config& config, Stream& in) {
 
     config.item_types.data = (item_properties*) malloc(max((size_t) 1, sizeof(item_properties) * config.item_types.length));
     if (config.item_types.data == NULL
-     || !read(config.item_types.data, in, config.item_types.length, config.scent_dimension, config.color_dimension, config.item_types.length)) {
+     || !read(config.item_types.data, in, config.item_types.length, config.scent_dimension, config.color_dimension, (unsigned int) config.item_types.length)) {
         fprintf(stderr, "read ERROR: Insufficient memory for simulator_config.item_types.data.\n");
         return false;
     }
@@ -461,7 +465,7 @@ bool read(simulator_config& config, Stream& in) {
     if (config.agent_color == NULL) {
         fprintf(stderr, "read ERROR: Insufficient memory for simulator_config.agent_color.\n");
         for (item_properties& properties : config.item_types)
-            free(properties, config.item_types.length);
+            free(properties, (unsigned int) config.item_types.length);
         free(config.item_types); return false;
     }
 
@@ -471,7 +475,7 @@ bool read(simulator_config& config, Stream& in) {
      || !read(config.diffusion_param, in)
      || !read(config.deleted_item_lifetime, in)) {
         for (item_properties& properties : config.item_types)
-            free(properties, config.item_types.length);
+            free(properties, (unsigned int) config.item_types.length);
         free(config.agent_color); free(config.item_types); return false;
     }
     return true;
@@ -491,7 +495,7 @@ bool write(const simulator_config& config, Stream& out) {
         && write(config.patch_size, out)
         && write(config.gibbs_iterations, out)
         && write(config.item_types.length, out)
-        && write(config.item_types.data, out, config.item_types.length, config.scent_dimension, config.color_dimension, config.item_types.length)
+        && write(config.item_types.data, out, config.item_types.length, config.scent_dimension, config.color_dimension, (unsigned int) config.item_types.length)
         && write(config.agent_color, out, config.color_dimension)
         && write(config.collision_policy, out)
         && write(config.decay_param, out)
@@ -535,7 +539,7 @@ inline bool init(patch_data& data) {
  */
 template<typename Stream>
 bool read(patch_data& data, Stream& in, array<agent_state*>& agents) {
-    size_t agent_count;
+    size_t agent_count = 0;
     if (!read(agent_count, in)
      || !array_init(data.agents, max((size_t) 2, agent_count)))
         return false;
@@ -1117,8 +1121,8 @@ public:
         position diff(0, 0);
         switch (dir) {
         case direction::UP   : diff.x = 0; diff.y = num_steps; break;
-        case direction::DOWN : diff.x = 0; diff.y = -num_steps; break;
-        case direction::LEFT : diff.x = -num_steps; diff.y = 0; break;
+        case direction::DOWN : diff.x = 0; diff.y = -((int64_t) num_steps); break;
+        case direction::LEFT : diff.x = -((int64_t) num_steps); diff.y = 0; break;
         case direction::RIGHT: diff.x = num_steps; diff.y = 0; break;
         case direction::COUNT: break;
         }
@@ -1638,7 +1642,7 @@ bool read(simulator<SimulatorData>& sim, Stream& in, const SimulatorData& data)
         free(sim.data); return false;
     }
 
-    size_t agent_count;
+    size_t agent_count = 0;
     if (!read(agent_count, in)
      || !array_init(sim.agents, ((size_t) 1) << (core::log2(agent_count) + 2))) {
         free(sim.data); free(sim.config); return false;
@@ -1657,7 +1661,7 @@ bool read(simulator<SimulatorData>& sim, Stream& in, const SimulatorData& data)
     }
     sim.agents.length = agent_count;
 
-    if (!read(sim.world, in, sim.config.item_types.data, sim.config.item_types.length, sim.agents)) {
+    if (!read(sim.world, in, sim.config.item_types.data, (unsigned int) sim.config.item_types.length, sim.agents)) {
         for (unsigned int j = 0; j < agent_count; j++) {
             free(*sim.agents[j]); free(sim.agents[j]);
         }

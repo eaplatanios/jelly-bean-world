@@ -135,13 +135,13 @@ struct py_client_data {
     std::condition_variable cv;
 
     PyObject* step_callback;
-	PyObject* lost_connection_callback;
+    PyObject* lost_connection_callback;
 
     static inline void free(py_client_data& data) {
         if (data.step_callback != NULL)
             Py_DECREF(data.step_callback);
-		if (data.lost_connection_callback != NULL)
-			Py_DECREF(data.lost_connection_callback);
+        if (data.lost_connection_callback != NULL)
+            Py_DECREF(data.lost_connection_callback);
         data.lock.~mutex();
         data.cv.~condition_variable();
     }
@@ -149,7 +149,7 @@ struct py_client_data {
 
 inline bool init(py_client_data& data) {
     data.step_callback = NULL;
-	data.lost_connection_callback = NULL;
+    data.lost_connection_callback = NULL;
     new (&data.lock) std::mutex();
     new (&data.cv) std::condition_variable();
     return true;
@@ -293,7 +293,7 @@ static inline bool build_py_agent(
             (npy_intp) config.color_dimension};
     npy_intp items_dim[] = {(npy_intp) config.item_types.length};
     py_position = PyArray_SimpleNewFromData(1, pos_dim, NPY_INT64, positions);
-	py_direction = PyLong_FromSize_t((size_t) agent.current_direction);
+    py_direction = PyLong_FromSize_t((size_t) agent.current_direction);
     py_scent = PyArray_SimpleNewFromData(1, scent_dim, NPY_FLOAT, scent);
     py_vision = PyArray_SimpleNewFromData(3, vision_dim, NPY_FLOAT, vision);
     py_items = PyArray_SimpleNewFromData(1, items_dim, NPY_UINT64, items);
@@ -530,15 +530,15 @@ void on_lost_connection(client<py_client_data>& c) {
     c.client_running = false;
     c.data.cv.notify_one();
 
-	/* invoke python callback */
-	PyGILState_STATE gstate;
-	gstate = PyGILState_Ensure();
-	PyObject* args = Py_BuildValue("()");
-	PyObject* result = PyEval_CallObject(c.data.lost_connection_callback, args);
-	Py_DECREF(args);
+    /* invoke python callback */
+    PyGILState_STATE gstate;
+    gstate = PyGILState_Ensure();
+    PyObject* args = Py_BuildValue("()");
+    PyObject* result = PyEval_CallObject(c.data.lost_connection_callback, args);
+    Py_DECREF(args);
     if (result != NULL)
         Py_DECREF(result);
-	PyGILState_Release(gstate);
+    PyGILState_Release(gstate);
 }
 
 /**
@@ -691,7 +691,7 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
         new_item.color = PyArg_ParseFloatList(py_color).key;
         new_item.required_item_counts = (unsigned int*) malloc(sizeof(unsigned int) * item_type_count);
         for (Py_ssize_t i = 0; i < item_type_count; i++)
-            new_item.required_item_counts[i] = PyLong_AsUnsignedLongLong(PyList_GetItem(py_required_item_counts, i));
+            new_item.required_item_counts[i] = PyLong_AsUnsignedLong(PyList_GetItem(py_required_item_counts, i));
         new_item.blocks_movement = (blocks_movement == Py_True);
 
         pair<float*, Py_ssize_t> intensity_fn_args = PyArg_ParseFloatList(py_intensity_fn_args);
@@ -704,6 +704,8 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
         }
         new_item.intensity_fn_args = intensity_fn_args.key;
         new_item.intensity_fn_arg_count = (unsigned int) intensity_fn_args.value;
+        new_item.interaction_fns = (interaction_function*) malloc(sizeof(interaction_function) * item_type_count);
+        new_item.interaction_fn_args = (float**) malloc(sizeof(float*) * item_type_count);
         new_item.interaction_fn_arg_counts = (unsigned int*) malloc(sizeof(unsigned int) * item_type_count);
         for (Py_ssize_t i = 0; i < item_type_count; i++) {
             PyObject* sublist = PyList_GetItem(py_interaction_fn_args, i);
@@ -713,7 +715,7 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
             new_item.interaction_fns[i] = get_interaction_fn((interaction_fns) py_interaction_fn,
                     interaction_fn_args.key, (unsigned int) interaction_fn_args.value);
             new_item.interaction_fn_args[i] = interaction_fn_args.key;
-            new_item.interaction_fn_arg_counts[i] = (unsigned int) (interaction_fn_args.value - 1);
+            new_item.interaction_fn_arg_counts[i] = (unsigned int) interaction_fn_args.value;
             if (new_item.interaction_fns[i] == NULL) {
                 PyErr_SetString(PyExc_ValueError, "Invalid interaction"
                         " function arguments in the call to 'simulator_c.new'.");
@@ -728,9 +730,9 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
     memset(config.allowed_movement_directions, 0, sizeof(bool) * (size_t) direction::COUNT);
     memset(config.allowed_rotations, 0, sizeof(bool) * (size_t) direction::COUNT);
     for (Py_ssize_t i = 0; i < allowed_movement_direction_count; i++)
-        config.allowed_movement_directions[PyLong_AsUnsignedLongLong(PyList_GetItem(py_allowed_movement_directions, i))] = true;
+        config.allowed_movement_directions[PyLong_AsUnsignedLong(PyList_GetItem(py_allowed_movement_directions, i))] = true;
     for (Py_ssize_t i = 0; i < allowed_turn_direction_count; i++)
-        config.allowed_rotations[PyLong_AsUnsignedLongLong(PyList_GetItem(py_allowed_turn_directions, i))] = true;
+        config.allowed_rotations[PyLong_AsUnsignedLong(PyList_GetItem(py_allowed_turn_directions, i))] = true;
 
     config.agent_color = PyArg_ParseFloatList(py_agent_color).key;
     config.collision_policy = (movement_conflict_policy) collision_policy;
@@ -952,7 +954,7 @@ static PyObject* simulator_start_client(PyObject *self, PyObject *args)
     char* server_address;
     unsigned int port;
     PyObject* py_step_callback;
-	PyObject* py_lost_connection_callback;
+    PyObject* py_lost_connection_callback;
     PyObject* py_agent_ids;
     if (!PyArg_ParseTuple(args, "sIOOO", &server_address, &port, &py_step_callback, &py_lost_connection_callback, &py_agent_ids)) {
         fprintf(stderr, "Invalid argument types in the call to 'simulator_c.start_client'.\n");
@@ -1003,9 +1005,9 @@ static PyObject* simulator_start_client(PyObject *self, PyObject *args)
     free(agent_states); free(agent_ids);
 
     new_client->data.step_callback = py_step_callback;
-	new_client->data.lost_connection_callback = py_lost_connection_callback;
+    new_client->data.lost_connection_callback = py_lost_connection_callback;
     Py_INCREF(py_step_callback);
-	Py_INCREF(py_lost_connection_callback);
+    Py_INCREF(py_lost_connection_callback);
     import_errors();
     return Py_BuildValue("(LOO)", simulator_time, PyLong_FromVoidPtr(new_client), py_states);
 }
@@ -1267,7 +1269,7 @@ static PyObject* build_py_map(
 
         PyObject* py_agents = PyList_New(patch.agent_count);
         for (unsigned int i = 0; i < patch.agent_count; i++)
-            PyList_SetItem(py_agents, i, Py_BuildValue("(LLL)", patch.agent_positions[i].x, patch.agent_positions[i].y, (size_t) patch.agent_directions[i]));
+            PyList_SetItem(py_agents, i, Py_BuildValue("(LLL)", patch.agent_positions[i].x, patch.agent_positions[i].y, (long long) patch.agent_directions[i]));
 
         npy_intp n = (npy_intp) config.patch_size;
         float* scent = (float*) malloc(sizeof(float) * n * n * config.scent_dimension);

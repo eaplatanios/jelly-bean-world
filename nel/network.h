@@ -141,7 +141,10 @@ struct socket_listener {
 		int result = WSARecv(socket.handle, &buffer_wrapper, 1, &bytes_received, &flags, overlapped, NULL);
 		if (result == SOCKET_ERROR) {
 			int error = WSAGetLastError();
-			if (error != WSA_IO_PENDING) {
+			if (error == WSAECONNABORTED) {
+				/* the server is shutting down */
+				return false;
+			} else if (error != WSA_IO_PENDING) {
 				errno = error;
 				perror("socket_listener.update_socket ERROR: Unable to begin receiving data from client");
 				shutdown(socket.handle, 2); return false;
@@ -181,7 +184,10 @@ struct socket_listener {
 		int result = WSARecv(connection.handle, &buffer_wrapper, 1, &bytes_received, &flags, overlapped, NULL);
 		if (result == SOCKET_ERROR) {
 			int error = WSAGetLastError();
-			if (error != WSA_IO_PENDING) {
+			if (error == WSAECONNABORTED) {
+				/* the server is shutting down */
+				return false;
+			} else if (error != WSA_IO_PENDING) {
 				errno = error;
 				perror("socket_listener.accept ERROR: Unable to begin receiving data from client");
 				shutdown(connection.handle, 2); return false;

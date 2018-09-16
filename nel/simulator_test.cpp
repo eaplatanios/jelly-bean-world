@@ -14,15 +14,17 @@ using namespace nel;
 inline void set_interaction_args(
 		item_properties* item_types, unsigned int first_item_type,
 		unsigned int second_item_type, interaction_function interaction,
-		float first_cutoff, float second_cutoff, float first_value, float second_value)
+		std::initializer_list<float> args)
 {
 	item_types[first_item_type].interaction_fns[second_item_type] = interaction;
-	item_types[first_item_type].interaction_fn_arg_counts[second_item_type] = 4;
-	item_types[first_item_type].interaction_fn_args[second_item_type] = (float*) malloc(sizeof(float) * 4);
-	item_types[first_item_type].interaction_fn_args[second_item_type][0] = first_cutoff;
-	item_types[first_item_type].interaction_fn_args[second_item_type][1] = second_cutoff;
-	item_types[first_item_type].interaction_fn_args[second_item_type][2] = first_value;
-	item_types[first_item_type].interaction_fn_args[second_item_type][3] = second_value;
+	item_types[first_item_type].interaction_fn_arg_counts[second_item_type] = (unsigned int) args.size();
+	item_types[first_item_type].interaction_fn_args[second_item_type] = (float*) malloc(max((size_t) 1, sizeof(float) * args.size()));
+
+	unsigned int counter = 0;
+	for (auto i = args.begin(); i != args.end(); i++) {
+		item_types[first_item_type].interaction_fn_args[second_item_type][counter] = *i;
+		counter++;
+	}
 }
 
 enum class movement_pattern {
@@ -494,11 +496,12 @@ int main(int argc, const char** argv)
 	config.deleted_item_lifetime = 2000;
 
 	/* configure item types */
-	config.item_types.ensure_capacity(3);
+	unsigned int item_type_count = 3;
+	config.item_types.ensure_capacity(item_type_count);
 	config.item_types[0].name = "banana";
 	config.item_types[0].scent = (float*) calloc(config.scent_dimension, sizeof(float));
 	config.item_types[0].color = (float*) calloc(config.color_dimension, sizeof(float));
-	config.item_types[0].required_item_counts = (unsigned int*) calloc(config.color_dimension, sizeof(unsigned int));
+	config.item_types[0].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
 	config.item_types[0].scent[1] = 1.0f;
 	config.item_types[0].color[1] = 1.0f;
 	config.item_types[0].required_item_counts[0] = 1;
@@ -506,7 +509,7 @@ int main(int argc, const char** argv)
 	config.item_types[1].name = "onion";
 	config.item_types[1].scent = (float*) calloc(config.scent_dimension, sizeof(float));
 	config.item_types[1].color = (float*) calloc(config.color_dimension, sizeof(float));
-	config.item_types[1].required_item_counts = (unsigned int*) calloc(config.color_dimension, sizeof(unsigned int));
+	config.item_types[1].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
 	config.item_types[1].scent[0] = 1.0f;
 	config.item_types[1].color[0] = 1.0f;
 	config.item_types[1].required_item_counts[1] = 1;
@@ -514,11 +517,11 @@ int main(int argc, const char** argv)
 	config.item_types[2].name = "jellybean";
 	config.item_types[2].scent = (float*) calloc(config.scent_dimension, sizeof(float));
 	config.item_types[2].color = (float*) calloc(config.color_dimension, sizeof(float));
-	config.item_types[2].required_item_counts = (unsigned int*) calloc(config.color_dimension, sizeof(unsigned int));
+	config.item_types[2].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
 	config.item_types[2].scent[2] = 1.0f;
 	config.item_types[2].color[2] = 1.0f;
 	config.item_types[2].blocks_movement = false;
-	config.item_types.length = 3;
+	config.item_types.length = item_type_count;
 
 	config.item_types[0].intensity_fn = constant_intensity_fn;
 	config.item_types[0].intensity_fn_arg_count = 1;
@@ -530,7 +533,7 @@ int main(int argc, const char** argv)
 	config.item_types[1].intensity_fn = constant_intensity_fn;
 	config.item_types[1].intensity_fn_arg_count = 1;
 	config.item_types[1].intensity_fn_args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[1].intensity_fn_args[0] = -5.0f;
+	config.item_types[1].intensity_fn_args[0] = -5.4f;
 	config.item_types[1].interaction_fns = (interaction_function*) malloc(sizeof(interaction_function) * config.item_types.length);
 	config.item_types[1].interaction_fn_args = (float**) malloc(sizeof(float*) * config.item_types.length);
 	config.item_types[1].interaction_fn_arg_counts = (unsigned int*) malloc(sizeof(unsigned int) * config.item_types.length);
@@ -542,15 +545,15 @@ int main(int argc, const char** argv)
 	config.item_types[2].interaction_fn_args = (float**) malloc(sizeof(float*) * config.item_types.length);
 	config.item_types[2].interaction_fn_arg_counts = (unsigned int*) malloc(sizeof(unsigned int) * config.item_types.length);
 
-	set_interaction_args(config.item_types.data, 0, 0, piecewise_box_interaction_fn, 10.0f, 200.0f, 0.0f, -6.0f);
-	set_interaction_args(config.item_types.data, 0, 1, piecewise_box_interaction_fn, 200.0f, 0.0f, -6.0f, -6.0f);
-	set_interaction_args(config.item_types.data, 0, 2, piecewise_box_interaction_fn, 10.0f, 200.0f, 2.0f, -100.0f);
-	set_interaction_args(config.item_types.data, 1, 0, piecewise_box_interaction_fn, 0.0f, 0.0f, 0.0f, 0.0f);
-	set_interaction_args(config.item_types.data, 1, 1, piecewise_box_interaction_fn, 0.0f, 0.0f, 0.0f, 0.0f);
-	set_interaction_args(config.item_types.data, 1, 2, piecewise_box_interaction_fn, 200.0f, 0.0f, -100.0f, -100.0f);
-	set_interaction_args(config.item_types.data, 2, 0, piecewise_box_interaction_fn, 10.0f, 200.0f, 2.0f, -100.0f);
-	set_interaction_args(config.item_types.data, 2, 1, piecewise_box_interaction_fn, 200.0f, 0.0f, -100.0f, -100.0f);
-	set_interaction_args(config.item_types.data, 2, 2, piecewise_box_interaction_fn, 10.0f, 200.0f, 0.0f, -6.0f);
+	set_interaction_args(config.item_types.data, 0, 0, piecewise_box_interaction_fn, {10.0f, 200.0f, 0.0f, -6.0f});
+	set_interaction_args(config.item_types.data, 0, 1, piecewise_box_interaction_fn, {200.0f, 0.0f, -6.0f, -6.0f});
+	set_interaction_args(config.item_types.data, 0, 2, piecewise_box_interaction_fn, {10.0f, 200.0f, 2.0f, -100.0f});
+	set_interaction_args(config.item_types.data, 1, 0, zero_interaction_fn, {});
+	set_interaction_args(config.item_types.data, 1, 1, zero_interaction_fn, {});
+	set_interaction_args(config.item_types.data, 1, 2, piecewise_box_interaction_fn, {200.0f, 0.0f, -100.0f, -100.0f});
+	set_interaction_args(config.item_types.data, 2, 0, piecewise_box_interaction_fn, {10.0f, 200.0f, 2.0f, -100.0f});
+	set_interaction_args(config.item_types.data, 2, 1, piecewise_box_interaction_fn, {200.0f, 0.0f, -100.0f, -100.0f});
+	set_interaction_args(config.item_types.data, 2, 2, piecewise_box_interaction_fn, {10.0f, 200.0f, 0.0f, -6.0f});
 
 #if defined(USE_MPI)
 	test_mpi(config);

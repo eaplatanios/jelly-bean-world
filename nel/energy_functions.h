@@ -10,12 +10,12 @@ typedef float (*interaction_function)(const position&, const position&, const fl
 
 typedef uint8_t intensity_fns_type;
 enum class intensity_fns : intensity_fns_type {
-	ZERO = 0, CONSTANT = 1
+	ZERO = 0, CONSTANT
 };
 
 typedef uint8_t interaction_fns_type;
 enum class interaction_fns : interaction_fns_type {
-	ZERO = 0, PIECEWISE_BOX = 1
+	ZERO = 0, PIECEWISE_BOX, CROSS
 };
 
 constexpr float zero_intensity_fn(const position& pos, const float* args) {
@@ -62,7 +62,24 @@ float piecewise_box_interaction_fn(const position& pos1, const position& pos2, c
 		return first_value;
 	else if (squared_length < second_cutoff)
 		return second_value;
-	else return 0.0;
+	else return 0.0f;
+}
+
+float cross_interaction_fn(const position& pos1, const position& pos2, const float* args)
+{
+	const position diff = pos1 - pos2;
+	uint64_t dist = max(abs(diff.x), abs(diff.y));
+	if (dist <= args[0]) {
+		if (diff.x == 0 || diff.y == 0)
+			return args[2];
+		else return args[4];
+	} else if (dist <= args[1]) {
+		if (diff.x == 0 || diff.y == 0)
+			return args[3];
+		else return args[5];
+	} else {
+		return 0.0f;
+	}
 }
 
 interaction_function get_interaction_fn(interaction_fns type, float* args, unsigned int num_args)
@@ -80,6 +97,12 @@ interaction_function get_interaction_fn(interaction_fns type, float* args, unsig
 			return NULL;
 		}
 		return piecewise_box_interaction_fn;
+	case interaction_fns::CROSS:
+		if (num_args != 6) {
+			fprintf(stderr, "get_interaction_fn ERROR: A cross integration function requires 6 arguments.");
+			return NULL;
+		}
+		return cross_interaction_fn;
 	}
 	fprintf(stderr, "get_interaction_fn ERROR: Unknown interaction function type.");
 	return NULL;
@@ -116,6 +139,7 @@ inline bool read(interaction_function& function, Stream& in) {
 	switch ((interaction_fns) c) {
 	case interaction_fns::ZERO:          function = zero_interaction_fn; return true;
 	case interaction_fns::PIECEWISE_BOX: function = piecewise_box_interaction_fn; return true;
+	case interaction_fns::CROSS:         function = cross_interaction_fn; return true;
 	}
 	fprintf(stderr, "read ERROR: Unrecognized interaction function.\n");
 	return false;
@@ -127,6 +151,8 @@ inline bool write(const interaction_function& function, Stream& out) {
 		return write((interaction_fns_type) interaction_fns::ZERO, out);
 	} else if (function == piecewise_box_interaction_fn) {
 		return write((interaction_fns_type) interaction_fns::PIECEWISE_BOX, out);
+	} else if (function == cross_interaction_fn) {
+		return write((interaction_fns_type) interaction_fns::CROSS, out);
 	} else {
 		fprintf(stderr, "write ERROR: Unrecognized interaction function.\n");
 		return false;
@@ -145,7 +171,8 @@ inline bool is_stationary(const intensity_function function) {
 
 inline bool is_stationary(const interaction_function function) {
 	return (function == zero_interaction_fn
-		 || function == piecewise_box_interaction_fn);
+		 || function == piecewise_box_interaction_fn
+		 || function == cross_interaction_fn);
 }
 
 } /* namespace nel */

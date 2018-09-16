@@ -558,7 +558,7 @@ inline bool receive_add_agent_response(ClientType& c) {
 template<typename ClientType>
 inline bool receive_move_response(ClientType& c) {
 	bool move_success;
-	uint64_t agent_id;
+	uint64_t agent_id = 0;
 	fixed_width_stream<socket_type> in(c.connection);
 	if (!read(agent_id, in) || !read(move_success, in))
 		return false;
@@ -569,7 +569,7 @@ inline bool receive_move_response(ClientType& c) {
 template<typename ClientType>
 inline bool receive_turn_response(ClientType& c) {
 	bool turn_success;
-	uint64_t agent_id;
+	uint64_t agent_id = 0;
 	fixed_width_stream<socket_type> in(c.connection);
 	if (!read(agent_id, in) || !read(turn_success, in))
 		return false;

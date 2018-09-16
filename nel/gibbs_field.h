@@ -25,8 +25,7 @@ struct gibbs_field_cache
 	unsigned int item_type_count;
 
 	gibbs_field_cache(const ItemType* item_types, unsigned int item_type_count, unsigned int n) :
-		intensities(NULL), interactions(NULL), two_n(2*n), four_n(4*n),
-		item_types(item_types), item_type_count(item_type_count)
+		two_n(2*n), four_n(4*n), item_types(item_types), item_type_count(item_type_count)
 	{
 		if (!init_helper()) exit(EXIT_FAILURE);
 	}

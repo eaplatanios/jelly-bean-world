@@ -64,7 +64,7 @@ class SimulatorConfig(object):
     assert all([len(i.scent) == self.scent_num_dims for i in items]), 'All items must use the same dimensionality for the scent vector.'
     assert all([len(i.color) == self.color_num_dims for i in items]), 'All items must use the same dimensionality for the color vector.'
     assert all([len(i.required_item_counts) == len(items) for i in items]), 'The `required_item_counts` field must be the same dimension as `items`'
-    assert all([len(i.interaction_fn_args) == len(items) for i in items]), 'The `interaction_fn_args` field must be the same dimension as `items`'
+    assert all([len(i.interaction_fns) == len(items) for i in items]), 'The `interaction_fn_args` field must be the same dimension as `items`'
     self.collision_policy = collision_policy
     self.decay_param = decay_param
     self.diffusion_param = diffusion_param
@@ -186,7 +186,7 @@ class Simulator(object):
         sim_config.max_steps_per_movement, [d.value for d in sim_config.allowed_movement_directions],
         [d.value for d in sim_config.allowed_turn_directions], sim_config.scent_num_dims,
         sim_config.color_num_dims, sim_config.vision_range, sim_config.patch_size, sim_config.gibbs_num_iter,
-        [(i.name, i.scent, i.color, i.required_item_counts, i.blocks_movement, i.intensity_fn, i.intensity_fn_args, i.interaction_fn_args) for i in sim_config.items],
+        [(i.name, i.scent, i.color, i.required_item_counts, i.blocks_movement, i.intensity_fn, i.intensity_fn_args, i.interaction_fns) for i in sim_config.items],
         sim_config.agent_color, sim_config.collision_policy.value, sim_config.decay_param,
         sim_config.diffusion_param, sim_config.deleted_item_lifetime, self._step_callback,
         save_frequency, save_filepath)

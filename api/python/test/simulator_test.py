@@ -4,8 +4,8 @@ from timeit import default_timer
 
 class SimpleAgent(nel.Agent):
 	def __init__(self, simulator, load_filepath=None):
-		super(SimpleAgent, self).__init__(simulator, load_filepath)
 		self.counter = 0
+		super(SimpleAgent, self).__init__(simulator, load_filepath)
 
 	def do_next_action(self):
 		self.counter += 1
@@ -21,45 +21,47 @@ class SimpleAgent(nel.Agent):
 			self.move(nel.RelativeDirection.FORWARD)
 
 	def save(self, filepath):
-		pass
+		with open(filepath, 'w') as fout:
+			fout.write(str(self.counter))
 
 	def _load(self, filepath):
-		pass
+		with open(filepath, 'r') as fin:
+			self.counter = int(fin.read())
 
 def make_config():
 	# specify the item types
 	items = []
 	items.append(nel.Item("banana",    [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [1, 0, 0, 0], False,
 					   intensity_fn=nel.IntensityFunction.CONSTANT, intensity_fn_args=[-5.3],
-					   interaction_fn=[
-						   [nel.InteractionFunction.PIECEWISE_BOX, 10.0, 200.0, 0.0, -6.0],     # parameters for interaction between item 0 and item 0
-						   [nel.InteractionFunction.PIECEWISE_BOX, 200.0, 0.0, -6.0, -6.0],     # parameters for interaction between item 0 and item 1
-						   [nel.InteractionFunction.PIECEWISE_BOX, 10.0, 200.0, 2.0, -100.0],   # parameters for interaction between item 0 and item 2
-						   [nel.InteractionFunction.ZERO]                                       # parameters for interaction between item 0 and item 3
+					   interaction_fns=[
+						   [nel.InteractionFunction.PIECEWISE_BOX, 10.0, 200.0, 0.0, -6.0],      # parameters for interaction between item 0 and item 0
+						   [nel.InteractionFunction.PIECEWISE_BOX, 200.0, 0.0, -6.0, -6.0],      # parameters for interaction between item 0 and item 1
+						   [nel.InteractionFunction.PIECEWISE_BOX, 10.0, 200.0, 2.0, -100.0],    # parameters for interaction between item 0 and item 2
+						   [nel.InteractionFunction.ZERO]                                        # parameters for interaction between item 0 and item 3
 						]))
 	items.append(nel.Item("onion",     [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0, 1, 0, 0], False,
 					   intensity_fn=nel.IntensityFunction.CONSTANT, intensity_fn_args=[-5.0],
-					   interaction_fn=[
-						   [nel.InteractionFunction.PIECEWISE_BOX, 200.0, 0.0, -6.0, -6.0],     # parameters for interaction between item 1 and item 0
-						   [nel.InteractionFunction.ZERO],                                      # parameters for interaction between item 1 and item 1
-						   [nel.InteractionFunction.PIECEWISE_BOX, 200.0, 0.0, -100.0, -100.0], # parameters for interaction between item 1 and item 2
-						   [nel.InteractionFunction.ZERO]                                       # parameters for interaction between item 1 and item 3
+					   interaction_fns=[
+						   [nel.InteractionFunction.PIECEWISE_BOX, 200.0, 0.0, -6.0, -6.0],      # parameters for interaction between item 1 and item 0
+						   [nel.InteractionFunction.ZERO],                                       # parameters for interaction between item 1 and item 1
+						   [nel.InteractionFunction.PIECEWISE_BOX, 200.0, 0.0, -100.0, -100.0],  # parameters for interaction between item 1 and item 2
+						   [nel.InteractionFunction.ZERO]                                        # parameters for interaction between item 1 and item 3
 						]))
 	items.append(nel.Item("jellybean", [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0, 0, 0, 0], False,
 					   intensity_fn=nel.IntensityFunction.CONSTANT, intensity_fn_args=[-5.3],
-					   interaction_fn=[
-						   [nel.InteractionFunction.PIECEWISE_BOX, 10.0, 200.0, 2.0, -100.0],   # parameters for interaction between item 2 and item 0
-						   [nel.InteractionFunction.PIECEWISE_BOX, 200.0, 0.0, -100.0, -100.0], # parameters for interaction between item 2 and item 1
-						   [nel.InteractionFunction.PIECEWISE_BOX, 10.0, 200.0, 0.0, -6.0],     # parameters for interaction between item 2 and item 2
-						   [nel.InteractionFunction.ZERO]                                       # parameters for interaction between item 2 and item 3
+					   interaction_fns=[
+						   [nel.InteractionFunction.PIECEWISE_BOX, 10.0, 200.0, 2.0, -100.0],    # parameters for interaction between item 2 and item 0
+						   [nel.InteractionFunction.PIECEWISE_BOX, 200.0, 0.0, -100.0, -100.0],  # parameters for interaction between item 2 and item 1
+						   [nel.InteractionFunction.PIECEWISE_BOX, 10.0, 200.0, 0.0, -6.0],      # parameters for interaction between item 2 and item 2
+						   [nel.InteractionFunction.ZERO]                                        # parameters for interaction between item 2 and item 3
 						]))
 	items.append(nel.Item("wall",      [0.0, 0.0, 0.0], [0.5, 0.5, 0.5], [0, 0, 0, 1], True,
-					   intensity_fn=nel.IntensityFunction.CONSTANT, intensity_fn_args=[-5.0],
-					   interaction_fn=[
-						   [nel.InteractionFunction.ZERO],                                      # parameters for interaction between item 3 and item 0
-						   [nel.InteractionFunction.ZERO],                                      # parameters for interaction between item 3 and item 1
-						   [nel.InteractionFunction.ZERO],                                      # parameters for interaction between item 3 and item 2
-						   [nel.InteractionFunction.ZERO]                                       # parameters for interaction between item 3 and item 3
+					   intensity_fn=nel.IntensityFunction.CONSTANT, intensity_fn_args=[0.0],
+					   interaction_fns=[
+						   [nel.InteractionFunction.ZERO],                                       # parameters for interaction between item 3 and item 0
+						   [nel.InteractionFunction.ZERO],                                       # parameters for interaction between item 3 and item 1
+						   [nel.InteractionFunction.ZERO],                                       # parameters for interaction between item 3 and item 2
+						   [nel.InteractionFunction.CROSS, 10.0, 15.0, 20.0, -200.0, -20.0, 1.0] # parameters for interaction between item 3 and item 3
 						]))
 
 	# construct the simulator configuration
@@ -68,7 +70,7 @@ def make_config():
 		allowed_turn_directions=[nel.RelativeDirection.LEFT, nel.RelativeDirection.RIGHT],
 		patch_size=32, gibbs_num_iter=10, items=items, agent_color=[0.0, 0.0, 1.0],
 		collision_policy=nel.MovementConflictPolicy.FIRST_COME_FIRST_SERVED,
-		decay_param=0.5, diffusion_param=0.12, deleted_item_lifetime=2000)
+		decay_param=0.4, diffusion_param=0.14, deleted_item_lifetime=2000)
 
 if __name__ == "__main__":
 	# create a local simulator
