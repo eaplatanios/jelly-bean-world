@@ -96,11 +96,25 @@ struct item_properties {
 
     bool blocks_movement;
 
-    static inline void free(item_properties& properties) {
+    intensity_function intensity_fn;
+    interaction_function* interaction_fns;
+
+    float* intensity_fn_args;
+    float** interaction_fn_args;
+    unsigned int intensity_fn_arg_count;
+    unsigned int* interaction_fn_arg_counts;
+
+    static inline void free(item_properties& properties, unsigned int item_type_count) {
         core::free(properties.name);
         core::free(properties.scent);
         core::free(properties.color);
         core::free(properties.required_item_counts);
+        core::free(properties.intensity_fn_args);
+        for (unsigned int i = 0; i < item_type_count; i++)
+            core::free(properties.interaction_fn_args[i]);
+        core::free(properties.interaction_fn_args);
+        core::free(properties.interaction_fn_arg_counts);
+        core::free(properties.interaction_fns);
     }
 };
 
@@ -128,6 +142,47 @@ inline bool init(
         fprintf(stderr, "init ERROR: Insufficient memory for item_properties.required_item_counts.\n");
         free(properties.scent); free(properties.color); return false;
     }
+    properties.interaction_fns = (interaction_function*) malloc(sizeof(interaction_function) * item_type_count);
+    if (properties.interaction_fns == NULL) {
+        fprintf(stderr, "init ERROR: Insufficient memory for item_properties.interaction_fns.\n");
+        free(properties.scent); free(properties.color);
+        free(properties.required_item_counts); return false;
+    }
+    properties.intensity_fn_arg_count = src.intensity_fn_arg_count;
+    properties.intensity_fn_args = (float*) malloc(max((size_t) 1, sizeof(float) * src.intensity_fn_arg_count));
+    if (properties.intensity_fn_args == NULL) {
+        fprintf(stderr, "init ERROR: Insufficient memory for item_properties.intensity_fn_arg_count.\n");
+        free(properties.scent); free(properties.color);
+        free(properties.required_item_counts); free(properties.interaction_fns);
+        return false;
+    }
+    properties.interaction_fn_args = (float**) malloc(sizeof(float*) * item_type_count);
+    if (properties.interaction_fn_args == NULL) {
+        fprintf(stderr, "init ERROR: Insufficient memory for item_properties.interaction_fn_args.\n");
+        free(properties.scent); free(properties.color);
+        free(properties.required_item_counts); free(properties.interaction_fns);
+        free(properties.intensity_fn_args); return false;
+    }
+    properties.interaction_fn_arg_counts = (unsigned int*) malloc(sizeof(unsigned int) * item_type_count);
+    if (properties.interaction_fn_arg_counts == NULL) {
+        fprintf(stderr, "init ERROR: Insufficient memory for item_properties.interaction_fn_arg_counts.\n");
+        free(properties.scent); free(properties.color);
+        free(properties.required_item_counts); free(properties.interaction_fns);
+        free(properties.intensity_fn_args); free(properties.interaction_fn_args); return false;
+    }
+
+    for (unsigned int i = 0; i < item_type_count; i++) {
+        properties.interaction_fns[i] = src.interaction_fns[i];
+        properties.interaction_fn_arg_counts[i] = src.interaction_fn_arg_counts[i];
+        properties.interaction_fn_args[i] = (float*) malloc(max((size_t) 1, sizeof(float) * src.interaction_fn_arg_counts[i]));
+        if (properties.interaction_fn_args[i] == NULL) {
+            fprintf(stderr, "init ERROR: Insufficient memory for item_properties.interaction_fn_args.\n");
+            for (unsigned int j = 0; j < i; j++) free(properties.interaction_fn_args[j]);
+            free(properties.scent); free(properties.color);
+            free(properties.required_item_counts); free(properties.interaction_fns);
+            free(properties.intensity_fn_args); free(properties.interaction_fn_args); return false;
+        }
+    }
 
     for (unsigned int i = 0; i < scent_dimension; i++)
         properties.scent[i] = src.scent[i];
@@ -136,6 +191,10 @@ inline bool init(
     for (unsigned int i = 0; i < item_type_count; i++)
         properties.required_item_counts[i] = src.required_item_counts[i];
     properties.blocks_movement = src.blocks_movement;
+    properties.intensity_fn = src.intensity_fn;
+    memcpy(properties.intensity_fn_args, src.intensity_fn_args, sizeof(float) * src.intensity_fn_arg_count);
+    for (unsigned int i = 0; i < item_type_count; i++)
+        memcpy(properties.interaction_fn_args[i], src.interaction_fn_args[i], sizeof(float) * src.interaction_fn_arg_counts[i]);
     return true;
 }
 
@@ -164,13 +223,62 @@ inline bool read(item_properties& properties, Stream& in,
         fprintf(stderr, "read ERROR: Insufficient memory for item_properties.required_item_counts.\n");
         free(properties.scent); free(properties.color); return false;
     }
+    properties.interaction_fns = (interaction_function*) malloc(sizeof(interaction_function) * item_type_count);
+    if (properties.interaction_fns == NULL) {
+        fprintf(stderr, "read ERROR: Insufficient memory for item_properties.interaction_fns.\n");
+        free(properties.scent); free(properties.color);
+        free(properties.required_item_counts); return false;
+    }
+    properties.interaction_fn_args = (float**) malloc(sizeof(float*) * item_type_count);
+    if (properties.interaction_fn_args == NULL) {
+        fprintf(stderr, "read ERROR: Insufficient memory for item_properties.interaction_fn_args.\n");
+        free(properties.scent); free(properties.color);
+        free(properties.required_item_counts); free(properties.interaction_fns);
+        return false;
+    }
+    properties.interaction_fn_arg_counts = (unsigned int*) malloc(sizeof(unsigned int) * item_type_count);
+    if (properties.interaction_fn_arg_counts == NULL) {
+        fprintf(stderr, "read ERROR: Insufficient memory for item_properties.interaction_fn_arg_counts.\n");
+        free(properties.scent); free(properties.color);
+        free(properties.required_item_counts); free(properties.interaction_fns);
+        free(properties.interaction_fn_args); return false;
+    }
 
     if (!read(properties.scent, in, scent_dimension)
      || !read(properties.color, in, color_dimension)
      || !read(properties.required_item_counts, in, item_type_count)
-     || !read(properties.blocks_movement, in)) {
-        free(properties.name); free(properties.scent);
-        free(properties.color); return false;
+     || !read(properties.blocks_movement, in)
+     || !read(properties.intensity_fn, in)
+     || !read(properties.intensity_fn_arg_count, in)
+     || !read(properties.interaction_fns, in, item_type_count)
+     || !read(properties.interaction_fn_arg_counts, in, item_type_count)) {
+        free(properties.name); free(properties.scent); free(properties.color);
+        free(properties.required_item_counts); free(properties.interaction_fns);
+        free(properties.interaction_fn_args); return false;
+    }
+
+    properties.intensity_fn_args = (float*) malloc(max((size_t) 1, sizeof(float) * properties.intensity_fn_arg_count));
+    if (properties.intensity_fn_args == NULL) {
+        fprintf(stderr, "read ERROR: Insufficient memory for item_properties.intensity_fn_args.\n");
+        free(properties.scent); free(properties.color);
+        free(properties.required_item_counts); free(properties.interaction_fns);
+        free(properties.interaction_fn_args); free(properties.interaction_fn_arg_counts);
+        return false;
+    }
+
+    for (unsigned int i = 0; i < item_type_count; i++) {
+        properties.interaction_fn_args[i] = (float*) malloc(max((size_t) 1, sizeof(float) * properties.interaction_fn_arg_counts[i]));
+        if (properties.interaction_fn_args[i] == NULL
+         || !read(properties.interaction_fn_args[i], in, properties.interaction_fn_arg_counts[i]))
+        {
+            fprintf(stderr, "read ERROR: Insufficient memory for item_properties.interaction_fn_args.\n");
+            for (unsigned int j = 0; j < i; j++) free(properties.interaction_fn_args[j]);
+            if (properties.interaction_fn_args[i] != NULL) free(properties.interaction_fn_args[i]);
+            free(properties.scent); free(properties.color);
+            free(properties.required_item_counts); free(properties.interaction_fns);
+            free(properties.interaction_fn_args); free(properties.interaction_fn_arg_counts);
+            free(properties.intensity_fn_args); return false;
+        }
     }
     return true;
 }
@@ -183,11 +291,20 @@ inline bool write(const item_properties& properties, Stream& out,
         unsigned int scent_dimension, unsigned int color_dimension,
         unsigned int item_type_count)
 {
-    return write(properties.name, out)
-        && write(properties.scent, out, scent_dimension)
-        && write(properties.color, out, color_dimension)
-        && write(properties.required_item_counts, out, item_type_count)
-        && write(properties.blocks_movement, out);
+    if (!write(properties.name, out)
+     || !write(properties.scent, out, scent_dimension)
+     || !write(properties.color, out, color_dimension)
+     || !write(properties.required_item_counts, out, item_type_count)
+     || !write(properties.blocks_movement, out)
+     || !write(properties.intensity_fn, out)
+     || !write(properties.intensity_fn_arg_count, out)
+     || !write(properties.interaction_fns, out, item_type_count)
+     || !write(properties.interaction_fn_arg_counts, out, item_type_count))
+        return false;
+
+    for (unsigned int i = 0; i < item_type_count; i++)
+        if (!write(properties.interaction_fn_args[i], out, properties.interaction_fn_arg_counts[i])) return false;
+    return true;
 }
 
 /**
@@ -213,16 +330,7 @@ struct simulator_config {
     float decay_param, diffusion_param;
     unsigned int deleted_item_lifetime;
 
-    intensity_function intensity_fn;
-    interaction_function interaction_fn;
-
-    float* intensity_fn_args;
-    float* interaction_fn_args;
-    unsigned int intensity_fn_arg_count;
-    unsigned int interaction_fn_arg_count;
-
-    simulator_config() : item_types(8), agent_color(NULL),
-        intensity_fn_args(NULL), interaction_fn_args(NULL) { }
+    simulator_config() : item_types(8), agent_color(NULL) { }
 
     simulator_config(const simulator_config& src) : item_types(src.item_types.length) {
         if (!init_helper(src))
@@ -248,12 +356,6 @@ struct simulator_config {
         core::swap(first.decay_param, second.decay_param);
         core::swap(first.diffusion_param, second.diffusion_param);
         core::swap(first.deleted_item_lifetime, second.deleted_item_lifetime);
-        core::swap(first.intensity_fn, second.intensity_fn);
-        core::swap(first.interaction_fn, second.interaction_fn);
-        core::swap(first.intensity_fn_args, second.intensity_fn_args);
-        core::swap(first.interaction_fn_args, second.interaction_fn_args);
-        core::swap(first.intensity_fn_arg_count, second.intensity_fn_arg_count);
-        core::swap(first.interaction_fn_arg_count, second.interaction_fn_arg_count);
     }
 
     static inline void free(simulator_config& config) {
@@ -269,16 +371,6 @@ private:
             fprintf(stderr, "simulator_config.init_helper ERROR: Insufficient memory for agent_color.\n");
             return false;
         }
-        intensity_fn_args = (float*) malloc(sizeof(float) * src.intensity_fn_arg_count);
-        if (intensity_fn_args == NULL) {
-            fprintf(stderr, "simulator_config.init_helper ERROR: Insufficient memory for intensity_fn_args.\n");
-            core::free(agent_color); return false;
-        }
-        interaction_fn_args = (float*) malloc(sizeof(float) * src.interaction_fn_arg_count);
-        if (interaction_fn_args == NULL) {
-            fprintf(stderr, "simulator_config.init_helper ERROR: Insufficient memory for interaction_fn_args.\n");
-            core::free(agent_color); core::free(intensity_fn_args); return false;
-        }
 
         for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
             allowed_movement_directions[i] = src.allowed_movement_directions[i];
@@ -286,15 +378,11 @@ private:
             allowed_rotations[i] = src.allowed_rotations[i];
         for (unsigned int i = 0; i < src.color_dimension; i++)
             agent_color[i] = src.agent_color[i];
-        for (unsigned int i = 0; i < src.intensity_fn_arg_count; i++)
-            intensity_fn_args[i] = src.intensity_fn_args[i];
-        for (unsigned int i = 0; i < src.interaction_fn_arg_count; i++)
-            interaction_fn_args[i] = src.interaction_fn_args[i];
 
         for (unsigned int i = 0; i < src.item_types.length; i++) {
             if (!init(item_types[i], src.item_types[i], src.scent_dimension, src.color_dimension, src.item_types.length)) {
-                for (unsigned int j = 0; j < i; j++) core::free(item_types[i]);
-                core::free(intensity_fn_args); core::free(interaction_fn_args);
+                for (unsigned int j = 0; j < i; j++)
+                    core::free(item_types[i], src.item_types.length);
                 core::free(agent_color); return false;
             }
         }
@@ -310,22 +398,14 @@ private:
         decay_param = src.decay_param;
         diffusion_param = src.diffusion_param;
         deleted_item_lifetime = src.deleted_item_lifetime;
-        intensity_fn = src.intensity_fn;
-        interaction_fn = src.interaction_fn;
-        intensity_fn_arg_count = src.intensity_fn_arg_count;
-        interaction_fn_arg_count = src.interaction_fn_arg_count;
         return true;
     }
 
     inline void free_helper() {
         for (item_properties& properties : item_types)
-            core::free(properties);
+            core::free(properties, item_types.length);
         if (agent_color != NULL)
             core::free(agent_color);
-        if (intensity_fn_args != NULL)
-            core::free(intensity_fn_args);
-        if (interaction_fn_args != NULL)
-            core::free(interaction_fn_args);
     }
 
     friend bool init(simulator_config&, const simulator_config&);
@@ -338,8 +418,6 @@ private:
  */
 inline bool init(simulator_config& config) {
     config.agent_color = NULL;
-    config.intensity_fn_args = NULL;
-    config.interaction_fn_args = NULL;
     return array_init(config.item_types, 8);
 }
 
@@ -383,7 +461,7 @@ bool read(simulator_config& config, Stream& in) {
     if (config.agent_color == NULL) {
         fprintf(stderr, "read ERROR: Insufficient memory for simulator_config.agent_color.\n");
         for (item_properties& properties : config.item_types)
-            free(properties);
+            free(properties, config.item_types.length);
         free(config.item_types); return false;
     }
 
@@ -391,40 +469,10 @@ bool read(simulator_config& config, Stream& in) {
      || !read(config.collision_policy, in)
      || !read(config.decay_param, in)
      || !read(config.diffusion_param, in)
-     || !read(config.deleted_item_lifetime, in)
-     || !read(config.intensity_fn, in)
-     || !read(config.interaction_fn, in)
-     || !read(config.intensity_fn_arg_count, in)
-     || !read(config.interaction_fn_arg_count, in)) {
+     || !read(config.deleted_item_lifetime, in)) {
         for (item_properties& properties : config.item_types)
-            free(properties);
+            free(properties, config.item_types.length);
         free(config.agent_color); free(config.item_types); return false;
-    }
-
-    config.intensity_fn_args = (float*) malloc(sizeof(float) * config.intensity_fn_arg_count);
-    if (config.intensity_fn_args == NULL) {
-        fprintf(stderr, "read ERROR: Insufficient memory for simulator_config.intensity_fn_args.\n");
-        for (item_properties& properties : config.item_types)
-            free(properties);
-        free(config.agent_color); free(config.item_types); return false;
-    }
-    config.interaction_fn_args = (float*) malloc(sizeof(float) * config.interaction_fn_arg_count);
-    if (config.interaction_fn_args == NULL) {
-        fprintf(stderr, "read ERROR: Insufficient memory for simulator_config.interaction_fn_args.\n");
-        for (item_properties& properties : config.item_types)
-            free(properties);
-        free(config.agent_color); free(config.item_types);
-        free(config.intensity_fn_args); return false;
-    }
-
-    if (!read(config.intensity_fn_args, in, config.intensity_fn_arg_count)
-     || !read(config.interaction_fn_args, in, config.interaction_fn_arg_count)) {
-        fprintf(stderr, "read ERROR: Insufficient memory for simulator_config.interaction_fn_args.\n");
-        for (item_properties& properties : config.item_types)
-            free(properties);
-        free(config.agent_color); free(config.item_types);
-        free(config.intensity_fn_args);
-        free(config.interaction_fn_args); return false;
     }
     return true;
 }
@@ -448,13 +496,7 @@ bool write(const simulator_config& config, Stream& out) {
         && write(config.collision_policy, out)
         && write(config.decay_param, out)
         && write(config.diffusion_param, out)
-        && write(config.deleted_item_lifetime, out)
-        && write(config.intensity_fn, out)
-        && write(config.interaction_fn, out)
-        && write(config.intensity_fn_arg_count, out)
-        && write(config.interaction_fn_arg_count, out)
-        && write(config.intensity_fn_args, out, config.intensity_fn_arg_count)
-        && write(config.interaction_fn_args, out, config.interaction_fn_arg_count);
+        && write(config.deleted_item_lifetime, out);
 }
 
 /**
@@ -696,7 +738,7 @@ struct agent_state {
 template<typename T>
 inline bool init(
         agent_state& agent,
-        map<patch_data>& world,
+        map<patch_data, item_properties>& world,
         const diffusion<T>& scent_model,
         const simulator_config& config,
         uint64_t& current_time)
@@ -827,7 +869,8 @@ struct patch_state {
     float* vision;
     item* items;
     unsigned int item_count;
-    position* agents;
+    position* agent_positions;
+    direction* agent_directions;
     unsigned int agent_count;
 
     static inline void move(const patch_state& src, patch_state& dst) {
@@ -837,7 +880,8 @@ struct patch_state {
         core::move(src.vision, dst.vision);
         core::move(src.items, dst.items);
         core::move(src.item_count, dst.item_count);
-        core::move(src.agents, dst.agents);
+        core::move(src.agent_positions, dst.agent_positions);
+        core::move(src.agent_directions, dst.agent_directions);
         core::move(src.agent_count, dst.agent_count);
     }
 
@@ -845,7 +889,8 @@ struct patch_state {
         core::free(patch.scent);
         core::free(patch.vision);
         core::free(patch.items);
-        core::free(patch.agents);
+        core::free(patch.agent_positions);
+        core::free(patch.agent_directions);
     }
 
     inline bool init_helper(unsigned int n,
@@ -867,9 +912,15 @@ struct patch_state {
             fprintf(stderr, "patch_state.init_helper ERROR: Insufficient memory for items.\n");
             core::free(scent); core::free(vision); return false;
         }
-        agents = (position*) malloc(sizeof(position) * agent_count);
-        if (agents == NULL) {
-            fprintf(stderr, "patch_state.init_helper ERROR: Insufficient memory for agents.\n");
+        agent_positions = (position*) malloc(sizeof(position) * agent_count);
+        if (agent_positions == NULL) {
+            fprintf(stderr, "patch_state.init_helper ERROR: Insufficient memory for agent_positions.\n");
+            core::free(scent); core::free(vision);
+            core::free(items); return false;
+        }
+        agent_directions = (direction*) malloc(sizeof(direction) * agent_count);
+        if (agent_directions == NULL) {
+            fprintf(stderr, "patch_state.init_helper ERROR: Insufficient memory for agent_directions.\n");
             core::free(scent); core::free(vision);
             core::free(items); return false;
         }
@@ -903,7 +954,8 @@ bool read(patch_state& patch, Stream& in, const simulator_config& config) {
         && read(patch.scent, in, n * n * config.scent_dimension)
         && read(patch.vision, in, n * n * config.color_dimension)
         && read(patch.items, in, patch.item_count)
-        && read(patch.agents, in, patch.agent_count);
+        && read(patch.agent_positions, in, patch.agent_count)
+        && read(patch.agent_directions, in, patch.agent_count);
 }
 
 /**
@@ -917,7 +969,8 @@ bool write(const patch_state& patch, Stream& out, const simulator_config& config
         && write(patch.scent, out, n * n * config.scent_dimension)
         && write(patch.vision, out, n * n * config.color_dimension)
         && write(patch.items, out, patch.item_count)
-        && write(patch.agents, out, patch.agent_count);
+        && write(patch.agent_positions, out, patch.agent_count)
+        && write(patch.agent_directions, out, patch.agent_count);
 }
 
 /**
@@ -931,7 +984,7 @@ class simulator {
     simulator_config config;
 
     /* Map of the world managed by this simulator. */
-    map<patch_data> world;
+    map<patch_data, item_properties> world;
 
     /* The diffusion model to simulate scent. */
     diffusion<double> scent_model;
@@ -971,10 +1024,9 @@ public:
             uint_fast32_t seed) :
         config(conf),
         world(config.patch_size,
-            (unsigned int) config.item_types.length,
             config.gibbs_iterations,
-            config.intensity_fn, config.intensity_fn_args,
-            config.interaction_fn, config.interaction_fn_args, seed),
+            config.item_types.data,
+            (unsigned int) config.item_types.length, seed),
         agents(16), requested_moves(32, alloc_position_keys),
         acted_agent_count(0), data(data), time(0)
     {
@@ -1199,7 +1251,7 @@ public:
         return config;
     }
 
-    inline map<patch_data>& get_world() {
+    inline map<patch_data, item_properties>& get_world() {
         return world;
     }
 
@@ -1244,8 +1296,10 @@ public:
                 }
             }
 
-            for (unsigned int i = 0; i < patch.data.agents.length; i++)
-                state.agents[i] = patch.data.agents[i]->current_position;
+            for (unsigned int i = 0; i < patch.data.agents.length; i++) {
+                state.agent_positions[i] = patch.data.agents[i]->current_position;
+                state.agent_directions[i] = patch.data.agents[i]->current_direction;
+            }
             return true;
         };
 
@@ -1518,10 +1572,9 @@ bool init(simulator<SimulatorData>& sim,
         free(sim.data); free(sim.config); free(sim.agents);
         free(sim.requested_moves); return false;
     } else if (!init(sim.world, sim.config.patch_size,
-            (unsigned int) sim.config.item_types.length,
             sim.config.gibbs_iterations,
-            sim.config.intensity_fn, sim.config.intensity_fn_args,
-            sim.config.interaction_fn, sim.config.interaction_fn_args, seed)) {
+            sim.config.item_types.data,
+            (unsigned int) sim.config.item_types.length, seed)) {
         free(sim.config); free(sim.data);
         free(sim.agents); free(sim.requested_moves);
         free(sim.scent_model); return false;
@@ -1604,9 +1657,7 @@ bool read(simulator<SimulatorData>& sim, Stream& in, const SimulatorData& data)
     }
     sim.agents.length = agent_count;
 
-    if (!read(sim.world, in, sim.config.intensity_fn, sim.config.interaction_fn,
-            sim.config.intensity_fn_args, sim.config.interaction_fn_args, sim.agents))
-    {
+    if (!read(sim.world, in, sim.config.item_types.data, sim.config.item_types.length, sim.agents)) {
         for (unsigned int j = 0; j < agent_count; j++) {
             free(*sim.agents[j]); free(sim.agents[j]);
         }

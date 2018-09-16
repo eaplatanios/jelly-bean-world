@@ -1,6 +1,6 @@
 import nel
 from timeit import default_timer
-from simulator_test import EasterlyAgent, make_config
+from simulator_test import SimpleAgent, make_config
 import numpy as np
 
 def compare_patches(patch1, patch2):
@@ -61,7 +61,7 @@ sim1 = nel.Simulator(sim_config=config)
 sim2 = nel.Simulator(sim_config=config, save_filepath="./temp/simulator_state", save_frequency=save_frequency)
 
 # add one agent to each simulator
-agent_type = EasterlyAgent
+agent_type = SimpleAgent
 agent1 = agent_type(sim1)
 agent2 = agent_type(sim2)
 
@@ -72,8 +72,8 @@ sim_start_time = sim2.time()
 (min_agent_position_x, min_agent_position_y) = (0, 0)
 (max_agent_position_x, max_agent_position_y) = (0, 0)
 for t in range(10000):
-	sim1.move(agent1, agent1.next_move(), 1)
-	sim2.move(agent2, agent2.next_move(), 1)
+	agent1.do_next_action()
+	agent2.do_next_action()
 	if default_timer() - start_time > 1.0:
 		elapsed += default_timer() - start_time
 		print(str((sim2.time() - sim_start_time) / elapsed) + " simulation steps per second.")

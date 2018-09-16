@@ -7,7 +7,8 @@ __all__ = ['Item', 'IntensityFunction', 'InteractionFunction']
 class Item(object):
   """Represents an item in the world (e.g., jelly beans)."""
 
-  def __init__(self, name, scent, color, required_item_counts, blocks_movement):
+  def __init__(self, name, scent, color, required_item_counts,
+               blocks_movement, intensity_fn, intensity_fn_args, interaction_fn_args):
     """Creates a new item.
   
     Arguments:
@@ -19,12 +20,27 @@ class Item(object):
                             collected by the agent in order to automatically
                             collect items of this type.
       blocks_movement:      Whether this item blocks movement of agents.
+      intensity_fn:         The IntensityFunction used by the Gibbs sampler for
+                            generating items of this type in the map.
+      intensity_fn_args:    A list of float arguments to intensity_fn.
+      interaction_fn_args:  A list of n lists, where n is the number of item
+                            types. For each sublist interaction_fn_args[i], the
+                            first element contains the InteractionFunction
+                            between items of this type and items of type i, and
+                            the remaining elements of the sublist contain the
+                            parameters to this interaction function.
     """
     self.name = name
     self.scent = scent
     self.color = color
     self.required_item_counts = required_item_counts
     self.blocks_movement = blocks_movement
+    self.intensity_fn = intensity_fn.value
+    self.intensity_fn_args = intensity_fn_args
+    self.interaction_fn_args = interaction_fn_args
+    assert all([len(l) > 0 and type(l[0]) == InteractionFunction for i in interaction_fn_args]), 'Each sublist in `interaction_fn_args` must contain an InteractionFunction instance as the first element.'
+    for l in interaction_fn_args:
+      l[0] = l[0].value
 
 
 class IntensityFunction(Enum):

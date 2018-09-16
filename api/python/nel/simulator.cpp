@@ -164,20 +164,20 @@ inline bool init(py_client_data& data) {
  * \returns A pair containing a pointer to the native array of floats and its
  *          length. The pointer is `NULL` upon error.
  */
-static pair<float*, Py_ssize_t> PyArg_ParseFloatList(PyObject* arg) {
+static pair<float*, Py_ssize_t> PyArg_ParseFloatList(PyObject* arg, Py_ssize_t start=0) {
     if (!PyList_Check(arg)) {
         PyErr_SetString(PyExc_ValueError, "Expected float list, but got invalid argument.");
         return make_pair<float*, Py_ssize_t>(NULL, 0);
     }
     Py_ssize_t len = PyList_Size(arg);
-    float* items = (float*) malloc(sizeof(float) * len);
+    float* items = (float*) malloc(max((size_t) 1, sizeof(float) * (len - start)));
     if (items == NULL) {
         PyErr_NoMemory();
         return make_pair<float*, Py_ssize_t>(NULL, 0);
     }
-    for (Py_ssize_t i = 0; i < len; i++)
-        items[i] = (float) PyFloat_AsDouble(PyList_GetItem(arg, i));
-    return make_pair(items, len);
+    for (Py_ssize_t i = start; i < len; i++)
+        items[i - start] = (float) PyFloat_AsDouble(PyList_GetItem(arg, i));
+    return make_pair(items, len - start);
 }
 
 /**
@@ -629,21 +629,15 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
     PyObject* py_agent_color;
     unsigned int seed;
     unsigned int collision_policy;
-    unsigned int py_intensity_fn;
-    unsigned int py_interaction_fn;
-    PyObject* py_intensity_fn_args;
-    PyObject* py_interaction_fn_args;
     PyObject* py_callback;
     unsigned int save_frequency;
     char* save_filepath;
     if (!PyArg_ParseTuple(
-      args, "IIOOIIIIIOOIffIIOIOOIz", &seed, &config.max_steps_per_movement,
+      args, "IIOOIIIIIOOIffIOIz", &seed, &config.max_steps_per_movement,
       &py_allowed_movement_directions, &py_allowed_turn_directions, &config.scent_dimension,
       &config.color_dimension, &config.vision_range, &config.patch_size, &config.gibbs_iterations,
       &py_items, &py_agent_color, &collision_policy, &config.decay_param, &config.diffusion_param,
-      &config.deleted_item_lifetime,
-      &py_intensity_fn, &py_intensity_fn_args, &py_interaction_fn, &py_interaction_fn_args,
-      &py_callback, &save_frequency, &save_filepath)) {
+      &config.deleted_item_lifetime, &py_callback, &save_frequency, &save_filepath)) {
         fprintf(stderr, "Invalid argument types in the call to 'simulator_c.new'.\n");
         return NULL;
     }
@@ -671,15 +665,26 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
     while (true) {
         PyObject *next_py_item = PyIter_Next(py_items_iter);
         if (!next_py_item) break;
+
         char* name;
         PyObject* py_scent;
         PyObject* py_color;
         PyObject* py_required_item_counts;
         PyObject* blocks_movement;
-        if (!PyArg_ParseTuple(next_py_item, "sOOOO", &name, &py_scent, &py_color, &py_required_item_counts, &blocks_movement)) {
+        unsigned int py_intensity_fn;
+        PyObject* py_intensity_fn_args;
+        PyObject* py_interaction_fn_args;
+        if (!PyArg_ParseTuple(next_py_item, "sOOOOIOO", &name, &py_scent, &py_color, &py_required_item_counts,
+          &blocks_movement, &py_intensity_fn, &py_intensity_fn_args, &py_interaction_fn_args)) {
             fprintf(stderr, "Invalid argument types for item property in call to 'simulator_c.new'.\n");
             return NULL;
         }
+
+        if (!PyList_Check(py_intensity_fn_args) || !PyList_Check(py_interaction_fn_args)) {
+            PyErr_SetString(PyExc_TypeError, "'intensity_fn_args' and 'interaction_fn_args' must be lists.\n");
+            return NULL;
+        }
+
         item_properties& new_item = config.item_types[config.item_types.length];
         init(new_item.name, name);
         new_item.scent = PyArg_ParseFloatList(py_scent).key;
@@ -688,6 +693,33 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
         for (Py_ssize_t i = 0; i < item_type_count; i++)
             new_item.required_item_counts[i] = PyLong_AsUnsignedLongLong(PyList_GetItem(py_required_item_counts, i));
         new_item.blocks_movement = (blocks_movement == Py_True);
+
+        pair<float*, Py_ssize_t> intensity_fn_args = PyArg_ParseFloatList(py_intensity_fn_args);
+        new_item.intensity_fn = get_intensity_fn((intensity_fns) py_intensity_fn,
+                intensity_fn_args.key, (unsigned int) intensity_fn_args.value);
+        if (new_item.intensity_fn == NULL) {
+            PyErr_SetString(PyExc_ValueError, "Invalid intensity"
+                    " function arguments in the call to 'simulator_c.new'.");
+            return NULL;
+        }
+        new_item.intensity_fn_args = intensity_fn_args.key;
+        new_item.intensity_fn_arg_count = (unsigned int) intensity_fn_args.value;
+        new_item.interaction_fn_arg_counts = (unsigned int*) malloc(sizeof(unsigned int) * item_type_count);
+        for (Py_ssize_t i = 0; i < item_type_count; i++) {
+            PyObject* sublist = PyList_GetItem(py_interaction_fn_args, i);
+            unsigned int py_interaction_fn = PyLong_AsUnsignedLong(PyList_GetItem(sublist, 0));
+
+            pair<float*, Py_ssize_t> interaction_fn_args = PyArg_ParseFloatList(sublist, 1);
+            new_item.interaction_fns[i] = get_interaction_fn((interaction_fns) py_interaction_fn,
+                    interaction_fn_args.key, (unsigned int) interaction_fn_args.value);
+            new_item.interaction_fn_args[i] = interaction_fn_args.key;
+            new_item.interaction_fn_arg_counts[i] = (unsigned int) (interaction_fn_args.value - 1);
+            if (new_item.interaction_fns[i] == NULL) {
+                PyErr_SetString(PyExc_ValueError, "Invalid interaction"
+                        " function arguments in the call to 'simulator_c.new'.");
+                return NULL;
+            }
+        }
         config.item_types.length += 1;
     }
 
@@ -702,23 +734,6 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
 
     config.agent_color = PyArg_ParseFloatList(py_agent_color).key;
     config.collision_policy = (movement_conflict_policy) collision_policy;
-    pair<float*, Py_ssize_t> intensity_fn_args = PyArg_ParseFloatList(py_intensity_fn_args);
-    pair<float*, Py_ssize_t> interaction_fn_args = PyArg_ParseFloatList(py_interaction_fn_args);
-    config.intensity_fn = get_intensity_fn((intensity_fns) py_intensity_fn,
-            intensity_fn_args.key, (unsigned int) intensity_fn_args.value, (unsigned int) config.item_types.length);
-    config.interaction_fn = get_interaction_fn((interaction_fns) py_interaction_fn,
-            interaction_fn_args.key, (unsigned int) interaction_fn_args.value, (unsigned int) config.item_types.length);
-    config.intensity_fn_args = intensity_fn_args.key;
-    config.interaction_fn_args = interaction_fn_args.key;
-    config.intensity_fn_arg_count = (unsigned int) intensity_fn_args.value;
-    config.interaction_fn_arg_count = (unsigned int) interaction_fn_args.value;
-
-    if (config.intensity_fn == NULL || config.interaction_fn == NULL
-     || config.intensity_fn_args == NULL || config.interaction_fn_args == NULL) {
-        PyErr_SetString(PyExc_ValueError, "Invalid intensity/interaction"
-                " function arguments in the call to 'simulator_c.new'.");
-        return NULL;
-    }
 
     py_simulator_data data(save_filepath,
             (save_filepath == NULL) ? 0 : strlen(save_filepath),
@@ -1226,7 +1241,8 @@ static PyObject* simulator_turn(PyObject *self, PyObject *args) {
  *            array has shape `(n, n, config.color_dimension)`.
  *          - (list) The list of items in this patch.
  *          - (list) The list of agents in this patch. The list contains tuples
- *            of 2 ints, which indicate the position of each agent.
+ *            of 3 ints, the first two indicate the position of each agent, and
+ *            the third indicates the direction.
  *
  *          The list of items contains a tuple for each item, where each tuple
  *          contains:
@@ -1251,7 +1267,7 @@ static PyObject* build_py_map(
 
         PyObject* py_agents = PyList_New(patch.agent_count);
         for (unsigned int i = 0; i < patch.agent_count; i++)
-            PyList_SetItem(py_agents, i, Py_BuildValue("(LL)", patch.agents[i].x, patch.agents[i].y));
+            PyList_SetItem(py_agents, i, Py_BuildValue("(LLL)", patch.agent_positions[i].x, patch.agent_positions[i].y, (size_t) patch.agent_directions[i]));
 
         npy_intp n = (npy_intp) config.patch_size;
         float* scent = (float*) malloc(sizeof(float) * n * n * config.scent_dimension);

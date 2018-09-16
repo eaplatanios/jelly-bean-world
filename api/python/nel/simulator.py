@@ -29,8 +29,7 @@ class SimulatorConfig(object):
   def __init__(self, max_steps_per_movement, allowed_movement_directions,
       allowed_turn_directions, vision_range, patch_size, gibbs_num_iter, items,
       agent_color, collision_policy, decay_param, diffusion_param,
-      deleted_item_lifetime, intensity_fn, intensity_fn_args, interaction_fn,
-      interaction_fn_args, seed=0):
+      deleted_item_lifetime, seed=0):
     """Creates a new simulator configuration.
 
     Arguments:
@@ -47,14 +46,6 @@ class SimulatorConfig(object):
                                    performed for sampling each patch of the
                                    map.
       items:                       List of items to include in this world.
-      intensity_fn:                Item intensity function used in the Gibbs
-                                   sampler for map generation. See class
-                                   `IntensityFunction` for further details.
-      intensity_fn_args:           Arguments to the item intensity function.
-      interaction_fn:              Item interaction function used in the Gibbs
-                                   sampler for map generation. See class
-                                   `InteractionFunction` for further details.
-      interaction_fn_args:         Arguments to the item interaction function.
       seed:                        The initial seed for the pseudorandom number
                                    generator.
     """
@@ -73,14 +64,11 @@ class SimulatorConfig(object):
     assert all([len(i.scent) == self.scent_num_dims for i in items]), 'All items must use the same dimensionality for the scent vector.'
     assert all([len(i.color) == self.color_num_dims for i in items]), 'All items must use the same dimensionality for the color vector.'
     assert all([len(i.required_item_counts) == len(items) for i in items]), 'The `required_item_counts` field must be the same dimension as `items`'
+    assert all([len(i.interaction_fn_args) == len(items) for i in items]), 'The `interaction_fn_args` field must be the same dimension as `items`'
     self.collision_policy = collision_policy
     self.decay_param = decay_param
     self.diffusion_param = diffusion_param
     self.deleted_item_lifetime = deleted_item_lifetime
-    self.intensity_fn = intensity_fn
-    self.intensity_fn_args = intensity_fn_args
-    self.interaction_fn = interaction_fn
-    self.interaction_fn_args = interaction_fn_args
     self.seed = seed
 
 
@@ -197,15 +185,11 @@ class Simulator(object):
       self._handle = simulator_c.new(sim_config.seed,
         sim_config.max_steps_per_movement, [d.value for d in sim_config.allowed_movement_directions],
         [d.value for d in sim_config.allowed_turn_directions], sim_config.scent_num_dims,
-        sim_config.color_num_dims, sim_config.vision_range, sim_config.patch_size,
-        sim_config.gibbs_num_iter,
-        [(i.name, i.scent, i.color, i.required_item_counts, i.blocks_movement) for i in sim_config.items],
-        sim_config.agent_color, sim_config.collision_policy.value,
-        sim_config.decay_param, sim_config.diffusion_param,
-        sim_config.deleted_item_lifetime,
-        sim_config.intensity_fn.value, sim_config.intensity_fn_args,
-        sim_config.interaction_fn.value, sim_config.interaction_fn_args,
-        self._step_callback, save_frequency, save_filepath)
+        sim_config.color_num_dims, sim_config.vision_range, sim_config.patch_size, sim_config.gibbs_num_iter,
+        [(i.name, i.scent, i.color, i.required_item_counts, i.blocks_movement, i.intensity_fn, i.intensity_fn_args, i.interaction_fn_args) for i in sim_config.items],
+        sim_config.agent_color, sim_config.collision_policy.value, sim_config.decay_param,
+        sim_config.diffusion_param, sim_config.deleted_item_lifetime, self._step_callback,
+        save_frequency, save_filepath)
       if is_server:
         self._server_handle = simulator_c.start_server(
           self._handle, port, conn_queue_capacity, num_workers)
@@ -262,7 +246,7 @@ class Simulator(object):
     (agent._position, agent._direction, agent._scent, agent._vision, agent._items) = (position, Direction(direction), scent, vision, items)
     return id
 
-  def move(self, agent, direction, num_steps):
+  def move(self, agent, direction, num_steps=1):
     """Moves the specified agent in the simulated environment.
 
     Note that the agent is not moved until the simulator advances by a 
@@ -280,7 +264,7 @@ class Simulator(object):
     return simulator_c.move(self._handle,
       self._client_handle, agent._id, direction.value, num_steps)
 
-  def turn(self, agent, direction, num_steps):
+  def turn(self, agent, direction):
     """Turns the specified agent in the simulated environment.
 
     Note that the agent is not turned until the simulator advances by a 

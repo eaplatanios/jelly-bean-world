@@ -38,8 +38,14 @@ class Agent(object):
   def collected_items(self):
     return self._items
 
+  def move(self, direction, num_steps=1):
+    return self._simulator.move(self, direction, num_steps)
+
+  def turn(self, direction):
+    return self._simulator.turn(self, direction)
+
   @abc.abstractmethod
-  def next_move(self):
+  def do_next_action(self):
     pass
 
   @abc.abstractmethod

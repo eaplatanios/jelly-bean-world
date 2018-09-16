@@ -107,36 +107,22 @@ void* alloc_position_keys(size_t n, size_t element_size) {
 	return (void*) keys;
 }
 
-template<typename PerPatchData>
+template<typename PerPatchData, typename ItemType>
 struct map {
 	hash_map<position, patch<PerPatchData>> patches;
 
-	intensity_function intensity_fn;
-	interaction_function interaction_fn;
-
-	// We assume that the length of the args arrays is known at this point and has been checked.
-	float* intensity_fn_args;
-	float* interaction_fn_args;
-
 	unsigned int n;
-	unsigned int item_type_count;
 	unsigned int gibbs_iterations;
 
 	std::minstd_rand rng;
-	gibbs_field_cache cache;
+	gibbs_field_cache<ItemType> cache;
 
 	typedef patch<PerPatchData> patch_type;
-	typedef item item_type;
+	typedef ItemType item_type;
 
 public:
-	map(unsigned int n, unsigned int item_type_count, unsigned int gibbs_iterations,
-			intensity_function intensity_fn, float* intensity_fn_args, 
-			interaction_function interaction_fn, float* interaction_fn_args, uint_fast32_t seed) :
-		patches(1024, alloc_position_keys), 
-		intensity_fn(intensity_fn), interaction_fn(interaction_fn), 
-		intensity_fn_args(intensity_fn_args), interaction_fn_args(interaction_fn_args), 
-		n(n), item_type_count(item_type_count), gibbs_iterations(gibbs_iterations),
-		cache(*this, n, item_type_count, is_stationary(intensity_fn), is_stationary(interaction_fn))
+	map(unsigned int n, unsigned int gibbs_iterations, const ItemType* item_types, unsigned int item_type_count, uint_fast32_t seed) :
+		patches(1024, alloc_position_keys), n(n), gibbs_iterations(gibbs_iterations), cache(item_types, item_type_count, n)
 	{
 		rng.seed(seed);
 #if !defined(NDEBUG)
@@ -146,10 +132,8 @@ public:
 #endif
 	}
 
-	map(unsigned int n, unsigned int item_type_count, unsigned int gibbs_iterations,
-			intensity_function intensity_fn, float* intensity_fn_args, 
-			interaction_function interaction_fn, float* interaction_fn_args) :
-		map(n, item_type_count, gibbs_iterations, intensity_fn, intensity_fn_args, interaction_fn, interaction_fn_args,
+	map(unsigned int n, unsigned int gibbs_iterations, const ItemType* item_types, unsigned int item_type_count) :
+		map(n, gibbs_iterations, item_types, item_type_count,
 #if !defined(NDEBUG)
 			0) { }
 #else
@@ -160,17 +144,6 @@ public:
 
 	inline void set_seed(uint_fast32_t new_seed) {
 		rng.seed(new_seed);
-	}
-
-	inline float intensity(const position& pos, unsigned int item_type) const {
-		return intensity_fn(pos, item_type, intensity_fn_args);
-	}
-
-	inline float interaction(
-			const position& pos1, const position& pos2,
-			unsigned int item_type1, unsigned int item_type2) const
-	{
-		return interaction_fn(pos1, pos2, item_type1, item_type2, interaction_fn_args);
 	}
 
 	inline patch_type& get_existing_patch(const position& patch_position) {
@@ -498,30 +471,13 @@ private:
 		}
 
 		/* construct the Gibbs field and sample the patches at positions_to_sample */
-		if (is_stationary(intensity_fn)) {
-			if (is_stationary(interaction_fn)) {
-				sample_patches<true, true>(positions_to_sample);
-			} else {
-				sample_patches<true, false>(positions_to_sample);
-			}
-		} else {
-			if (is_stationary(interaction_fn)) {
-				sample_patches<false, true>(positions_to_sample);
-			} else {
-				sample_patches<false, false>(positions_to_sample);
-			}
-		}
+		gibbs_field<map<PerPatchData, ItemType>> field(
+				*this, cache, positions_to_sample.data, (unsigned int) positions_to_sample.length, n);
+		for (unsigned int i = 0; i < gibbs_iterations; i++)
+			field.sample(rng);
 
 		for (unsigned int i = 0; i < patch_count; i++)
 			patches[i]->fixed = true;
-	}
-
-	template<bool StationaryIntensity, bool StationaryInteraction>
-	inline void sample_patches(const array<position>& positions_to_sample) {
-		gibbs_field<map<PerPatchData>, StationaryIntensity, StationaryInteraction> field(
-				*this, cache, positions_to_sample.data, (unsigned int) positions_to_sample.length, n, item_type_count);
-		for (unsigned int i = 0; i < gibbs_iterations; i++)
-			field.sample(rng);
 	}
 
 	inline void free_helper() {
@@ -530,24 +486,16 @@ private:
 	}
 };
 
-template<typename PerPatchData>
-inline bool init(map<PerPatchData>& world, unsigned int n,
-		unsigned int item_type_count, unsigned int gibbs_iterations,
-		intensity_function intensity_fn, float* intensity_fn_args, 
-		interaction_function interaction_fn, float* interaction_fn_args,
-		uint_fast32_t seed)
+template<typename PerPatchData, typename ItemType>
+inline bool init(map<PerPatchData, ItemType>& world, unsigned int n,
+		unsigned int gibbs_iterations, const ItemType* item_types,
+		unsigned int item_type_count, uint_fast32_t seed)
 {
 	if (!hash_map_init(world.patches, 1024, alloc_position_keys))
 		return false;
-	world.intensity_fn = intensity_fn;
-	world.interaction_fn = interaction_fn;
-	world.intensity_fn_args = intensity_fn_args;
-	world.interaction_fn_args = interaction_fn_args;
 	world.n = n;
-	world.item_type_count = item_type_count;
 	world.gibbs_iterations = gibbs_iterations;
-	if (!init(world.cache, world, n, item_type_count,
-			is_stationary(intensity_fn), is_stationary(interaction_fn))) {
+	if (!init(world.cache, item_types, item_type_count, n)) {
 		free(world.patches);
 		return false;
 	}
@@ -556,27 +504,22 @@ inline bool init(map<PerPatchData>& world, unsigned int n,
 	return true;
 }
 
-template<typename PerPatchData>
-inline bool init(map<PerPatchData>& world, unsigned int n,
-		unsigned int item_type_count, unsigned int gibbs_iterations,
-		intensity_function intensity_fn, float* intensity_fn_args, 
-		interaction_function interaction_fn, float* interaction_fn_args)
+template<typename PerPatchData, typename ItemType>
+inline bool init(map<PerPatchData, ItemType>& world, unsigned int n,
+		unsigned int gibbs_iterations, const ItemType* item_types,
+		unsigned int item_type_count)
 {
 #if !defined(NDEBUG)
 	uint_fast32_t seed = 0;
 #else
 	uint_fast32_t seed = (uint_fast32_t) milliseconds();
 #endif
-	return init(world, n, item_type_count, gibbs_iterations, intensity_fn,
-			intensity_fn_args, interaction_fn, interaction_fn_args, seed);
+	return init(world, n, gibbs_iterations, item_types, item_type_count, seed);
 }
 
-template<typename PerPatchData, typename Stream, typename PatchReader>
-bool read(map<PerPatchData>& world, Stream& in,
-		intensity_function intensity_fn,
-		interaction_function interaction_fn,
-		float* intensity_fn_args,
-		float* interaction_fn_args,
+template<typename PerPatchData, typename ItemType, typename Stream, typename PatchReader>
+bool read(map<PerPatchData, ItemType>& world, Stream& in,
+		const ItemType* item_types, unsigned int item_type_count,
 		PatchReader& patch_reader = default_scribe())
 {
 	/* read PRNG state into a char* buffer */
@@ -590,18 +533,11 @@ bool read(map<PerPatchData>& world, Stream& in,
 	buffer >> world.rng;
 
 	default_scribe scribe;
-	world.intensity_fn = intensity_fn;
-	world.interaction_fn = interaction_fn;
-	world.intensity_fn_args = intensity_fn_args;
-	world.interaction_fn_args = interaction_fn_args;
 	if (!read(world.n, in)
-	 || !read(world.item_type_count, in)
 	 || !read(world.gibbs_iterations, in)
 	 || !read(world.patches, in, alloc_position_keys, scribe, patch_reader))
 		return false;
-	if (!init(world.cache, world, world.n, world.item_type_count,
-			is_stationary(intensity_fn), is_stationary(interaction_fn)))
-	{
+	if (!init(world.cache, item_types, item_type_count, world.n)) {
 		free(world.patches);
 		return false;
 	}
@@ -609,8 +545,8 @@ bool read(map<PerPatchData>& world, Stream& in,
 }
 
 /* NOTE: this function assumes the variables in the map are not modified during writing */
-template<typename PerPatchData, typename Stream, typename PatchWriter>
-bool write(const map<PerPatchData>& world, Stream& out,
+template<typename PerPatchData, typename ItemType, typename Stream, typename PatchWriter>
+bool write(const map<PerPatchData, ItemType>& world, Stream& out,
 		PatchWriter& patch_writer = default_scribe())
 {
 	/* write the PRNG state into a stringstream buffer */
@@ -623,7 +559,6 @@ bool write(const map<PerPatchData>& world, Stream& out,
 
 	default_scribe scribe;
 	return write(world.n, out)
-		&& write(world.item_type_count, out)
 		&& write(world.gibbs_iterations, out)
 		&& write(world.patches, out, scribe, patch_writer);
 }

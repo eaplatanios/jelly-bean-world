@@ -1,6 +1,6 @@
 import nel
 from timeit import default_timer
-from simulator_test import EasterlyAgent, make_config
+from simulator_test import SimpleAgent, make_config
 from threading import Lock, Condition
 
 cv = Condition(Lock())
@@ -22,7 +22,7 @@ agents = []
 while len(agents) < 1:
 	print("adding agent " + str(len(agents)))
 	try:
-		agent = EasterlyAgent(sim)
+		agent = SimpleAgent(sim)
 		agents.append(agent)
 	except nel.AddAgentError:
 		pass
@@ -30,7 +30,7 @@ while len(agents) < 1:
 	# move agents to avoid collision at (0,0)
 	waiting = True
 	for agent in agents:
-		sim.move(agent, agent.next_move(), 1)
+		agent.do_next_action()
 
 # start main loop
 start_time = default_timer()
@@ -40,7 +40,7 @@ while True:
 	if not waiting:
 		waiting = True
 		for agent in agents:
-			sim.move(agent, agent.next_move(), 1)
+			agent.do_next_action()
 	if default_timer() - start_time > 1.0:
 		elapsed += default_timer() - start_time
 		print(str((sim.time() - sim_start_time) / elapsed) + " simulation steps per second.")

@@ -513,7 +513,7 @@ template<typename ClientType>
 bool send_turn(ClientType& c, uint64_t agent_id, direction dir) {
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(dir));
 	fixed_width_stream<memory_stream> out(mem_stream);
-	return write(message_type::MOVE, out)
+	return write(message_type::TURN, out)
 		&& write(agent_id, out)
 		&& write(dir, out)
 		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
