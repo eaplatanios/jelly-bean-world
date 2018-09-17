@@ -32,11 +32,6 @@ class NELEnv(gym.Env):
 
     self.reset()
 
-    if self._render:
-      self._painter = MapVisualizer(
-        self._sim, self.sim_config, 
-        bottom_left=(-70, -70), top_right=(70, 70))
-
     # Computing shapes for the observation space.
     scent_shape = [len(self.sim_config.items[0].scent)]
     vision_dim = len(self.sim_config.items[0].color)
