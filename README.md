@@ -21,7 +21,14 @@ cd api/python
 python setup.py install
 ```
 
+Note that if you plan to use this framework with OpenAI gym
+you should also install `gym` using `pip install gym`.
+
 ### Usage
+
+We first present a typical workflow in Python, without 
+using OpenAI gym and we then show how to use this framework 
+within OpenAI gym.
 
 The typical workflow is as follows:
 
@@ -95,6 +102,49 @@ sim = nel.Simulator(server_address="localhost")
 See [api/python/test/server_test.py](api/python/test/server_test.py) and
 [api/python/test/client_test.py](api/python/test/client_test.py) for an example
 of simulators running in server and client modes (using MPI to communicate).
+
+#### Using with OpenAI Gym
+
+We also provide a NEL environment for OpenAI gym, which is 
+implemented in [api/python/nel/environment.py](api/python/nel/environment.py). 
+
+The action space consists of three actions:
+  - `0`: Move forward.
+  - `1`: Turn left.
+  - `2`: Turn right.
+
+The observation space consists of a dictionary:
+  - `scent`: Vector with shape `[S]`, where `S` is the 
+    scent dimensionality.
+  - `vision`: Matrix with shape `[2R+1, 2R+1, V]`, 
+    where `R` is the vision range and `V` is the 
+    vision/color dimensionality.
+
+After installing the `nel` framework and `gym`, the 
+provided environment can be used as follows:
+
+```python
+import gym
+import nel
+
+# Use 'NEL-render-v0' to include rendering support.
+# Otherwise, use 'NEL-v0', which should be much faster.
+env = gym.make('NEL-render-v0')
+
+# The created environment can then be used as any other 
+# OpenAI gym environment. For example:
+for t in range(10000):
+  # Render the current environment.
+  env.render()
+  # Sample a random action.
+  action = env.action_space.sample()
+  # Run a simulation step using the sampled action.
+  observation, reward, _, _ = env.step(action)
+```
+
+Environments with different configurations can be 
+registered as shown in [api/python/nel/environments.py](api/python/nel/environments.py) 
+and used as shown above.
 
 ### Agent class
 

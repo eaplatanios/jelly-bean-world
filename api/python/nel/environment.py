@@ -28,6 +28,13 @@ class NELEnv(gym.Env):
     - `1`: Turn left.
     - `2`: Turn right.
   
+  The observation space consists of a dictionary:
+    - `scent`: Vector with shape `[S]`, where `S` is the 
+      scent dimensionality.
+    - `vision`: Matrix with shape `[2R+1, 2R+1, V]`, 
+      where `R` is the vision range and `V` is the 
+      vision/color dimensionality.
+  
   After following the instructions provided in the main 
   `README` file to install the `nel` framework, and 
   installing `gym` using `pip install gym`, this 
