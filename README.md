@@ -119,6 +119,8 @@ The observation space consists of a dictionary:
   - `vision`: Matrix with shape `[2R+1, 2R+1, V]`, 
     where `R` is the vision range and `V` is the 
     vision/color dimensionality.
+  - `moved`: Binary value indicating whether the last 
+    action resulted in the agent moving.
 
 After installing the `nel` framework and `gym`, the 
 provided environment can be used as follows:

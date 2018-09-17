@@ -34,6 +34,8 @@ class NELEnv(gym.Env):
     - `vision`: Matrix with shape `[2R+1, 2R+1, V]`, 
       where `R` is the vision range and `V` is the 
       vision/color dimensionality.
+    - `moved`: Binary value indicating whether the last 
+      action resulted in the agent moving.
   
   After following the instructions provided in the main 
   `README` file to install the `nel` framework, and 
@@ -103,10 +105,13 @@ class NELEnv(gym.Env):
     max_vision = max_float * np.ones(vision_shape)
 
     # Observations in this environment consist of a scent 
-    # vector and a vision matrix.
+    # vector, a vision matrix, and a binary value 
+    # indicating whether the last action resulted in the 
+    # agent moving.
     self.observation_space = spaces.Dict({
       'scent': spaces.Box(low=min_scent, high=max_scent), 
-      'vision': spaces.Box(low=min_vision, high=max_vision)})
+      'vision': spaces.Box(low=min_vision, high=max_vision),
+      'moved': spaces.Discrete(2)})
 
     # There are three possible actions:
     #   1. Move forward,
@@ -124,26 +129,36 @@ class NELEnv(gym.Env):
                     - `2`: Turn right.
     
     Returns:
-      Tuple containing:
-        - The new agent state, which is dictionary 
-          that contains a `'scent'` vector, with shape 
-          `[S]` where `S` is the scent dimensionality, 
-          and a `'vision'` matrix, with shape 
-          `[2R+1, 2R+1, V]`, where `R` is the vision 
-          range and `V` is the vision/color dimensionality.
+      observation (dictionary): Contains:
+          - `scent`: Vector with shape `[S]`, where `S` 
+            is the scent dimensionality.
+          - `vision`: Matrix with shape 
+            `[2R+1, 2R+1, V]`, where `R` is the vision 
+            range and `V` is the vision/color 
+            dimensionality.
+          - `moved`: Binary value indicating whether the 
+            last action resulted in the agent moving.
+      reward (float): Amount of reward obtained from the 
+          last action.
+      done (bool): Whether or not the episode has ended 
+          which is always `False` for this environment.
+      info (dict): Empty dictionary.
     """
+    prev_position = self._agent.position()
     prev_items = self._agent.collected_items()
 
     self._agent._next_action = action
     self._agent.do_next_action()
 
+    position = self._agent.position()
     items = self._agent.collected_items()
     reward = self._reward_fn(prev_items, items)
     done = False
 
     self.state = {
       'scent': self._agent.scent(), 
-      'vision': self._agent.vision()}
+      'vision': self._agent.vision(), 
+      'moved': np.any(prev_position != position)}
     
     return self.state, reward, done, {}
     
@@ -159,7 +174,8 @@ class NELEnv(gym.Env):
         bottom_left=(-70, -70), top_right=(70, 70))
     self.state = {
       'scent': self._agent.scent(), 
-      'vision': self._agent.vision()}
+      'vision': self._agent.vision(), 
+      'moved': False}
     return self.state
 
   def render(self, mode='matplotlib'):

@@ -10,4 +10,4 @@ for t in range(10000):
   action = env.action_space.sample()
   print(action)
   observation, reward, _, _ = env.step(action)
-  print(observation['scent'])
+  print(observation['moved'])
