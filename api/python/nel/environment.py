@@ -27,6 +27,7 @@ class NELEnv(gym.Env):
     """
     self.sim_config = sim_config
     self._sim = None
+    self._painter = None
     self._reward_fn = reward_fn
     self._render = render
 
@@ -81,6 +82,7 @@ class NELEnv(gym.Env):
     self._sim = Simulator(sim_config=self.sim_config)
     self._agent = _NELEnvAgent(self._sim)
     if self._render:
+      del self._painter
       self._painter = MapVisualizer(
         self._sim, self.sim_config, 
         bottom_left=(-70, -70), top_right=(70, 70))
