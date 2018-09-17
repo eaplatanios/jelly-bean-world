@@ -5,10 +5,9 @@ import gym
 
 env = gym.make('NEL-render-v0')
 
-observation = env.reset()
 for t in range(10000):
   env.render()
   action = env.action_space.sample()
   print(action)
   observation, reward, _, _ = env.step(action)
-  print(observation)
+  print(observation['scent'])

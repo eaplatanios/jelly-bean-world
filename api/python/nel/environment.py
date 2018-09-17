@@ -21,9 +21,55 @@ __all__ = ['NELEnv']
 
 
 class NELEnv(gym.Env):
-  def __init__(self, sim_config, reward_fn, render=False):
-    """
+  """NEL environment for OpenAI gym.
 
+  The action space consists of three actions:
+    - `0`: Move forward.
+    - `1`: Turn left.
+    - `2`: Turn right.
+  
+  After following the instructions provided in the main 
+  `README` file to install the `nel` framework, and 
+  installing `gym` using `pip install gym`, this 
+  environment can be used as follows:
+
+  ```
+  import gym
+  import nel
+
+  # Use 'NEL-render-v0' to include rendering support.
+  # Otherwise, use 'NEL-v0', which should be much faster.
+  env = gym.make('NEL-render-v0')
+
+  # The created environment can then be used as any other 
+  # OpenAI gym environment. For example:
+  for t in range(10000):
+    # Render the current environment.
+    env.render()
+    # Sample a random action.
+    action = env.action_space.sample()
+    # Run a simulation step using the sampled action.
+    observation, reward, _, _ = env.step(action)
+  ```
+  """
+
+  def __init__(
+      self, sim_config, reward_fn, render=False):
+    """Creates a new NEL environment for OpenAI gym.
+
+    Arguments:
+      sim_config(SimulatorConfig) Simulator configuration
+                                  to use.
+      reward_fn(callable)         Function that takes the 
+                                  previously collected 
+                                  items and the current 
+                                  collected items as inputs
+                                  and returns a reward 
+                                  value.
+      render(bool)                Boolean value indicating 
+                                  whether or not to support 
+                                  rendering the 
+                                  environment.
     """
     self.sim_config = sim_config
     self._sim = None
@@ -62,6 +108,23 @@ class NELEnv(gym.Env):
     self.action_space = spaces.Discrete(3)
 
   def step(self, action):
+    """Runs a simulation step.
+    
+    Arguments:
+      action(int) Action to take, which can be one of:
+                    - `0`: Move forward.
+                    - `1`: Turn left.
+                    - `2`: Turn right.
+    
+    Returns:
+      Tuple containing:
+        - The new agent state, which is dictionary 
+          that contains a `'scent'` vector, with shape 
+          `[S]` where `S` is the scent dimensionality, 
+          and a `'vision'` matrix, with shape 
+          `[2R+1, 2R+1, V]`, where `R` is the vision 
+          range and `V` is the vision/color dimensionality.
+    """
     prev_items = self._agent.collected_items()
 
     self._agent._next_action = action
@@ -78,6 +141,7 @@ class NELEnv(gym.Env):
     return self.state, reward, done, {}
     
   def reset(self):
+    """Resets this environment to its initial state."""
     del self._sim
     self._sim = Simulator(sim_config=self.sim_config)
     self._agent = _NELEnvAgent(self._sim)
