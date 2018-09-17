@@ -11,8 +11,8 @@ A framework for experimenting with never-ending learning.
 
 ### Installation Instructions
 
-Assuming that you have Python installed in your system and 
-that you are located in the root directory of this 
+Assuming that you have Python installed in your system and
+that you are located in the root directory of this
 repository, run the following commands:
 
 ```bash
@@ -148,16 +148,18 @@ and used as shown above.
 
 ### Agent class
 
-Agents have a very simple interface. They have an abstract `next_move` method
-which should contain the decision-making logic of the agent and return the
-direction in which the agent has decided to move. The Agent class has an
-abstract `save` method that users can implement to save the state of an agent
-to a file. `save` is called by Simulator whenever the simulator is saved. The
-Agent class also has an abstract `_load` method which is called by the Agent
-constructor to load the agent's state from a given filepath.
+Agents have a very simple interface. They have an abstract `do_next_action`
+method which should contain the decision-making logic of the agent and call
+methods such as `self.move` or `self.turn` to perform the next action. The
+Agent class has an abstract `save` method that users can implement to save the
+state of an agent to a file. `save` is called by Simulator whenever the
+simulator is saved. The Agent class also has an abstract `_load` method which
+is called by the Agent constructor to load the agent's state from a given
+filepath.
 
 Agents also have a private fields that store state information, such as the
-agent's position, current scent perception, current visual perception, etc.
+agent's position, direction, current scent perception, current visual
+perception, etc.
 
 ## Using C++
 
@@ -291,10 +293,10 @@ invoked, which must be defined by the user.
 
 ## Design
 
-The center of our design is the **simulator**. The simulator handles everything 
-that happens to our artificial environment. It does by controlling the map 
-generation process, as well as the agent-environment interaction. **Agents** are 
-part of the design too, but in a very limited way. This is intentional, and it 
+The center of our design is the **simulator**. The simulator handles everything
+that happens to our artificial environment. It does by controlling the map
+generation process, as well as the agent-environment interaction. **Agents** are
+part of the design too, but in a very limited way. This is intentional, and it
 is done in order to allow for flexibility in the design of custom agents.
 
 ### Simulator
@@ -308,8 +310,8 @@ The simulator controls the following things:
 Under the current design:
 
   - Each simulator *owns* a set of agents.
-  - Users can easily add/register new agents to an existing simulator. 
-  - Each agent interacts with the simulator by deciding 
+  - Users can easily add/register new agents to an existing simulator.
+  - Each agent interacts with the simulator by deciding
     **when and where to move**.
   - Once all agents have requested to perform an action, the simulator
     progresses by one time step and notifies invokes a callback function.
@@ -317,7 +319,7 @@ Under the current design:
     collected items are available in each agent's state information.
 
 **NOTE:** Note that the agent is not moved until the simulator advances the
-time step and issues a notification about that event. The simulator only 
+time step and issues a notification about that event. The simulator only
 advances the time step once all agents have requested to act.
 
 We provide a message-passing interface (using TCP) to allow the simulator to
@@ -381,7 +383,7 @@ scent (or lack thereof) diffuses correctly.
 
 ### Implementation
 
-The core library is implemented in **C++** and has no dependencies. It should 
+The core library is implemented in **C++** and has no dependencies. It should
 be able to run on Mac, Linux, and Windows. We already provide a **Python** API
 that is quite simple to use and extend. APIs for other languages should also be
 easy to implement.
