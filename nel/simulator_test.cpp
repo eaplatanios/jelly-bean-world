@@ -33,7 +33,7 @@ enum class movement_pattern {
 };
 
 constexpr unsigned int agent_count = 1;
-constexpr unsigned int max_time = 10000;
+constexpr unsigned int max_time = 100;
 constexpr movement_conflict_policy collision_policy = movement_conflict_policy::FIRST_COME_FIRST_SERVED;
 constexpr movement_pattern move_pattern = movement_pattern::RADIAL;
 unsigned int sim_time = 0;
@@ -502,6 +502,7 @@ int main(int argc, const char** argv)
 	config.item_types[0].scent = (float*) calloc(config.scent_dimension, sizeof(float));
 	config.item_types[0].color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.item_types[0].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
+	config.item_types[0].required_item_costs = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
 	config.item_types[0].scent[1] = 1.0f;
 	config.item_types[0].color[1] = 1.0f;
 	config.item_types[0].required_item_counts[0] = 1;
@@ -510,6 +511,7 @@ int main(int argc, const char** argv)
 	config.item_types[1].scent = (float*) calloc(config.scent_dimension, sizeof(float));
 	config.item_types[1].color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.item_types[1].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
+	config.item_types[1].required_item_costs = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
 	config.item_types[1].scent[0] = 1.0f;
 	config.item_types[1].color[0] = 1.0f;
 	config.item_types[1].required_item_counts[1] = 1;
@@ -518,6 +520,7 @@ int main(int argc, const char** argv)
 	config.item_types[2].scent = (float*) calloc(config.scent_dimension, sizeof(float));
 	config.item_types[2].color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.item_types[2].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
+	config.item_types[2].required_item_costs = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
 	config.item_types[2].scent[2] = 1.0f;
 	config.item_types[2].color[2] = 1.0f;
 	config.item_types[2].blocks_movement = false;

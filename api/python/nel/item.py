@@ -7,7 +7,7 @@ __all__ = ['Item', 'IntensityFunction', 'InteractionFunction']
 class Item(object):
   """Represents an item in the world (e.g., jelly beans)."""
 
-  def __init__(self, name, scent, color, required_item_counts,
+  def __init__(self, name, scent, color, required_item_counts, required_item_costs,
                blocks_movement, intensity_fn, intensity_fn_args, interaction_fns):
     """Creates a new item.
   
@@ -19,6 +19,10 @@ class Item(object):
                             minimum number of items of type `i` that need to be
                             collected by the agent in order to automatically
                             collect items of this type.
+      required_item_costs:  A list whose value at index `i` indicates the
+                            number of items of type `i` that are removed from
+                            the agent's inventory whenever the agent collects
+                            items of this type.
       blocks_movement:      Whether this item blocks movement of agents.
       intensity_fn:         The IntensityFunction used by the Gibbs sampler for
                             generating items of this type in the map.
@@ -34,6 +38,7 @@ class Item(object):
     self.scent = scent
     self.color = color
     self.required_item_counts = required_item_counts
+    self.required_item_costs = required_item_costs
     self.blocks_movement = blocks_movement
     self.intensity_fn = intensity_fn.value
     self.intensity_fn_args = intensity_fn_args

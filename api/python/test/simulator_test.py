@@ -1,3 +1,4 @@
+import matplotlib
 import nel
 from random import choice
 from timeit import default_timer
@@ -31,7 +32,7 @@ class SimpleAgent(nel.Agent):
 def make_config():
 	# specify the item types
 	items = []
-	items.append(nel.Item("banana",    [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [1, 0, 0, 0], False,
+	items.append(nel.Item("banana",    [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [1, 0, 0, 0], [0, 0, 0, 0], False,
 					   intensity_fn=nel.IntensityFunction.CONSTANT, intensity_fn_args=[-5.3],
 					   interaction_fns=[
 						   [nel.InteractionFunction.PIECEWISE_BOX, 10.0, 200.0, 0.0, -6.0],      # parameters for interaction between item 0 and item 0
@@ -39,7 +40,7 @@ def make_config():
 						   [nel.InteractionFunction.PIECEWISE_BOX, 10.0, 200.0, 2.0, -100.0],    # parameters for interaction between item 0 and item 2
 						   [nel.InteractionFunction.ZERO]                                        # parameters for interaction between item 0 and item 3
 						]))
-	items.append(nel.Item("onion",     [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0, 1, 0, 0], False,
+	items.append(nel.Item("onion",     [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0, 1, 0, 0], [0, 0, 0, 0], False,
 					   intensity_fn=nel.IntensityFunction.CONSTANT, intensity_fn_args=[-5.0],
 					   interaction_fns=[
 						   [nel.InteractionFunction.PIECEWISE_BOX, 200.0, 0.0, -6.0, -6.0],      # parameters for interaction between item 1 and item 0
@@ -47,7 +48,7 @@ def make_config():
 						   [nel.InteractionFunction.PIECEWISE_BOX, 200.0, 0.0, -100.0, -100.0],  # parameters for interaction between item 1 and item 2
 						   [nel.InteractionFunction.ZERO]                                        # parameters for interaction between item 1 and item 3
 						]))
-	items.append(nel.Item("jellybean", [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0, 0, 0, 0], False,
+	items.append(nel.Item("jellybean", [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0, 0, 0, 0], [0, 0, 0, 0], False,
 					   intensity_fn=nel.IntensityFunction.CONSTANT, intensity_fn_args=[-5.3],
 					   interaction_fns=[
 						   [nel.InteractionFunction.PIECEWISE_BOX, 10.0, 200.0, 2.0, -100.0],    # parameters for interaction between item 2 and item 0
@@ -55,7 +56,7 @@ def make_config():
 						   [nel.InteractionFunction.PIECEWISE_BOX, 10.0, 200.0, 0.0, -6.0],      # parameters for interaction between item 2 and item 2
 						   [nel.InteractionFunction.ZERO]                                        # parameters for interaction between item 2 and item 3
 						]))
-	items.append(nel.Item("wall",      [0.0, 0.0, 0.0], [0.5, 0.5, 0.5], [0, 0, 0, 1], True,
+	items.append(nel.Item("wall",      [0.0, 0.0, 0.0], [0.5, 0.5, 0.5], [0, 0, 0, 1], [0, 0, 0, 0], True,
 					   intensity_fn=nel.IntensityFunction.CONSTANT, intensity_fn_args=[0.0],
 					   interaction_fns=[
 						   [nel.InteractionFunction.ZERO],                                       # parameters for interaction between item 3 and item 0

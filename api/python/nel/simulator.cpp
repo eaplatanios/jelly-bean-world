@@ -599,11 +599,6 @@ static inline void import_errors() {
  *                  - (int) The duration of time for which removed items are
  *                    remembered by the simulation in order to compute their
  *                    scent contribution.
- *                  - (int) The ID of the intensity function.
- *                  - (list of floats) The arguments to the intensity function.
- *                  - (int) The ID of the interaction function.
- *                  - (list of floats) The arguments to the interaction
- *                    function.
  *                  - (function) The function to invoke when the simulator
  *                    advances time.
  *                  - (int) The frequency by which the simulator is saved to
@@ -616,8 +611,18 @@ static inline void import_errors() {
  *                  - (string) The name.
  *                  - (list of floats) The item scent.
  *                  - (list of floats) The item color.
- *                  - (bool) Whether the item is automatically collected by
- *                    agents.
+ *                  - (list of ints) The number of items of each type that is
+ *                    required to automatically collect items of this type.
+ *                  - (list of ints) The number of items of each type that is
+ *                    removed from the agent's inventory whenever an item of
+ *                    this type is collected.
+ *                  - (bool) Whether this item type blocks agent movement.
+ *                  - (int) The ID of the intensity function.
+ *                  - (list of floats) The arguments to the intensity function.
+ *                  - (list of list of floats) The list of interaction
+ *                    functions, where the first element in each sublist is the
+ *                    ID of the interaction function, and the remaining
+ *                    elements are its arguments.
  * \returns Pointer to the new simulator.
  */
 static PyObject* simulator_new(PyObject *self, PyObject *args)
@@ -670,12 +675,13 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
         PyObject* py_scent;
         PyObject* py_color;
         PyObject* py_required_item_counts;
+        PyObject* py_required_item_costs;
         PyObject* blocks_movement;
         unsigned int py_intensity_fn;
         PyObject* py_intensity_fn_args;
         PyObject* py_interaction_fn_args;
-        if (!PyArg_ParseTuple(next_py_item, "sOOOOIOO", &name, &py_scent, &py_color, &py_required_item_counts,
-          &blocks_movement, &py_intensity_fn, &py_intensity_fn_args, &py_interaction_fn_args)) {
+        if (!PyArg_ParseTuple(next_py_item, "sOOOOOIOO", &name, &py_scent, &py_color, &py_required_item_counts,
+          &py_required_item_costs, &blocks_movement, &py_intensity_fn, &py_intensity_fn_args, &py_interaction_fn_args)) {
             fprintf(stderr, "Invalid argument types for item property in call to 'simulator_c.new'.\n");
             return NULL;
         }
@@ -692,6 +698,9 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
         new_item.required_item_counts = (unsigned int*) malloc(sizeof(unsigned int) * item_type_count);
         for (Py_ssize_t i = 0; i < item_type_count; i++)
             new_item.required_item_counts[i] = PyLong_AsUnsignedLong(PyList_GetItem(py_required_item_counts, i));
+        new_item.required_item_costs = (unsigned int*) malloc(sizeof(unsigned int) * item_type_count);
+        for (Py_ssize_t i = 0; i < item_type_count; i++)
+            new_item.required_item_costs[i] = PyLong_AsUnsignedLong(PyList_GetItem(py_required_item_costs, i));
         new_item.blocks_movement = (blocks_movement == Py_True);
 
         pair<float*, Py_ssize_t> intensity_fn_args = PyArg_ParseFloatList(py_intensity_fn_args);

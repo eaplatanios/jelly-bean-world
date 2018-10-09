@@ -60,7 +60,7 @@ class SimpleAgent(nel.Agent):
 
 # specify the item types
 items = []
-items.append(nel.Item("banana", [1.0, 1.0, 0.0], [1.0, 1.0, 0.0], [0], True,
+items.append(nel.Item("banana", [1.0, 1.0, 0.0], [1.0, 1.0, 0.0], [0], [0], True,
         intensity_fn=nel.IntensityFunction.CONSTANT, intensity_fn_args=[-2.0],
         interaction_fns=[[nel.InteractionFunction.PIECEWISE_BOX, 40.0, 200.0, 0.0, -40.0]]))
 
@@ -225,6 +225,7 @@ int main(int argc, const char** argv) {
   config.item_types[0].scent = (float*) calloc(config.scent_dimension, sizeof(float));
   config.item_types[0].color = (float*) calloc(config.color_dimension, sizeof(float));
   config.item_types[0].required_item_counts = (unsigned int*) calloc(1, sizeof(unsigned int));
+  config.item_types[0].required_item_costs = (unsigned int*) calloc(1, sizeof(unsigned int));
   config.item_types[0].scent[0] = 1.0f;
   config.item_types[0].color[0] = 1.0f;
   config.item_types[0].blocks_movement = false;
