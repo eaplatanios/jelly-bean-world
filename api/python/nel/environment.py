@@ -23,7 +23,7 @@ if not modules_loaded:
 else:
   __all__ = ['NELEnv']
 
-  class NELEnv(gym.Env):
+class NELEnv(gym.Env):
     """NEL environment for OpenAI gym.
 
     The action space consists of three actions:
@@ -211,9 +211,8 @@ else:
       return
 
     def seed(self, seed=None):
-      logger.warn(
-        'Could not seed environment %s after it\'s '
-        'initialized.', self)
+      self.sim_config.seed = seed
+      self.reset()
       return
 
 
