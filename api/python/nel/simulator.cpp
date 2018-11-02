@@ -320,7 +320,12 @@ static PyObject* build_py_agent(
     PyObject* py_scent; PyObject* py_vision; PyObject* py_items;
     if (!build_py_agent(agent, config, py_position, py_direction, py_scent, py_vision, py_items))
         return NULL;
-    return Py_BuildValue("(OOOOOO)", py_position, py_direction, py_scent, py_vision, py_items, PyLong_FromUnsignedLongLong(agent_id));
+    PyObject* py_agent_id = PyLong_FromUnsignedLongLong(agent_id);
+    PyObject* py_agent = Py_BuildValue("(OOOOOO)", py_position, py_direction, py_scent, py_vision, py_items, py_agent_id);
+    Py_DECREF(py_position); Py_DECREF(py_direction);
+    Py_DECREF(py_scent); Py_DECREF(py_vision);
+    Py_DECREF(py_items); Py_DECREF(py_agent_id);
+    return py_agent;
 }
 
 /**
@@ -341,7 +346,11 @@ static PyObject* build_py_agent(
     PyObject* py_scent; PyObject* py_vision; PyObject* py_items;
     if (!build_py_agent(agent, config, py_position, py_direction, py_scent, py_vision, py_items))
         return NULL;
-    return Py_BuildValue("(OOOOO)", py_position, py_direction, py_scent, py_vision, py_items);
+    PyObject* py_agent = Py_BuildValue("(OOOOO)", py_position, py_direction, py_scent, py_vision, py_items);
+    Py_DECREF(py_position); Py_DECREF(py_direction);
+    Py_DECREF(py_scent); Py_DECREF(py_vision);
+    Py_DECREF(py_items);
+    return py_agent;
 }
 
 /**
@@ -388,6 +397,8 @@ void on_step(const simulator<py_simulator_data>* sim,
     PyObject* args = Py_BuildValue("(OO)", py_states, py_saved);
     PyObject* result = PyEval_CallObject(data.callback, args);
     Py_DECREF(args);
+    Py_DECREF(py_saved);
+    Py_DECREF(py_states);
     if (result != NULL)
         Py_DECREF(result);
     PyGILState_Release(gstate); /* release global interpreter lock */
@@ -516,6 +527,8 @@ void on_step(client<py_client_data>& c,
     PyObject* args = Py_BuildValue("(OO)", py_states, py_saved);
     PyObject* result = PyEval_CallObject(c.data.step_callback, args);
     Py_DECREF(args);
+    Py_DECREF(py_saved);
+    Py_DECREF(py_states);
     if (result != NULL)
         Py_DECREF(result);
     PyGILState_Release(gstate); /* release global interpreter lock */
@@ -852,7 +865,10 @@ static PyObject* simulator_load(PyObject *self, PyObject *args)
     free(agent_states);
 
     import_errors();
-    return Py_BuildValue("(LOO)", sim->time, PyLong_FromVoidPtr(sim), py_states);
+    PyObject* py_sim = PyLong_FromVoidPtr(sim);
+    PyObject* to_return = Py_BuildValue("(LOO)", sim->time, py_sim, py_states);
+    Py_DECREF(py_sim); Py_DECREF(py_states);
+    return to_return;
 }
 
 /**
@@ -1018,7 +1034,10 @@ static PyObject* simulator_start_client(PyObject *self, PyObject *args)
     Py_INCREF(py_step_callback);
     Py_INCREF(py_lost_connection_callback);
     import_errors();
-    return Py_BuildValue("(LOO)", simulator_time, PyLong_FromVoidPtr(new_client), py_states);
+    PyObject* py_new_client = PyLong_FromVoidPtr(new_client);
+    PyObject* to_return = Py_BuildValue("(LOO)", simulator_time, py_new_client, py_states);
+    Py_DECREF(py_new_client); Py_DECREF(py_states);
+	return to_return;
 }
 
 /**
@@ -1076,7 +1095,10 @@ static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
         }
         sim_handle->get_data().agent_ids.add(new_agent.key);
         std::unique_lock<std::mutex> lock(new_agent.value->lock);
-        return Py_BuildValue("O", build_py_agent(*new_agent.value, sim_handle->get_config(), new_agent.key));
+        PyObject* py_agent = build_py_agent(*new_agent.value, sim_handle->get_config(), new_agent.key);
+        PyObject* to_return = Py_BuildValue("O", py_agent);
+        Py_DECREF(py_agent);
+        return to_return;
     } else {
         /* this is a client, so send an add_agent message to the server */
         client<py_client_data>* client_handle =
@@ -1294,6 +1316,11 @@ static PyObject* build_py_map(
         PyObject* fixed = patch.fixed ? Py_True : Py_False;
         Py_INCREF(fixed);
         PyObject* py_patch = Py_BuildValue("((LL)OOOOO)", patch.patch_position.x, patch.patch_position.y, fixed, py_scent, py_vision, py_items, py_agents);
+        Py_DECREF(fixed);
+        Py_DECREF(py_scent);
+        Py_DECREF(py_vision);
+        Py_DECREF(py_items);
+        Py_DECREF(py_agents);
         PyList_SetItem(list, index, py_patch);
         index++;
     }
