@@ -5,8 +5,8 @@
 
 namespace nel {
 
-typedef float (*intensity_function)(const position&, const float*);
-typedef float (*interaction_function)(const position&, const position&, const float*);
+typedef float (*intensity_function)(const position, const float*);
+typedef float (*interaction_function)(const position, const position, const float*);
 
 typedef uint8_t intensity_fns_type;
 enum class intensity_fns : intensity_fns_type {
