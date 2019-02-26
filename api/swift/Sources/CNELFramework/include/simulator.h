@@ -167,7 +167,7 @@ bool simulatorTurn(
   uint64_t agentId,
   TurnDirection direction);
 
-SimulationMap simulatorMap(
+const SimulationMap simulatorMap(
   void* simulator_handle,
   void* client_handle,
   const Position* bottomLeftCorner,
@@ -193,4 +193,4 @@ SimulationClientInfo simulationClientStart(
 void simulationClientStop(
   void* client_handle);
 
-}
+} /* extern "C" */

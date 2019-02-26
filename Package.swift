@@ -1,6 +1,7 @@
-// swift-tools-version:4.2
+// swift-tools-version:5.0
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
+import Foundation
 import PackageDescription
 
 let package = Package(
@@ -13,17 +14,18 @@ let package = Package(
     targets: [
         .target(
             name: "CNELFramework",
-            path: "api/swift/Sources/CNELFramework", 
+            path: ".", 
             sources: [
-                "*.h", "*.cpp", 
-                "deps/core/*.h", "deps/core/*.cpp",
-                "deps/math/*.h", "deps/math/*.cpp"],
-            publicHeadersPath: "api/swift/Sources/CNELFramework/include/simulator.h",
-            _cSettings: [
-                .headerSearchPath("../../../../"),
-                .headerSearchPath("../../../../deps"),
-                .headerSearchPath("../../../../deps/core"),
-                .headerSearchPath("../../../../deps/math"),
+                "./api/swift/Sources/CNELFramework", 
+                "./nel/simulator.cpp"],
+            publicHeadersPath: "./api/swift/Sources/CNELFramework",
+            cxxSettings: [
+                .headerSearchPath("."),
+                .headerSearchPath("./deps"),
+                .unsafeFlags([
+                    "-std=c++11", "-Wall", "-Wpedantic", "-Ofast", 
+                    "-DNDEBUG", "-fno-stack-protector", "-mtune=native", 
+                    "-march=native"]),
             ]),
         .target(
             name: "NELFramework",

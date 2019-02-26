@@ -59,11 +59,11 @@ struct simulator_data
         save_frequency(save_frequency), server(server),
         callback(callback), agent_ids(16)
     {
-        if (save_filepath == NULL) {
-            save_directory = NULL;
+        if (save_filepath == nullptr) {
+            save_directory = nullptr;
         } else {
             save_directory = (char*) malloc(sizeof(char) * save_filepath_length);
-            if (save_directory == NULL) {
+            if (save_directory == nullptr) {
                 fprintf(stderr, "simulator_data ERROR: Out of memory.\n");
                 exit(EXIT_FAILURE);
             }
@@ -82,7 +82,7 @@ struct simulator_data
 
 private:
     inline void free_helper() {
-        if (save_directory != NULL)
+        if (save_directory != nullptr)
             core::free(save_directory);
     }
 };
@@ -101,9 +101,9 @@ inline bool init(simulator_data& data, const simulator_data& src)
         return false;
     data.agent_ids.append(src.agent_ids.data, src.agent_ids.length);
 
-    if (src.save_directory != NULL) {
+    if (src.save_directory != nullptr) {
         data.save_directory = (char*) malloc(sizeof(char) * max(1u, src.save_directory_length));
-        if (data.save_directory == NULL) {
+        if (data.save_directory == nullptr) {
             fprintf(stderr, "init ERROR: Insufficient memory for simulator_data.save_directory.\n");
             free(data.agent_ids); return false;
         }
@@ -111,7 +111,7 @@ inline bool init(simulator_data& data, const simulator_data& src)
             data.save_directory[i] = src.save_directory[i];
         data.save_directory_length = src.save_directory_length;
     } else {
-        data.save_directory = NULL;
+        data.save_directory = nullptr;
     }
     data.save_frequency = src.save_frequency;
     data.server = src.server;
@@ -128,9 +128,9 @@ void* simulatorCreate(
   simulator_config sim_config;
 
   sim_config.agent_color = (float*) malloc(sizeof(float) * config->colorDimSize);
-  if (sim_config.agent_color == NULL)
+  if (sim_config.agent_color == nullptr)
     /* TODO: how to communicate out of memory errors to swift? */
-    return NULL;
+    return nullptr;
 
   for (unsigned int i = 0; i < (size_t) DirectionCount; i++)
     sim_config.allowed_movement_directions[i] = config->allowedMoveDirections[i];
@@ -141,13 +141,13 @@ void* simulatorCreate(
 
   if (!sim_config.item_types.ensure_capacity(max(1u, config->numItemTypes)))
     /* TODO: how to communicate out of memory errors to swift? */
-    return NULL;
+    return nullptr;
   for (unsigned int i = 0; i < config->numItemTypes; i++) {
     if (!init(sim_config.item_types[i], config->itemTypes[i], config->scentDimSize, config->colorDimSize, config->numItemTypes)) {
       /* TODO: how to communicate out of memory errors to swift? */
       for (unsigned int j = 0; j < i; j++)
         core::free(sim_config.item_types[i], config->numItemTypes);
-      return NULL;
+      return nullptr;
     }
   }
   sim_config.item_types.length = config->numItemTypes;
@@ -164,17 +164,17 @@ void* simulatorCreate(
   sim_config.deleted_item_lifetime = config->removedItemLifetime;
 
   simulator_data data(savePath,
-      (savePath == NULL) ? 0 : strlen(savePath),
-      saveFrequency, NULL, onStepCallback);
+      (savePath == nullptr) ? 0 : strlen(savePath),
+      saveFrequency, nullptr, onStepCallback);
 
   simulator<simulator_data>* sim =
       (simulator<simulator_data>*) malloc(sizeof(simulator<simulator_data>));
-  if (sim == NULL) {
+  if (sim == nullptr) {
     /* TODO: how to communicate out of memory errors to swift? */
-    return NULL;
+    return nullptr;
   } else if (!init(*sim, sim_config, data, config->randomSeed)) {
     /* TODO: communicate simulator initialization error */
-    return NULL;
+    return nullptr;
   }
   return (void*) sim;
 }
@@ -205,7 +205,7 @@ bool simulatorTurn(
   uint64_t agentId,
   TurnDirection direction);
 
-SimulationMap simulatorMap(
+const SimulationMap simulatorMap(
   void* simulator_handle,
   void* client_handle,
   const Position* bottomLeftCorner,
