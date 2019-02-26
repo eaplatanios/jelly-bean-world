@@ -18,7 +18,7 @@ enum class interaction_fns : interaction_fns_type {
 	ZERO = 0, PIECEWISE_BOX, CROSS
 };
 
-constexpr float zero_intensity_fn(const position pos, const float* args) {
+float zero_intensity_fn(const position pos, const float* args) {
 	return 0.0;
 }
 
@@ -46,7 +46,7 @@ intensity_function get_intensity_fn(intensity_fns type, float* args, unsigned in
 	return NULL;
 }
 
-constexpr float zero_interaction_fn(const position pos1, const position pos2, const float* args) {
+float zero_interaction_fn(const position pos1, const position pos2, const float* args) {
 	return 0.0;
 }
 

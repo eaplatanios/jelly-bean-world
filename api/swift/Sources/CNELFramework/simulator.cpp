@@ -6,6 +6,9 @@
 #include "nel/mpi.h"
 #include "nel/simulator.h"
 
+using namespace core;
+using namespace nel;
+
 constexpr SimulatorInfo EMPTY_SIM_INFO = {nullptr, 0, nullptr, 0};
 
 inline Direction to_Direction(direction dir) {
@@ -41,7 +44,8 @@ inline bool init(
   return init(properties, src.name, strlen(src.name),
     src.scent, src.color, src.requiredItemCounts,
     src.requiredItemCosts, src.blocksMovement,
-    src.intensityFn, src.interactionFns,
+    reinterpret_cast<intensity_function>(src.intensityFn), 
+    reinterpret_cast<interaction_function*>(src.interactionFns), 
     src.intensityFnArgs, src.interactionFnArgs,
     src.intensityFnArgCount, src.interactionFnArgCounts,
     scent_dimension, color_dimension, item_type_count);

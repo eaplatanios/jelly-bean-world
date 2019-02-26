@@ -1,48 +1,43 @@
 #include <inttypes.h>
 #include <stdbool.h>
 
-#include "nel/simulator.h"
-
-using namespace core;
-using namespace nel;
-
 /** Represents all possible directions of motion 
  * in the environment. */
-enum Direction {
+typedef enum Direction {
   DirectionUp = 0,
   DirectionDown,
   DirectionLeft,
   DirectionRight,
   DirectionCount
-};
-
-static_assert((size_t) DirectionCount == (size_t) direction::COUNT, "DirectionCount is not equal to direction::COUNT");
+} Direction;
 
 /** Represents all possible directions of turning 
  * in the environment. */
-enum TurnDirection {
+typedef enum TurnDirection {
   TurnDirectionNoChange = 0,
   TurnDirectionReverse,
   TurnDirectionLeft,
   TurnDirectionRight
-};
+} TurnDirection;
 
-enum MovementConflictPolicy {
+typedef enum MovementConflictPolicy {
   MovementConflictPolicyNoCollisions = 0,
   MovementConflictPolicyFirstComeFirstServe,
   MovementConflictPolicyRandom
-};
+} MovementConflictPolicy;
 
-struct Position {
+typedef struct Position {
   int64_t x;
   int64_t y;
-};
+} Position;
 
 typedef void (*OnStepCallback)();
 typedef void (*LostConnectionCallback)();
+typedef float (*intensityFunction)(const Position, const float*);
+typedef float (*interactionFunction)(const Position, const Position, const float*);
 
 /** A structure containing the properties of an item type. */
-struct ItemProperties {
+typedef struct ItemProperties {
   const char* name;
 
   float* scent;
@@ -53,25 +48,25 @@ struct ItemProperties {
 
   bool blocksMovement;
 
-  intensity_function intensityFn;
-  interaction_function* interactionFns;
+  intensityFunction intensityFn;
+  interactionFunction* interactionFns;
 
   float* intensityFnArgs;
   float** interactionFnArgs;
   unsigned int intensityFnArgCount;
   unsigned int* interactionFnArgCounts;
-};
+} ItemProperties;
 
-struct AgentState {
+typedef struct AgentState {
+  uint64_t id;
   Position position;
   Direction direction;
   float* scent;
   float* vision;
   unsigned int* collectedItems;
-  uint64_t id;
-};
+} AgentState;
 
-struct SimulatorConfig {
+typedef struct SimulatorConfig {
   /* Simulation Parameters */
   unsigned int randomSeed;
 
@@ -96,26 +91,26 @@ struct SimulatorConfig {
   float scentDecay;
   float scentDiffusion;
   unsigned int removedItemLifetime;
-};
+} SimulatorConfig;
 
-struct SimulatorInfo {
+typedef struct SimulatorInfo {
   void* handle;
   uint64_t time;
   AgentState* agents;
   unsigned int numAgents;
-};
+} SimulatorInfo;
 
-struct ItemInfo {
+typedef struct ItemInfo {
   unsigned int type;
   Position position;
-};
+} ItemInfo;
 
-struct AgentInfo {
+typedef struct AgentInfo {
   Position position;
   Direction direction;
-};
+} AgentInfo;
 
-struct SimulationMapPatch {
+typedef struct SimulationMapPatch {
   Position position;
   bool fixed;
   float* scent;
@@ -124,21 +119,19 @@ struct SimulationMapPatch {
   unsigned int numItems;
   AgentInfo* agents;
   unsigned int numAgents;
-};
+} SimulationMapPatch;
 
-struct SimulationMap {
+typedef struct SimulationMap {
   SimulationMapPatch* patches;
   unsigned int numPatches;
-};
+} SimulationMap;
 
-struct SimulationClientInfo {
+typedef struct SimulationClientInfo {
   void* handle;
   uint64_t simulationTime;
   AgentState* agentStates;
   unsigned int numAgents;
-};
-
-extern "C" {
+} SimulationClientInfo;
 
 void* simulatorCreate(
   const SimulatorConfig* config, 
@@ -153,39 +146,39 @@ SimulatorInfo simulatorLoad(
   const char* savePath);
 
 void simulatorDelete(
-  void* simulator_handle);
+  const void* simulator_handle);
 
 AgentState simulatorAddAgent(
-  void* simulator_handle,
-  void* client_handle);
+  const void* simulator_handle,
+  const void* client_handle);
 
-bool simulatorMove(
-  void* simulator_handle,
-  void* client_handle,
+bool simulatorMoveAgent(
+  const void* simulator_handle,
+  const void* client_handle,
   uint64_t agentId,
   Direction direction,
   unsigned int numSteps);
 
-bool simulatorTurn(
-  void* simulator_handle,
-  void* client_handle,
+bool simulatorTurnAgent(
+  const void* simulator_handle,
+  const void* client_handle,
   uint64_t agentId,
   TurnDirection direction);
 
 const SimulationMap simulatorMap(
-  void* simulator_handle,
-  void* client_handle,
+  const void* simulator_handle,
+  const void* client_handle,
   const Position* bottomLeftCorner,
   const Position* topRightCorner);
 
 void* simulationServerStart(
-  void* simulator_handle,
+  const void* simulator_handle,
   unsigned int port,
   unsigned int connectionQueueCapacity,
   unsigned int numWorkers);
 
 void simulationServerStop(
-  void* server_handle);
+  const void* server_handle);
 
 SimulationClientInfo simulationClientStart(
   const char* serverAddress,
@@ -197,5 +190,3 @@ SimulationClientInfo simulationClientStart(
 
 void simulationClientStop(
   void* client_handle);
-
-} /* extern "C" */
