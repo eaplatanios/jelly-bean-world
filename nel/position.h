@@ -14,9 +14,9 @@ struct position {
 
 	position() { }
 
-	explicit position(int64_t v) : x(v), y(v) { }
+	explicit constexpr position(int64_t v) : x(v), y(v) { }
 
-	position(int64_t x, int64_t y) : x(x), y(y) { }
+	constexpr position(int64_t x, int64_t y) : x(x), y(y) { }
 
 	position(const position& src) : x(src.x), y(src.y) { }
 

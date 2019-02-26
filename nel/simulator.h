@@ -48,7 +48,7 @@ inline bool print(const direction& dir, Stream& out) {
     case direction::DOWN:  return core::print("DOWN", out);
     case direction::LEFT:  return core::print("LEFT", out);
     case direction::RIGHT: return core::print("RIGHT", out);
-	case direction::COUNT: break;
+    case direction::COUNT: break;
     }
     fprintf(stderr, "print ERROR: Unrecognized direction.\n");
     return false;
@@ -121,74 +121,81 @@ struct item_properties {
 };
 
 /**
- * Initializes the given item_properties `properties` by copying from `src`.
+ * Initializes the given item_properties `properties` with the properties given as arguments.
  */
 inline bool init(
-        item_properties& properties, const item_properties& src,
+        item_properties& properties, const char* name, unsigned int name_length,
+        const float* scent, const float* color, unsigned int* required_item_counts,
+        unsigned int* required_item_costs, bool blocks_movement,
+        intensity_function intensity_fn, const interaction_function* interaction_fns,
+        const float* intensity_fn_args, const float* const* interaction_fn_args,
+        unsigned int intensity_fn_arg_count, const unsigned int* interaction_fn_arg_counts,
         unsigned int scent_dimension, unsigned int color_dimension,
         unsigned int item_type_count)
 {
-    properties.name = src.name;
+    if (!init(properties.name, name, name_length))
+        return false;
     properties.scent = (float*) malloc(sizeof(float) * scent_dimension);
     if (properties.scent == NULL) {
         fprintf(stderr, "init ERROR: Insufficient memory for item_properties.scent.\n");
-        return false;
+        core::free(properties.name); return false;
     }
     properties.color = (float*) malloc(sizeof(float) * color_dimension);
     if (properties.color == NULL) {
         fprintf(stderr, "init ERROR: Insufficient memory for item_properties.scent.\n");
-        free(properties.scent); return false;
+        core::free(properties.name); free(properties.scent); return false;
     }
     properties.required_item_counts = (unsigned int*) malloc(sizeof(unsigned int) * item_type_count);
     if (properties.required_item_counts == NULL) {
         fprintf(stderr, "init ERROR: Insufficient memory for item_properties.required_item_counts.\n");
-        free(properties.scent); free(properties.color); return false;
+        core::free(properties.name); free(properties.scent);
+        free(properties.color); return false;
     }
     properties.required_item_costs = (unsigned int*) malloc(sizeof(unsigned int) * item_type_count);
     if (properties.required_item_costs == NULL) {
         fprintf(stderr, "init ERROR: Insufficient memory for item_properties.required_item_costs.\n");
-        free(properties.scent); free(properties.color);
-        free(properties.required_item_counts); return false;
+        core::free(properties.name); free(properties.scent);
+        free(properties.color); free(properties.required_item_counts); return false;
     }
     properties.interaction_fns = (interaction_function*) malloc(sizeof(interaction_function) * item_type_count);
     if (properties.interaction_fns == NULL) {
         fprintf(stderr, "init ERROR: Insufficient memory for item_properties.interaction_fns.\n");
-        free(properties.scent); free(properties.color);
-        free(properties.required_item_counts);
+        core::free(properties.name); free(properties.scent);
+        free(properties.color); free(properties.required_item_counts);
         free(properties.required_item_costs); return false;
     }
-    properties.intensity_fn_arg_count = src.intensity_fn_arg_count;
-    properties.intensity_fn_args = (float*) malloc(max((size_t) 1, sizeof(float) * src.intensity_fn_arg_count));
+    properties.intensity_fn_arg_count = intensity_fn_arg_count;
+    properties.intensity_fn_args = (float*) malloc(max((size_t) 1, sizeof(float) * intensity_fn_arg_count));
     if (properties.intensity_fn_args == NULL) {
         fprintf(stderr, "init ERROR: Insufficient memory for item_properties.intensity_fn_arg_count.\n");
-        free(properties.scent); free(properties.color);
+        core::free(properties.name); free(properties.scent); free(properties.color);
         free(properties.required_item_counts); free(properties.required_item_costs);
         free(properties.interaction_fns); return false;
     }
     properties.interaction_fn_args = (float**) malloc(sizeof(float*) * item_type_count);
     if (properties.interaction_fn_args == NULL) {
         fprintf(stderr, "init ERROR: Insufficient memory for item_properties.interaction_fn_args.\n");
-        free(properties.scent); free(properties.color);
+        core::free(properties.name); free(properties.scent); free(properties.color);
         free(properties.required_item_counts); free(properties.required_item_costs);
         free(properties.interaction_fns); free(properties.intensity_fn_args); return false;
     }
     properties.interaction_fn_arg_counts = (unsigned int*) malloc(sizeof(unsigned int) * item_type_count);
     if (properties.interaction_fn_arg_counts == NULL) {
         fprintf(stderr, "init ERROR: Insufficient memory for item_properties.interaction_fn_arg_counts.\n");
-        free(properties.scent); free(properties.color);
+        core::free(properties.name); free(properties.scent); free(properties.color);
         free(properties.required_item_counts); free(properties.required_item_costs);
         free(properties.interaction_fns); free(properties.intensity_fn_args);
         free(properties.interaction_fn_args); return false;
     }
 
     for (unsigned int i = 0; i < item_type_count; i++) {
-        properties.interaction_fns[i] = src.interaction_fns[i];
-        properties.interaction_fn_arg_counts[i] = src.interaction_fn_arg_counts[i];
-        properties.interaction_fn_args[i] = (float*) malloc(max((size_t) 1, sizeof(float) * src.interaction_fn_arg_counts[i]));
+        properties.interaction_fns[i] = interaction_fns[i];
+        properties.interaction_fn_arg_counts[i] = interaction_fn_arg_counts[i];
+        properties.interaction_fn_args[i] = (float*) malloc(max((size_t) 1, sizeof(float) * interaction_fn_arg_counts[i]));
         if (properties.interaction_fn_args[i] == NULL) {
             fprintf(stderr, "init ERROR: Insufficient memory for item_properties.interaction_fn_args[%u].\n", i);
             for (unsigned int j = 0; j < i; j++) free(properties.interaction_fn_args[j]);
-            free(properties.scent); free(properties.color);
+            core::free(properties.name); free(properties.scent); free(properties.color);
             free(properties.required_item_counts); free(properties.required_item_costs);
             free(properties.interaction_fns); free(properties.intensity_fn_args);
             free(properties.interaction_fn_args); return false;
@@ -196,19 +203,36 @@ inline bool init(
     }
 
     for (unsigned int i = 0; i < scent_dimension; i++)
-        properties.scent[i] = src.scent[i];
+        properties.scent[i] = scent[i];
     for (unsigned int i = 0; i < color_dimension; i++)
-        properties.color[i] = src.color[i];
+        properties.color[i] = color[i];
     for (unsigned int i = 0; i < item_type_count; i++)
-        properties.required_item_counts[i] = src.required_item_counts[i];
+        properties.required_item_counts[i] = required_item_counts[i];
     for (unsigned int i = 0; i < item_type_count; i++)
-        properties.required_item_costs[i] = src.required_item_costs[i];
-    properties.blocks_movement = src.blocks_movement;
-    properties.intensity_fn = src.intensity_fn;
-    memcpy(properties.intensity_fn_args, src.intensity_fn_args, sizeof(float) * src.intensity_fn_arg_count);
+        properties.required_item_costs[i] = required_item_costs[i];
+    properties.blocks_movement = blocks_movement;
+    properties.intensity_fn = intensity_fn;
+    memcpy(properties.intensity_fn_args, intensity_fn_args, sizeof(float) * intensity_fn_arg_count);
     for (unsigned int i = 0; i < item_type_count; i++)
-        memcpy(properties.interaction_fn_args[i], src.interaction_fn_args[i], sizeof(float) * src.interaction_fn_arg_counts[i]);
+        memcpy(properties.interaction_fn_args[i], interaction_fn_args[i], sizeof(float) * interaction_fn_arg_counts[i]);
     return true;
+}
+
+/**
+ * Initializes the given item_properties `properties` by copying from `src`.
+ */
+inline bool init(
+        item_properties& properties, const item_properties& src,
+        unsigned int scent_dimension, unsigned int color_dimension,
+        unsigned int item_type_count)
+{
+    return init(properties, src.name.data, src.name.length,
+        src.scent, src.color, src.required_item_counts,
+        src.required_item_costs, src.blocks_movement,
+        src.intensity_fn, src.interaction_fns,
+        src.intensity_fn_args, src.interaction_fn_args,
+        src.intensity_fn_arg_count, src.interaction_fn_arg_counts,
+        scent_dimension, color_dimension, item_type_count);
 }
 
 /**

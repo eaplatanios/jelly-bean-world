@@ -680,6 +680,10 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
         return NULL;
     }
     Py_ssize_t item_type_count = PyList_Size(py_items);
+    if (!config.item_types.ensure_capacity(max((Py_ssize_t) 1, item_type_count))) {
+        PyErr_NoMemory();
+        return NULL;
+    }
     while (true) {
         PyObject *next_py_item = PyIter_Next(py_items_iter);
         if (!next_py_item) break;
@@ -1357,7 +1361,7 @@ static PyObject* simulator_map(PyObject *self, PyObject *args) {
     position top_right = position(py_top_right_x, py_top_right_y);
 
     if (py_client_handle == Py_None) {
-        /* the simulation is local, so call get_scent directly */
+        /* the simulation is local, so call get_map directly */
         simulator<py_simulator_data>* sim_handle =
                 (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
         hash_map<position, patch_state> patches(16, alloc_position_keys);
@@ -1370,7 +1374,7 @@ static PyObject* simulator_map(PyObject *self, PyObject *args) {
             free(entry.value);
         return py_map;
     } else {
-        /* this is a client, so send a get_scent message to the server */
+        /* this is a client, so send a get_map message to the server */
         client<py_client_data>* client_handle =
                 (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
         if (!client_handle->client_running) {

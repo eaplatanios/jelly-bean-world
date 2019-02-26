@@ -51,16 +51,16 @@ extension StatefulAgent {
 }
 
 public class Simulator {
-  internal var simulator: CNELFramework.Simulator
+  internal var handle: UnsafeMutableRawPointer
 
   public init(
     using config: inout SimulatorConfig,
     onStep callback: @escaping @convention(c) () -> (),
-    saveFrequency: Int32, 
+    saveFrequency: UInt32, 
     savePath: String
   ) {
-    self.simulator = CNELFramework.simulatorCreate(
-      &config, 
+    self.handle = CNELFramework.simulatorCreate(
+      &config,
       callback, 
       saveFrequency, 
       savePath)
@@ -69,10 +69,10 @@ public class Simulator {
   public init(
     from file: URL, 
     onStep callback: @escaping @convention(c) () -> (),
-    saveFrequency: Int32, 
+    saveFrequency: UInt32, 
     savePath: String
   ) {
-    self.simulator = CNELFramework.simulatorLoad(
+    self.handle = CNELFramework.simulatorLoad(
       file.absoluteString, 
       callback, 
       saveFrequency,
@@ -80,11 +80,11 @@ public class Simulator {
   }
 
   deinit {
-    CNELFramework.simulatorDelete(&self.simulator)
+    CNELFramework.simulatorDelete(&self.handle)
   }
 
   fileprivate func addAgent() -> AgentState {
-    return CNELFramework.simulatorAddAgent(&self.simulator, nil)
+    return CNELFramework.simulatorAddAgent(&self.handle, nil)
   }
 
   fileprivate func moveAgent(
@@ -93,12 +93,12 @@ public class Simulator {
     by numSteps: UInt32
   ) -> Bool {
     return CNELFramework.simulatorMoveAgent(
-      &self.simulator, nil, agent.simulationState.id, direction, numSteps)
+      &self.handle, nil, agent.simulationState.id, direction, numSteps)
   }
 }
 
 public class SimulationServer {
-  internal var server: CNELFramework.SimulationServer
+  internal var handle: UnsafeMutableRawPointer
 
   public init(
     using simulator: Simulator, 
@@ -106,15 +106,15 @@ public class SimulationServer {
     connectionQueueCapacity: UInt32 = 256, 
     numWorkers: UInt32 = 8
   ) {
-    self.server = CNELFramework.simulationServerStart(
-      &simulator.simulator, 
+    self.handle = CNELFramework.simulationServerStart(
+      &simulator.handle, 
       port, 
-      connectionQueueCapacity, 
+      connectionQueueCapacity,
       numWorkers)
   }
 
   deinit {
-    CNELFramework.simulationServerStop(&self.server)
+    CNELFramework.simulationServerStop(&self.handle)
   }
 }
 

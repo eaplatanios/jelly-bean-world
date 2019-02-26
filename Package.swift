@@ -25,7 +25,8 @@ let package = Package(
                 .unsafeFlags([
                     "-std=c++11", "-Wall", "-Wpedantic", "-Ofast", 
                     "-DNDEBUG", "-fno-stack-protector", "-mtune=native", 
-                    "-march=native"]),
+                    "-march=native",
+                ]),
             ]),
         .target(
             name: "NELFramework",
