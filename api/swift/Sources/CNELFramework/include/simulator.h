@@ -130,12 +130,12 @@ typedef struct SimulationMapPatch {
 } SimulationMapPatch;
 
 typedef struct SimulationMap {
-  SimulationMapPatch* patches;
+  const SimulationMapPatch patches;
   unsigned int numPatches;
 } SimulationMap;
 
 Simulator simulatorCreate(
-  SimulatorConfig* config, 
+  const SimulatorConfig* config, 
   OnStepCallback onStepCallback,
   int saveFrequency,
   const char* savePath);
@@ -146,39 +146,40 @@ Simulator simulatorLoad(
   int saveFrequency,
   const char* savePath);
 
-void simulatorDelete(Simulator* simulator);
+void simulatorDelete(
+  const Simulator* simulator);
 
 AgentState simulatorAddAgent(
-  Simulator* simulator,
-  SimulationClient* client);
+  const Simulator* simulator,
+  const SimulationClient* client);
 
 bool simulatorMove(
-  Simulator* simulator,
-  SimulationClient* client,
+  const Simulator* simulator,
+  const SimulationClient* client,
   uint64_t agentId,
   Direction direction,
   unsigned int numSteps);
 
 bool simulatorTurn(
-  Simulator* simulator,
-  SimulationClient* client,
+  const Simulator* simulator,
+  const SimulationClient* client,
   uint64_t agentId,
   TurnDirection direction);
 
 SimulationMap simulatorMap(
-  Simulator* simulator,
-  SimulationClient* client,
-  Position* bottomLeftCorner,
-  Position* topRightCorner);
+  const Simulator* simulator,
+  const SimulationClient* client,
+  const Position* bottomLeftCorner,
+  const Position* topRightCorner);
 
 SimulationServer simulationServerStart(
-  Simulator* simulator,
+  const Simulator* simulator,
   unsigned int port,
   unsigned int connectionQueueCapacity,
   unsigned int numWorkers);
 
 SimulationServer simulationServerStop(
-  SimulationServer* server);
+  const SimulationServer* server);
 
 SimulationClient simulationClientStart(
   const char* serverAddress,
@@ -189,4 +190,4 @@ SimulationClient simulationClientStart(
   unsigned int numAgents);
 
 SimulationClient simulationClientStop(
-  SimulationClient* client);
+  const SimulationClient* client);

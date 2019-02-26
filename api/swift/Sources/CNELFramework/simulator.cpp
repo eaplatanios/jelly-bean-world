@@ -8,16 +8,20 @@
 
 void* createSimulator(
     SimulatorConfig config, 
-    onStepCallback onStepCallbackFn,
+    OnStepCallback onStepCallbackFn,
     int saveFrequency, 
     const char* savePath) {
-
+  return nullptr;
 }
 
 void* loadSimulator(
     const char* filePath, 
-    onStepCallback onStepCallbackFn,
+    OnStepCallback onStepCallbackFn,
     int saveFrequency, 
     const char* savePath) {
+  return nullptr;
+}
 
+void simulatorDelete(Simulator* simulator) {
+  delete simulator;
 }
