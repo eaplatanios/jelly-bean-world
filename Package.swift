@@ -17,8 +17,7 @@ let package = Package(
             path: ".", 
             sources: [
                 "./api/swift/Sources/CNELFramework", 
-                "./nel",
-                "./deps"],
+                "./nel/simulator.cpp"],
             publicHeadersPath: "./api/swift/Sources/CNELFramework",
             cxxSettings: [
                 .headerSearchPath("."),
