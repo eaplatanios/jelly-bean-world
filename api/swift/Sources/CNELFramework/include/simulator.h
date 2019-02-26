@@ -4,26 +4,26 @@
 /** Represents all possible directions of motion 
  * in the environment. */
 typedef enum Direction {
-  D_UP,
-  D_DOWN,
-  D_LEFT,
-  D_RIGHT,
-  D_COUNT
+  DirectionUp = 0,
+  DirectionDown,
+  DirectionLeft,
+  DirectionRight,
+  DirectionCount
 } Direction;
 
 /** Represents all possible directions of turning 
  * in the environment. */
 typedef enum TurnDirection {
-  TD_NO_CHANGE,
-  TD_REVERSE,
-  TD_LEFT,
-  TD_RIGHT
+  TurnDirectionNoChange = 0,
+  TurnDirectionReverse,
+  TurnDirectionLeft,
+  TurnDirectionRight
 } TurnDirection;
 
 typedef enum MovementConflictPolicy {
-  MCP_NO_COLLISIONS,
-  MCP_FIRST_COME_FIRST_SERVED,
-  MCP_RANDOM
+  MovementConflictPolicyNoCollisions = 0,
+  MovementConflictPolicyFirstComeFirstServe,
+  MovementConflictPolicyRandom
 } MovementConflictPolicy;
 
 typedef struct Position {
@@ -85,8 +85,8 @@ typedef struct SimulatorConfig {
   int scentDimSize;
   int colorDimSize;
   int visionRange;
-  bool allowedMoveDirections[(size_t) D_COUNT];
-  bool allowedRotations[(size_t) D_COUNT];
+  bool allowedMoveDirections[(size_t) DirectionCount];
+  bool allowedRotations[(size_t) DirectionCount];
 
   /* World Properties */
   unsigned int patchSize;
