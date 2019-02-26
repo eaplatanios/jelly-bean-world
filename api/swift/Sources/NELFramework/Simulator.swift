@@ -2,7 +2,52 @@ import CNELFramework
 import Foundation
 
 protocol Agent {
-  var state: CNELFramework.AgentState { get }
+  var simulator: Simulator { get }
+  var simulationState: AgentState { get set }
+
+  init(in simulator: Simulator)
+}
+
+extension Agent {
+  public init(in simulator: Simulator) {
+    self.init(in: simulator)
+    self.simulationState = simulator.addAgent()
+  }
+
+  @inline(__always)
+  func position() -> Position {
+    return self.simulationState.position
+  }
+
+  @inline(__always)
+  func direction() -> Direction {
+    return self.simulationState.direction
+  }
+
+  // TODO: scent, vision, collectedItems
+  
+  func move(towards direction: Direction, by numSteps: UInt32) -> Bool {
+    return self.simulator.moveAgent(
+      agent: self,
+      towards: direction,
+      by: numSteps)
+  }
+}
+
+protocol StatefulAgent : Agent {
+  associatedtype State
+
+  var state: State { get set }
+
+  static func load(from file: URL) -> State
+  func save(state: State, to file: URL) -> Void
+}
+
+extension StatefulAgent {
+  public init(in simulator: Simulator, from file: URL) {
+    self.init(in: simulator)
+    self.state = Self.load(from: file)
+  }
 }
 
 public class Simulator {
@@ -38,9 +83,18 @@ public class Simulator {
     CNELFramework.simulatorDelete(&self.simulator)
   }
 
-  // func addAgent() -> Agent {
+  fileprivate func addAgent() -> AgentState {
+    return CNELFramework.simulatorAddAgent(&self.simulator, nil)
+  }
 
-  // }
+  fileprivate func moveAgent(
+    agent: Agent, 
+    towards direction: Direction, 
+    by numSteps: UInt32
+  ) -> Bool {
+    return CNELFramework.simulatorMoveAgent(
+      &self.simulator, nil, agent.simulationState.id, direction, numSteps)
+  }
 }
 
 public class SimulationServer {

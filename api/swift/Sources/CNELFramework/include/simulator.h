@@ -65,6 +65,7 @@ typedef struct ItemProperties {
 } ItemProperties;
 
 typedef struct AgentState {
+  uint64_t id;
   Position position;
   Direction direction;
   float* scent;
@@ -153,14 +154,14 @@ AgentState simulatorAddAgent(
   const Simulator* simulator,
   const SimulationClient* client);
 
-bool simulatorMove(
+bool simulatorMoveAgent(
   const Simulator* simulator,
   const SimulationClient* client,
   uint64_t agentId,
   Direction direction,
   unsigned int numSteps);
 
-bool simulatorTurn(
+bool simulatorTurnAgent(
   const Simulator* simulator,
   const SimulationClient* client,
   uint64_t agentId,
