@@ -1,8 +1,6 @@
 #include <inttypes.h>
 #include <stdbool.h>
 
-#include "nel/gibbs_field.h"
-#include "nel/mpi.h"
 #include "nel/simulator.h"
 
 using namespace core;
@@ -100,6 +98,13 @@ struct SimulatorConfig {
   unsigned int removedItemLifetime;
 };
 
+struct SimulatorInfo {
+  void* handle;
+  uint64_t time;
+  AgentState* agents;
+  unsigned int numAgents;
+};
+
 struct ItemInfo {
   unsigned int type;
   Position position;
@@ -141,7 +146,7 @@ void* simulatorCreate(
   unsigned int saveFrequency,
   const char* savePath);
 
-void* simulatorLoad(
+SimulatorInfo simulatorLoad(
   const char* filePath, 
   OnStepCallback onStepCallback,
   unsigned int saveFrequency,

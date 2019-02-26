@@ -6,6 +6,20 @@
 #include "nel/mpi.h"
 #include "nel/simulator.h"
 
+constexpr SimulatorInfo EMPTY_SIM_INFO = {nullptr, 0, nullptr, 0};
+
+inline Direction to_Direction(direction dir) {
+  switch (dir) {
+  case direction::UP:    return DirectionUp;
+  case direction::DOWN:  return DirectionDown;
+  case direction::LEFT:  return DirectionLeft;
+  case direction::RIGHT: return DirectionRight;
+  case direction::COUNT: break;
+  }
+  fprintf(stderr, "to_Direction ERROR: Unrecognized direction.\n");
+  exit(EXIT_FAILURE);
+}
+
 inline movement_conflict_policy to_movement_conflict_policy(MovementConflictPolicy policy) {
   switch (policy) {
   case MovementConflictPolicyNoCollisions:
@@ -20,9 +34,9 @@ inline movement_conflict_policy to_movement_conflict_policy(MovementConflictPoli
 }
 
 inline bool init(
-        item_properties& properties, const ItemProperties& src,
-        unsigned int scent_dimension, unsigned int color_dimension,
-        unsigned int item_type_count)
+  item_properties& properties, const ItemProperties& src,
+  unsigned int scent_dimension, unsigned int color_dimension,
+  unsigned int item_type_count)
 {
   return init(properties, src.name, strlen(src.name),
     src.scent, src.color, src.requiredItemCounts,
@@ -31,6 +45,48 @@ inline bool init(
     src.intensityFnArgs, src.interactionFnArgs,
     src.intensityFnArgCount, src.interactionFnArgCounts,
     scent_dimension, color_dimension, item_type_count);
+}
+
+inline bool init(
+  AgentState& state,
+  const agent_state& src,
+  const simulator_config& config,
+  uint64_t agent_id)
+{
+  state.position.x = src.current_position.x;
+  state.position.y = src.current_position.y;
+  state.direction = to_Direction(src.current_direction);
+  state.id = agent_id;
+
+  state.scent = (float*) malloc(sizeof(float) * config.scent_dimension);
+  if (state.scent == nullptr) {
+    /* TODO: communicate out of memory error to swift */
+    return false;
+  }
+  unsigned int vision_size = (2*config.vision_range + 1) * (2*config.vision_range + 1) * config.color_dimension;
+  state.vision = (float*) malloc(sizeof(float) * vision_size);
+  if (state.vision == nullptr) {
+    /* TODO: communicate out of memory error to swift */
+    free(state.scent); return false;
+  }
+  state.collectedItems = (unsigned int*) malloc(sizeof(unsigned int) * config.item_types.length);
+  if (state.collectedItems == nullptr) {
+    /* TODO: communicate out of memory error to swift */
+    free(state.scent); free(state.vision); return false;
+  }
+
+  for (unsigned int i = 0; i < config.scent_dimension; i++)
+    state.scent[i] = src.current_scent[i];
+  for (unsigned int i = 0; i < config.item_types.length; i++)
+    state.collectedItems[i] = src.collected_items[i];
+  memcpy(state.vision, src.current_vision, sizeof(float) * vision_size);
+  return true;
+}
+
+inline void free(AgentState& state) {
+  free(state.scent);
+  free(state.vision);
+  free(state.collectedItems);
 }
 
 /**
@@ -179,14 +235,84 @@ void* simulatorCreate(
   return (void*) sim;
 }
 
-void* simulatorLoad(
+SimulatorInfo simulatorLoad(
   const char* filePath, 
   OnStepCallback onStepCallback,
   unsigned int saveFrequency,
-  const char* savePath);
+  const char* savePath)
+{
+  simulator<simulator_data>* sim =
+      (simulator<simulator_data>*) malloc(sizeof(simulator<simulator_data>));
+  if (sim == nullptr) {
+    /* TODO: how to communicate out of memory errors to swift? */
+    return EMPTY_SIM_INFO;
+  }
+
+  simulator_data data(savePath,
+      (savePath == nullptr) ? 0 : strlen(savePath),
+      saveFrequency, nullptr, onStepCallback);
+
+  FILE* file = open_file(filePath, "rb");
+  if (file == nullptr) {
+    /* TODO: communicate i/o error */
+    free(sim); return EMPTY_SIM_INFO;
+  }
+  size_t agent_id_count;
+  fixed_width_stream<FILE*> in(file);
+  if (!read(*sim, in, data)) {
+    /* TODO: communicate "Failed to load simulator." error */
+    free(sim); fclose(file); return EMPTY_SIM_INFO;
+  }
+  simulator_data& sim_data = sim->get_data();
+  if (!read(agent_id_count, in)
+   || !sim_data.agent_ids.ensure_capacity(agent_id_count)
+   || !read(sim_data.agent_ids.data, in, agent_id_count))
+  {
+    /* TODO: communicate "Failed to load agent IDs." error */
+    free(*sim); free(sim); fclose(file); return EMPTY_SIM_INFO;
+  }
+  sim_data.agent_ids.length = agent_id_count;
+  fclose(file);
+
+  agent_state** agent_states = (agent_state**) malloc(sizeof(agent_state*) * agent_id_count);
+  if (agent_states == nullptr) {
+    /* TODO: how to communicate out of memory errors to swift? */
+    free(*sim); free(sim); return EMPTY_SIM_INFO;
+  }
+
+  sim->get_agent_states(agent_states, sim_data.agent_ids.data, (unsigned int) agent_id_count);
+
+  const simulator_config& config = sim->get_config();
+  AgentState* agents = (AgentState*) malloc(sizeof(AgentState) * agent_id_count);
+  if (agents == nullptr) {
+    /* TODO: how to communicate out of memory errors to swift? */
+    free(*sim); free(sim); free(agent_states);
+    return EMPTY_SIM_INFO;
+  }
+  for (size_t i = 0; i < agent_id_count; i++) {
+    if (!init(agents[i], *agent_states[i], config, sim_data.agent_ids[i])) {
+      for (size_t j = 0; j < i; j++) free(agents[i]);
+      free(*sim); free(sim); free(agent_states);
+      free(agents); return EMPTY_SIM_INFO;
+    }
+  }
+  free(agent_states);
+
+  SimulatorInfo sim_info;
+  sim_info.handle = (void*) sim;
+  sim_info.time = sim->time;
+  sim_info.agents = agents;
+  sim_info.numAgents = (unsigned int) agent_id_count;
+  return sim_info;
+}
 
 void simulatorDelete(
-  void* simulator_handle);
+  void* simulator_handle)
+{
+  simulator<simulator_data>* sim =
+      (simulator<simulator_data>*) simulator_handle;
+  free(*sim); free(sim);
+}
 
 AgentState simulatorAddAgent(
   void* simulator_handle,
