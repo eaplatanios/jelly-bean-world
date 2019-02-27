@@ -9,9 +9,10 @@
 using namespace core;
 using namespace nel;
 
-constexpr SimulatorInfo EMPTY_SIM_INFO = { nullptr, 0, nullptr, 0 };
-constexpr SimulationClientInfo EMPTY_CLIENT_INFO = { nullptr, 0, nullptr };
-constexpr SimulationMap EMPTY_SIM_MAP = { nullptr, 0 };
+constexpr AgentState EMPTY_AGENT_STATE = { 0 };
+constexpr SimulatorInfo EMPTY_SIM_INFO = { 0 };
+constexpr SimulationClientInfo EMPTY_CLIENT_INFO = { 0 };
+constexpr SimulationMap EMPTY_SIM_MAP = { 0 };
 
 
 inline Direction to_Direction(direction dir) {
@@ -74,8 +75,8 @@ inline bool init(
   return init(properties, src.name, strlen(src.name),
     src.scent, src.color, src.requiredItemCounts,
     src.requiredItemCosts, src.blocksMovement,
-    reinterpret_cast<intensity_function>(src.intensityFn), 
-    reinterpret_cast<interaction_function*>(src.interactionFns), 
+    reinterpret_cast<intensity_function>(src.intensityFn),
+    reinterpret_cast<interaction_function*>(src.interactionFns),
     src.intensityFnArgs, src.interactionFnArgs,
     src.intensityFnArgCount, src.interactionFnArgCounts,
     scent_dimension, color_dimension, item_type_count);
@@ -220,6 +221,7 @@ struct simulator_data
   unsigned int save_frequency;
   async_server* server;
   OnStepCallback callback;
+  void* callback_data;
 
   /* agents owned by the simulator */
   array<uint64_t> agent_ids;
@@ -229,9 +231,10 @@ struct simulator_data
       unsigned int save_filepath_length,
       unsigned int save_frequency,
       async_server* server,
-      OnStepCallback callback) :
+      OnStepCallback callback,
+      void* callback_data) :
     save_frequency(save_frequency), server(server),
-    callback(callback), agent_ids(16)
+    callback(callback), callback_data(callback_data), agent_ids(16)
   {
     if (save_filepath == nullptr) {
       save_directory = nullptr;
@@ -305,7 +308,7 @@ struct client_data {
   /* storing the server responses */
   union response {
     bool action_result;
-    AgentState* agent_state;
+    AgentState agent_state;
     hash_map<position, patch_state>* map;
   } response;
 
@@ -316,6 +319,7 @@ struct client_data {
 
   OnStepCallback step_callback;
   LostConnectionCallback lost_connection_callback;
+  void* callback_data;
 
   static inline void free(client_data& data) {
     data.lock.~mutex();
@@ -416,7 +420,7 @@ void on_step(const simulator<simulator_data>* sim,
   }
 
   /* invoke callback */
-  data.callback(agent_states, data.agent_ids.length, saved);
+  data.callback(data.callback_data, agent_states, data.agent_ids.length, saved);
 
   for (size_t i = 0; i < data.agent_ids.length; i++)
     free(agent_states[i]);
@@ -443,13 +447,9 @@ void on_step(const simulator<simulator_data>* sim,
 void on_add_agent(client<client_data>& c,
         uint64_t agent_id, const agent_state& new_agent)
 {
-  AgentState* new_agent_state = (AgentState*) malloc(sizeof(AgentState));
-  if (new_agent_state == nullptr) {
-    fprintf(stderr, "on_add_agent ERROR: Out of memory.\n");
-  } else if (!init(*new_agent_state, new_agent, c.config, agent_id)) {
-    free(new_agent_state);
-    new_agent_state = nullptr;
-  }
+  AgentState new_agent_state;
+  if (!init(new_agent_state, new_agent, c.config, agent_id))
+    new_agent_state = EMPTY_AGENT_STATE;
 
   std::unique_lock<std::mutex> lck(c.data.lock);
   c.data.waiting_for_server = false;
@@ -547,7 +547,7 @@ void on_step(client<client_data>& c,
     }
   }
 
-  c.data.step_callback(agents, agent_ids.length, saved);
+  c.data.step_callback(c.data.callback_data, agents, agent_ids.length, saved);
 
   for (size_t i = 0; i < agent_ids.length; i++)
     free(agents[i]);
@@ -565,7 +565,7 @@ void on_lost_connection(client<client_data>& c) {
   c.data.cv.notify_one();
 
   /* invoke callback */
-  c.data.lost_connection_callback();
+  c.data.lost_connection_callback(c.data.callback_data);
 }
 
 
@@ -585,6 +585,7 @@ inline void wait_for_server(client<client_data>& c)
 void* simulatorCreate(
   const SimulatorConfig* config, 
   OnStepCallback onStepCallback,
+  void* callbackData,
   unsigned int saveFrequency,
   const char* savePath)
 {
@@ -628,7 +629,7 @@ void* simulatorCreate(
 
   simulator_data data(savePath,
       (savePath == nullptr) ? 0 : strlen(savePath),
-      saveFrequency, nullptr, onStepCallback);
+      saveFrequency, nullptr, onStepCallback, callbackData);
 
   simulator<simulator_data>* sim =
       (simulator<simulator_data>*) malloc(sizeof(simulator<simulator_data>));
@@ -646,6 +647,7 @@ void* simulatorCreate(
 SimulatorInfo simulatorLoad(
   const char* filePath, 
   OnStepCallback onStepCallback,
+  void* callbackData,
   unsigned int saveFrequency,
   const char* savePath)
 {
@@ -658,7 +660,7 @@ SimulatorInfo simulatorLoad(
 
   simulator_data data(savePath,
       (savePath == nullptr) ? 0 : strlen(savePath),
-      saveFrequency, nullptr, onStepCallback);
+      saveFrequency, nullptr, onStepCallback, callbackData);
 
   FILE* file = open_file(filePath, "rb");
   if (file == nullptr) {
@@ -724,31 +726,26 @@ void simulatorDelete(
 }
 
 
-const AgentState* simulatorAddAgent(
+AgentState simulatorAddAgent(
   void* simulator_handle,
   void* client_handle)
 {
   if (client_handle == nullptr) {
-    AgentState* new_agent_state = (AgentState*) malloc(sizeof(AgentState));
-    if (new_agent_state == nullptr) {
-      /* TODO: communicate the error "Failed to add new agent." to swift */
-      return nullptr;
-    }
-
     /* the simulation is local, so call add_agent directly */
     simulator<simulator_data>* sim_handle =
         (simulator<simulator_data>*) simulator_handle;
     pair<uint64_t, agent_state*> new_agent = sim_handle->add_agent();
     if (new_agent.key == UINT64_MAX) {
       /* TODO: communicate the error "Failed to add new agent." to swift */
-      free(new_agent_state); return nullptr;
+      return EMPTY_AGENT_STATE;
     }
 
     sim_handle->get_data().agent_ids.add(new_agent.key);
 
+    AgentState new_agent_state;
     std::unique_lock<std::mutex> lock(new_agent.value->lock);
-    if (!init(*new_agent_state, *new_agent.value, sim_handle->get_config(), new_agent.key)) {
-      free(new_agent_state); return nullptr;
+    if (!init(new_agent_state, *new_agent.value, sim_handle->get_config(), new_agent.key)) {
+      return EMPTY_AGENT_STATE;
     }
     return new_agent_state;
   } else {
@@ -757,23 +754,17 @@ const AgentState* simulatorAddAgent(
         (client<client_data>*) client_handle;
     if (!client_ptr->client_running) {
       /* TODO: communicate "Connection to the server was lost." error to swift */
-      return nullptr;
+      return EMPTY_AGENT_STATE;
     }
 
     client_ptr->data.waiting_for_server = true;
     if (!send_add_agent(*client_ptr)) {
       /* TODO: communicate "Unable to send add_agent request." error to swift */
-      return nullptr;
+      return EMPTY_AGENT_STATE;
     }
 
     /* wait for response from server */
     wait_for_server(*client_ptr);
-
-    if (client_ptr->data.response.agent_state == nullptr) {
-      /* server returned failure */
-      /* TODO: communicate "Failed to add new agent." error to swift */
-      return nullptr;
-    }
 
     return client_ptr->data.response.agent_state;
   }
@@ -852,11 +843,11 @@ bool simulatorTurn(
 const SimulationMap simulatorMap(
   void* simulator_handle,
   void* client_handle,
-  const Position* bottomLeftCorner,
-  const Position* topRightCorner)
+  Position bottomLeftCorner,
+  Position topRightCorner)
 {
-  position bottom_left = position(bottomLeftCorner->x, bottomLeftCorner->y);
-  position top_right = position(topRightCorner->x, topRightCorner->y);
+  position bottom_left = position(bottomLeftCorner.x, bottomLeftCorner.y);
+  position top_right = position(topRightCorner.x, topRightCorner.y);
 
   if (client_handle == nullptr) {
     /* the simulation is local, so call get_map directly */
@@ -939,6 +930,7 @@ SimulationClientInfo simulationClientStart(
   unsigned int serverPort,
   OnStepCallback onStepCallback,
   LostConnectionCallback lostConnectionCallback,
+  void* callbackData,
   const uint64_t* agents,
   unsigned int numAgents)
 {
@@ -983,6 +975,7 @@ SimulationClientInfo simulationClientStart(
 
   new_client->data.step_callback = onStepCallback;
   new_client->data.lost_connection_callback = lostConnectionCallback;
+  new_client->data.callback_data = callbackData;
 
   SimulationClientInfo client_info;
   client_info.handle = (void*) new_client;
@@ -999,4 +992,30 @@ void simulationClientStop(
       (client<client_data>*) client_handle;
   stop_client(*client_ptr);
   free(*client_ptr); free(client_ptr);
+}
+
+
+void freeSimulatorInfo(
+  SimulatorInfo info)
+{
+  for (unsigned int i = 0; i < info.numAgents; i++)
+    free(info.agents[i]);
+  free(info.agents);
+}
+
+
+void freeSimulationClientInfo(
+  SimulationClientInfo client_info,
+  unsigned int numAgents)
+{
+  for (unsigned int i = 0; i < numAgents; i++)
+    free(client_info.agentStates[i]);
+  free(client_info.agentStates);
+}
+
+
+void freeAgentState(
+  AgentState agent_state)
+{
+  free(agent_state);
 }

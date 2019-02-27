@@ -64,8 +64,8 @@ typedef struct AgentState {
   unsigned int* collectedItems;
 } AgentState;
 
-typedef void (*OnStepCallback)(const AgentState*, unsigned int, bool);
-typedef void (*LostConnectionCallback)();
+typedef void (*OnStepCallback)(void*, const AgentState*, unsigned int, bool);
+typedef void (*LostConnectionCallback)(void*);
 
 typedef struct SimulatorConfig {
   /* Simulation Parameters */
@@ -136,19 +136,21 @@ typedef struct SimulationClientInfo {
 void* simulatorCreate(
   const SimulatorConfig* config, 
   OnStepCallback onStepCallback,
+  void* callbackData,
   unsigned int saveFrequency,
   const char* savePath);
 
 SimulatorInfo simulatorLoad(
   const char* filePath,
   OnStepCallback onStepCallback,
+  void* callbackData,
   unsigned int saveFrequency,
   const char* savePath);
 
 void simulatorDelete(
   void* simulator_handle);
 
-const AgentState* simulatorAddAgent(
+AgentState simulatorAddAgent(
   void* simulator_handle,
   void* client_handle);
 
@@ -168,8 +170,8 @@ bool simulatorTurnAgent(
 const SimulationMap simulatorMap(
   const void* simulator_handle,
   const void* client_handle,
-  const Position* bottomLeftCorner,
-  const Position* topRightCorner);
+  Position bottomLeftCorner,
+  Position topRightCorner);
 
 void* simulationServerStart(
   void* simulator_handle,
@@ -185,8 +187,19 @@ SimulationClientInfo simulationClientStart(
   unsigned int serverPort,
   OnStepCallback onStepCallback,
   LostConnectionCallback lostConnectionCallback,
+  void* callbackData,
   const uint64_t* agents,
   unsigned int numAgents);
 
 void simulationClientStop(
   void* client_handle);
+
+void freeSimulatorInfo(
+  SimulatorInfo info);
+
+void freeSimulationClientInfo(
+  SimulationClientInfo client_info,
+  unsigned int numAgents);
+
+void freeAgentState(
+  AgentState agent_state);
