@@ -55,16 +55,16 @@ typedef struct ItemProperties {
   unsigned int* interactionFnArgCounts;
 } ItemProperties;
 
-typedef struct AgentState {
+typedef struct AgentSimulationState {
   uint64_t id;
   Position position;
   Direction direction;
   float* scent;
   float* vision;
   unsigned int* collectedItems;
-} AgentState;
+} AgentSimulationState;
 
-typedef void (*OnStepCallback)(const AgentState*, unsigned int, bool);
+typedef void (*OnStepCallback)(const void*, const AgentSimulationState*, unsigned int, bool);
 typedef void (*LostConnectionCallback)();
 
 typedef struct SimulatorConfig {
@@ -97,7 +97,7 @@ typedef struct SimulatorConfig {
 typedef struct SimulatorInfo {
   void* handle;
   uint64_t time;
-  AgentState* agents;
+  AgentSimulationState* agents;
   unsigned int numAgents;
 } SimulatorInfo;
 
@@ -130,63 +130,69 @@ typedef struct SimulationMap {
 typedef struct SimulationClientInfo {
   void* handle;
   uint64_t simulationTime;
-  AgentState* agentStates;
+  AgentSimulationState* agentStates;
 } SimulationClientInfo;
 
 void* simulatorCreate(
   const SimulatorConfig* config, 
+  const void* swiftHandle,
   OnStepCallback onStepCallback,
   unsigned int saveFrequency,
   const char* savePath);
 
 SimulatorInfo simulatorLoad(
   const char* filePath,
+  const void* swiftHandle,
   OnStepCallback onStepCallback,
   unsigned int saveFrequency,
   const char* savePath);
 
 void simulatorDelete(
-  void* simulator_handle);
+  void* simulatorHandle);
 
-const AgentState* simulatorAddAgent(
-  void* simulator_handle,
-  void* client_handle);
+const AgentSimulationState* simulatorAddAgent(
+  void* simulatorHandle,
+  void* clientHandle);
+
+void simulatorDeleteAgentSimulationState(
+  const AgentSimulationState* handle);
 
 bool simulatorMoveAgent(
-  void* simulator_handle,
-  void* client_handle,
+  void* simulatorHandle,
+  void* clientHandle,
   uint64_t agentId,
   Direction direction,
   unsigned int numSteps);
 
 bool simulatorTurnAgent(
-  void* simulator_handle,
-  void* client_handle,
+  void* simulatorHandle,
+  void* clientHandle,
   uint64_t agentId,
   TurnDirection direction);
 
 const SimulationMap simulatorMap(
-  const void* simulator_handle,
-  const void* client_handle,
+  const void* simulatorHandle,
+  const void* clientHandle,
   const Position* bottomLeftCorner,
   const Position* topRightCorner);
 
 void* simulationServerStart(
-  void* simulator_handle,
+  void* simulatorHandle,
   unsigned int port,
   unsigned int connectionQueueCapacity,
   unsigned int numWorkers);
 
 void simulationServerStop(
-  void* server_handle);
+  void* serverHandle);
 
 SimulationClientInfo simulationClientStart(
   const char* serverAddress,
   unsigned int serverPort,
+  const void* swiftHandle,
   OnStepCallback onStepCallback,
   LostConnectionCallback lostConnectionCallback,
   const uint64_t* agents,
   unsigned int numAgents);
 
 void simulationClientStop(
-  void* client_handle);
+  void* clientHandle);

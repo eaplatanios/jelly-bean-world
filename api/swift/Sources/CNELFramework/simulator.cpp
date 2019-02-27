@@ -83,7 +83,7 @@ inline bool init(
 
 
 inline bool init(
-  AgentState& state,
+  AgentSimulationState& state,
   const agent_state& src,
   const simulator_config& config,
   uint64_t agent_id)
@@ -119,7 +119,7 @@ inline bool init(
 }
 
 
-inline void free(AgentState& state) {
+inline void free(AgentSimulationState& state) {
   free(state.scent);
   free(state.vision);
   free(state.collectedItems);
@@ -305,7 +305,7 @@ struct client_data {
   /* storing the server responses */
   union response {
     bool action_result;
-    AgentState* agent_state;
+    AgentSimulationState* agent_state;
     hash_map<position, patch_state>* map;
   } response;
 
@@ -401,7 +401,7 @@ void on_step(const simulator<simulator_data>* sim,
       fprintf(stderr, "on_step ERROR: send_step_response failed.\n");
   }
 
-  AgentState* agent_states = (AgentState*) malloc(sizeof(AgentState) * data.agent_ids.length);
+  AgentSimulationState* agent_states = (AgentSimulationState*) malloc(sizeof(AgentSimulationState) * data.agent_ids.length);
   if (agent_states == nullptr) {
     fprintf(stderr, "on_step ERROR: Insufficient memory for agent_states.\n");
     return;
@@ -416,7 +416,7 @@ void on_step(const simulator<simulator_data>* sim,
   }
 
   /* invoke callback */
-  data.callback(agent_states, data.agent_ids.length, saved);
+  data.callback(nullptr, agent_states, data.agent_ids.length, saved);
 
   for (size_t i = 0; i < data.agent_ids.length; i++)
     free(agent_states[i]);
@@ -430,7 +430,7 @@ void on_step(const simulator<simulator_data>* sim,
 
 /**
  * The callback invoked when the client receives an add_agent response from the
- * server. This function copies the agent state into an AgentState object,
+ * server. This function copies the agent state into an AgentSimulationState object,
  * stores it in `c.data.response.agent_state`, and wakes up the parent thread
  * (which should be waiting in the `simulatorAddAgent` function) so that it can
  * return the response.
@@ -443,7 +443,7 @@ void on_step(const simulator<simulator_data>* sim,
 void on_add_agent(client<client_data>& c,
         uint64_t agent_id, const agent_state& new_agent)
 {
-  AgentState* new_agent_state = (AgentState*) malloc(sizeof(AgentState));
+  AgentSimulationState* new_agent_state = (AgentSimulationState*) malloc(sizeof(AgentSimulationState));
   if (new_agent_state == nullptr) {
     fprintf(stderr, "on_add_agent ERROR: Out of memory.\n");
   } else if (!init(*new_agent_state, new_agent, c.config, agent_id)) {
@@ -518,7 +518,7 @@ void on_get_map(client<client_data>& c,
 
 /**
  * The callback invoked when the client receives a step response from the
- * server. This function constructs a list of AgentState objects governed by
+ * server. This function constructs a list of AgentSimulationState objects governed by
  * this client and invokes the function `c.data.step_callback`.
  *
  * \param   c            The client that received the response.
@@ -534,7 +534,7 @@ void on_step(client<client_data>& c,
   bool saved;
   if (!read(saved, c.connection)) return;
 
-  AgentState* agents = (AgentState*) malloc(sizeof(AgentState) * agent_ids.length);
+  AgentSimulationState* agents = (AgentSimulationState*) malloc(sizeof(AgentSimulationState) * agent_ids.length);
   if (agents == nullptr) {
     fprintf(stderr, "on_step ERROR: Insufficient memory for agents.\n");
     return;
@@ -547,7 +547,7 @@ void on_step(client<client_data>& c,
     }
   }
 
-  c.data.step_callback(agents, agent_ids.length, saved);
+  c.data.step_callback(nullptr, agents, agent_ids.length, saved);
 
   for (size_t i = 0; i < agent_ids.length; i++)
     free(agents[i]);
@@ -584,6 +584,7 @@ inline void wait_for_server(client<client_data>& c)
 
 void* simulatorCreate(
   const SimulatorConfig* config, 
+  void* swiftHandle,
   OnStepCallback onStepCallback,
   unsigned int saveFrequency,
   const char* savePath)
@@ -645,6 +646,7 @@ void* simulatorCreate(
 
 SimulatorInfo simulatorLoad(
   const char* filePath, 
+  void* swiftHandle,
   OnStepCallback onStepCallback,
   unsigned int saveFrequency,
   const char* savePath)
@@ -691,7 +693,7 @@ SimulatorInfo simulatorLoad(
   sim->get_agent_states(agent_states, sim_data.agent_ids.data, (unsigned int) agent_id_count);
 
   const simulator_config& config = sim->get_config();
-  AgentState* agents = (AgentState*) malloc(sizeof(AgentState) * agent_id_count);
+  AgentSimulationState* agents = (AgentSimulationState*) malloc(sizeof(AgentSimulationState) * agent_id_count);
   if (agents == nullptr) {
     /* TODO: how to communicate out of memory errors to swift? */
     free(*sim); free(sim); free(agent_states);
@@ -716,20 +718,20 @@ SimulatorInfo simulatorLoad(
 
 
 void simulatorDelete(
-  void* simulator_handle)
+  void* simulatorHandle)
 {
   simulator<simulator_data>* sim =
-      (simulator<simulator_data>*) simulator_handle;
+      (simulator<simulator_data>*) simulatorHandle;
   free(*sim); free(sim);
 }
 
 
-const AgentState* simulatorAddAgent(
-  void* simulator_handle,
-  void* client_handle)
+const AgentSimulationState* simulatorAddAgent(
+  void* simulatorHandle,
+  void* clientHandle)
 {
-  if (client_handle == nullptr) {
-    AgentState* new_agent_state = (AgentState*) malloc(sizeof(AgentState));
+  if (clientHandle == nullptr) {
+    AgentSimulationState* new_agent_state = (AgentSimulationState*) malloc(sizeof(AgentSimulationState));
     if (new_agent_state == nullptr) {
       /* TODO: communicate the error "Failed to add new agent." to swift */
       return nullptr;
@@ -737,7 +739,7 @@ const AgentState* simulatorAddAgent(
 
     /* the simulation is local, so call add_agent directly */
     simulator<simulator_data>* sim_handle =
-        (simulator<simulator_data>*) simulator_handle;
+        (simulator<simulator_data>*) simulatorHandle;
     pair<uint64_t, agent_state*> new_agent = sim_handle->add_agent();
     if (new_agent.key == UINT64_MAX) {
       /* TODO: communicate the error "Failed to add new agent." to swift */
@@ -754,7 +756,7 @@ const AgentState* simulatorAddAgent(
   } else {
     /* this is a client, so send an add_agent message to the server */
     client<client_data>* client_ptr =
-        (client<client_data>*) client_handle;
+        (client<client_data>*) clientHandle;
     if (!client_ptr->client_running) {
       /* TODO: communicate "Connection to the server was lost." error to swift */
       return nullptr;
@@ -781,21 +783,21 @@ const AgentState* simulatorAddAgent(
 
 
 bool simulatorMove(
-  void* simulator_handle,
-  void* client_handle,
+  void* simulatorHandle,
+  void* clientHandle,
   uint64_t agentId,
   Direction direction,
   unsigned int numSteps)
 {
-  if (client_handle == nullptr) {
+  if (clientHandle == nullptr) {
     /* the simulation is local, so call move directly */
     simulator<simulator_data>* sim_handle =
-        (simulator<simulator_data>*) simulator_handle;
+        (simulator<simulator_data>*) simulatorHandle;
     return sim_handle->move(agentId, to_direction(direction), numSteps);
   } else {
     /* this is a client, so send a move message to the server */
     client<client_data>* client_ptr =
-        (client<client_data>*) client_handle;
+        (client<client_data>*) clientHandle;
     if (!client_ptr->client_running) {
       /* TODO: communicate "Connection to the server was lost." to swift */
       return false;
@@ -816,20 +818,20 @@ bool simulatorMove(
 
 
 bool simulatorTurn(
-  void* simulator_handle,
-  void* client_handle,
+  void* simulatorHandle,
+  void* clientHandle,
   uint64_t agentId,
   TurnDirection direction)
 {
-  if (client_handle == nullptr) {
+  if (clientHandle == nullptr) {
     /* the simulation is local, so call turn directly */
     simulator<simulator_data>* sim_handle =
-        (simulator<simulator_data>*) simulator_handle;
+        (simulator<simulator_data>*) simulatorHandle;
     return sim_handle->turn(agentId, to_direction(direction));
   } else {
     /* this is a client, so send a turn message to the server */
     client<client_data>* client_ptr =
-        (client<client_data>*) client_handle;
+        (client<client_data>*) clientHandle;
     if (!client_ptr->client_running) {
       /* TODO: communicate "Connection to the server was lost." to swift */
       return false;
@@ -850,18 +852,18 @@ bool simulatorTurn(
 
 
 const SimulationMap simulatorMap(
-  void* simulator_handle,
-  void* client_handle,
+  void* simulatorHandle,
+  void* clientHandle,
   const Position* bottomLeftCorner,
   const Position* topRightCorner)
 {
   position bottom_left = position(bottomLeftCorner->x, bottomLeftCorner->y);
   position top_right = position(topRightCorner->x, topRightCorner->y);
 
-  if (client_handle == nullptr) {
+  if (clientHandle == nullptr) {
     /* the simulation is local, so call get_map directly */
     simulator<simulator_data>* sim_handle =
-        (simulator<simulator_data>*) simulator_handle;
+        (simulator<simulator_data>*) simulatorHandle;
     hash_map<position, patch_state> patches(16, alloc_position_keys);
     if (!sim_handle->get_map(bottom_left, top_right, patches)) {
       /* TODO: communicate "simulator.get_map failed." to swift */
@@ -877,7 +879,7 @@ const SimulationMap simulatorMap(
   } else {
     /* this is a client, so send a get_map message to the server */
     client<client_data>* client_ptr =
-        (client<client_data>*) client_handle;
+        (client<client_data>*) clientHandle;
     if (!client_ptr->client_running) {
       /* TODO: communicate "Connection to the server was lost." error to swift */
       return EMPTY_SIM_MAP;
@@ -904,13 +906,13 @@ const SimulationMap simulatorMap(
 
 
 void* simulationServerStart(
-  void* simulator_handle,
+  void* simulatorHandle,
   unsigned int port,
   unsigned int connectionQueueCapacity,
   unsigned int numWorkers)
 {
   simulator<simulator_data>* sim_handle =
-      (simulator<simulator_data>*) simulator_handle;
+      (simulator<simulator_data>*) simulatorHandle;
   async_server* server = (async_server*) malloc(sizeof(async_server));
   if (server == nullptr || !init(*server)) {
     /* TODO: communicate out of memory errors to swift */
@@ -926,9 +928,9 @@ void* simulationServerStart(
 
 
 void simulationServerStop(
-  void* server_handle)
+  void* serverHandle)
 {
-  async_server* server = (async_server*) server_handle;
+  async_server* server = (async_server*) serverHandle;
   stop_server(*server);
   free(*server); free(server);
 }
@@ -937,6 +939,7 @@ void simulationServerStop(
 SimulationClientInfo simulationClientStart(
   const char* serverAddress,
   unsigned int serverPort,
+  void* swiftHandle,
   OnStepCallback onStepCallback,
   LostConnectionCallback lostConnectionCallback,
   const uint64_t* agents,
@@ -963,7 +966,7 @@ SimulationClientInfo simulationClientStart(
     free(*new_client); free(new_client); return EMPTY_CLIENT_INFO;
   }
 
-  AgentState* agentStates = (AgentState*) malloc(sizeof(AgentState) * numAgents);
+  AgentSimulationState* agentStates = (AgentSimulationState*) malloc(sizeof(AgentSimulationState) * numAgents);
   if (agentStates == nullptr) {
     /* TODO: how to communicate out of memory errors to swift? */
     for (unsigned int i = 0; i < numAgents; i++) free(agent_states[i]);
@@ -993,10 +996,10 @@ SimulationClientInfo simulationClientStart(
 
 
 void simulationClientStop(
-  void* client_handle)
+  void* clientHandle)
 {
   client<client_data>* client_ptr =
-      (client<client_data>*) client_handle;
+      (client<client_data>*) clientHandle;
   stop_client(*client_ptr);
   free(*client_ptr); free(client_ptr);
 }
