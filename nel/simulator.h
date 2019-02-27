@@ -125,8 +125,8 @@ struct item_properties {
  */
 inline bool init(
         item_properties& properties, const char* name, unsigned int name_length,
-        const float* scent, const float* color, unsigned int* required_item_counts,
-        unsigned int* required_item_costs, bool blocks_movement,
+        const float* scent, const float* color, const unsigned int* required_item_counts,
+        const unsigned int* required_item_costs, bool blocks_movement,
         intensity_function intensity_fn, const interaction_function* interaction_fns,
         const float* intensity_fn_args, const float* const* interaction_fn_args,
         unsigned int intensity_fn_arg_count, const unsigned int* interaction_fn_arg_counts,

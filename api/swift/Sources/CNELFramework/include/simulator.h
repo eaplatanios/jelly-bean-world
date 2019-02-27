@@ -38,11 +38,11 @@ typedef float (*interactionFunction)(const Position, const Position, const float
 typedef struct ItemProperties {
   const char* name;
 
-  float* scent;
-  float* color;
+  const float* scent;
+  const float* color;
 
-  unsigned int* requiredItemCounts;
-  unsigned int* requiredItemCosts;
+  const unsigned int* requiredItemCounts;
+  const unsigned int* requiredItemCosts;
 
   bool blocksMovement;
 
@@ -52,7 +52,7 @@ typedef struct ItemProperties {
   float* intensityFnArgs;
   float** interactionFnArgs;
   unsigned int intensityFnArgCount;
-  unsigned int* interactionFnArgCounts;
+  const unsigned int* interactionFnArgCounts;
 } ItemProperties;
 
 typedef struct AgentSimulationState {
@@ -82,10 +82,9 @@ typedef struct SimulatorConfig {
   /* World Properties */
   unsigned int patchSize;
   unsigned int gibbsIterations;
-  unsigned int numItems;
-  ItemProperties* itemTypes;
+  const ItemProperties* itemTypes;
   unsigned int numItemTypes;
-  float* agentColor;
+  const float* agentColor;
   MovementConflictPolicy movementConflictPolicy;
 
   /* Scent Diffusion Parameters */
@@ -134,8 +133,7 @@ typedef struct SimulationClientInfo {
 } SimulationClientInfo;
 
 void* simulatorCreate(
-  const SimulatorConfig* config, 
-  const void* swiftHandle,
+  const SimulatorConfig* config,
   OnStepCallback onStepCallback,
   void* callbackData,
   unsigned int saveFrequency,
@@ -143,7 +141,6 @@ void* simulatorCreate(
 
 SimulatorInfo simulatorLoad(
   const char* filePath,
-  const void* swiftHandle,
   OnStepCallback onStepCallback,
   void* callbackData,
   unsigned int saveFrequency,
@@ -187,7 +184,6 @@ void simulationServerStop(
 SimulationClientInfo simulationClientStart(
   const char* serverAddress,
   unsigned int serverPort,
-  const void* swiftHandle,
   OnStepCallback onStepCallback,
   LostConnectionCallback lostConnectionCallback,
   void* callbackData,

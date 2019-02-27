@@ -584,7 +584,6 @@ inline void wait_for_server(client<client_data>& c)
 
 void* simulatorCreate(
   const SimulatorConfig* config, 
-  void* swiftHandle,
   OnStepCallback onStepCallback,
   void* callbackData,
   unsigned int saveFrequency,
@@ -647,7 +646,6 @@ void* simulatorCreate(
 
 SimulatorInfo simulatorLoad(
   const char* filePath, 
-  void* swiftHandle,
   OnStepCallback onStepCallback,
   void* callbackData,
   unsigned int saveFrequency,
@@ -930,7 +928,6 @@ void simulationServerStop(
 SimulationClientInfo simulationClientStart(
   const char* serverAddress,
   unsigned int serverPort,
-  void* swiftHandle,
   OnStepCallback onStepCallback,
   LostConnectionCallback lostConnectionCallback,
   void* callbackData,
