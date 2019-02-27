@@ -68,17 +68,74 @@ inline movement_conflict_policy to_movement_conflict_policy(MovementConflictPoli
 
 
 inline bool init(
+  energy_function<intensity_function>& function,
+  const IntensityFunction& src)
+{
+  function.fn = get_intensity_fn((intensity_fns) src.id, src.args, src.numArgs);
+  function.args = (float*) malloc(sizeof(float) * src.numArgs);
+  if (function.args == NULL) {
+    /* TODO: communicate out of memory error to swift */
+    return false;
+  }
+  memcpy(function.args, src.args, sizeof(float) * src.numArgs);
+  function.arg_count = src.numArgs;
+  return true;
+}
+
+
+inline bool init(
+  energy_function<interaction_function>& function,
+  const InteractionFunction& src)
+{
+  function.fn = get_interaction_fn((interaction_fns) src.id, src.args, src.numArgs);
+  function.args = (float*) malloc(sizeof(float) * src.numArgs);
+  if (function.args == NULL) {
+    /* TODO: communicate out of memory error to swift */
+    return false;
+  }
+  memcpy(function.args, src.args, sizeof(float) * src.numArgs);
+  function.arg_count = src.numArgs;
+  return true;
+}
+
+
+inline bool init(
   item_properties& properties, const ItemProperties& src,
   unsigned int scent_dimension, unsigned int color_dimension,
   unsigned int item_type_count)
 {
-  return init(properties, src.name, strlen(src.name),
+  /* check that `itemId` for `src.energyFunctions.interactionFn` are unique */
+  array<unsigned int> item_ids(src.energyFunctions.numInteractionFns);
+  for (unsigned int i = 0; i < src.energyFunctions.numInteractionFns; i++)
+    item_ids[i] = src.energyFunctions.interactionFns[i].itemId;
+  item_ids.length = src.energyFunctions.numInteractionFns;
+  if (item_ids.length > 1) {
+    sort(item_ids);
+    unique(item_ids);
+    if (item_ids.length != src.energyFunctions.numInteractionFns) {
+      /* TODO: communicate error to swift that the itemIds are not unique */
+      return false;
+    }
+  }
+
+  energy_function<intensity_function> intensity_fn;
+  if (!init(intensity_fn, src.energyFunctions.intensityFn))
+    return false;
+
+  array_map<unsigned int, energy_function<interaction_function>> interaction_fns(src.energyFunctions.numInteractionFns);
+  for (unsigned int i = 0; i < src.energyFunctions.numInteractionFns; i++) {
+    interaction_fns.keys[i] = src.energyFunctions.interactionFns[i].itemId;
+    if (!init(interaction_fns.values[i], src.energyFunctions.interactionFns[i])) {
+      for (unsigned int j = 0; j < i; j++) free(interaction_fns.values[i]);
+      free(intensity_fn); return false;
+    }
+  }
+  interaction_fns.size = src.energyFunctions.numInteractionFns;
+
+  bool success = init(properties, src.name, strlen(src.name),
     src.scent, src.color, src.requiredItemCounts,
     src.requiredItemCosts, src.blocksMovement,
-    reinterpret_cast<intensity_function>(src.intensityFn),
-    reinterpret_cast<interaction_function*>(src.interactionFns),
-    src.intensityFnArgs, src.interactionFnArgs,
-    src.intensityFnArgCount, src.interactionFnArgCounts,
+    intensity_fn, interaction_fns,
     scent_dimension, color_dimension, item_type_count);
 }
 

@@ -721,28 +721,27 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
         new_item.blocks_movement = (blocks_movement == Py_True);
 
         pair<float*, Py_ssize_t> intensity_fn_args = PyArg_ParseFloatList(py_intensity_fn_args);
-        new_item.intensity_fn = get_intensity_fn((intensity_fns) py_intensity_fn,
+        new_item.intensity_fn.fn = get_intensity_fn((intensity_fns) py_intensity_fn,
                 intensity_fn_args.key, (unsigned int) intensity_fn_args.value);
-        if (new_item.intensity_fn == NULL) {
+        if (new_item.intensity_fn.fn == NULL) {
             PyErr_SetString(PyExc_ValueError, "Invalid intensity"
                     " function arguments in the call to 'simulator_c.new'.");
             return NULL;
         }
-        new_item.intensity_fn_args = intensity_fn_args.key;
-        new_item.intensity_fn_arg_count = (unsigned int) intensity_fn_args.value;
-        new_item.interaction_fns = (interaction_function*) malloc(sizeof(interaction_function) * item_type_count);
-        new_item.interaction_fn_args = (float**) malloc(sizeof(float*) * item_type_count);
-        new_item.interaction_fn_arg_counts = (unsigned int*) malloc(sizeof(unsigned int) * item_type_count);
+        new_item.intensity_fn.args = intensity_fn_args.key;
+        new_item.intensity_fn.arg_count = (unsigned int) intensity_fn_args.value;
+        new_item.interaction_fns = (energy_function<interaction_function>*)
+                malloc(sizeof(energy_function<interaction_function>) * item_type_count);
         for (Py_ssize_t i = 0; i < item_type_count; i++) {
             PyObject* sublist = PyList_GetItem(py_interaction_fn_args, i);
             unsigned int py_interaction_fn = PyLong_AsUnsignedLong(PyList_GetItem(sublist, 0));
 
             pair<float*, Py_ssize_t> interaction_fn_args = PyArg_ParseFloatList(sublist, 1);
-            new_item.interaction_fns[i] = get_interaction_fn((interaction_fns) py_interaction_fn,
+            new_item.interaction_fns[i].fn = get_interaction_fn((interaction_fns) py_interaction_fn,
                     interaction_fn_args.key, (unsigned int) interaction_fn_args.value);
-            new_item.interaction_fn_args[i] = interaction_fn_args.key;
-            new_item.interaction_fn_arg_counts[i] = (unsigned int) interaction_fn_args.value;
-            if (new_item.interaction_fns[i] == NULL) {
+            new_item.interaction_fns[i].args = interaction_fn_args.key;
+            new_item.interaction_fns[i].arg_count = (unsigned int) interaction_fn_args.value;
+            if (new_item.interaction_fns[i].fn == NULL) {
                 PyErr_SetString(PyExc_ValueError, "Invalid interaction"
                         " function arguments in the call to 'simulator_c.new'.");
                 return NULL;

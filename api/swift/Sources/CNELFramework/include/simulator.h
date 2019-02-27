@@ -47,6 +47,7 @@ typedef struct InteractionFunction {
 typedef struct EnergyFunctions {
   IntensityFunction intensityFn;
   const InteractionFunction* interactionFns;
+  unsigned int numInteractionFns;
 } EnergyFunctions;
 
 /** A structure containing the properties of an item type. */
