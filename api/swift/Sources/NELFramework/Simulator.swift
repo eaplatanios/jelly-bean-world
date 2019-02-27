@@ -40,10 +40,24 @@ public enum TurnDirection: UInt32 {
   }
 }
 
+public enum MoveConflictPolicy: UInt32 {
+  case noCollisions = 0, firstComeFirstServe, random
+
+  internal static func fromCMoveConflictPolicy(
+    _ value: CNELFramework.MovementConflictPolicy
+  ) -> MoveConflictPolicy {
+    return MoveConflictPolicy(rawValue: value.rawValue)!
+  }
+
+  internal func toCMoveConflictPolicy() -> CNELFramework.MovementConflictPolicy {
+    return CNELFramework.MovementConflictPolicy(rawValue: self.rawValue)
+  }
+}
+
 public struct Item : Equatable, Hashable {
   let name: String
-  let scent: Tensor<Float>
-  let color: Tensor<Float>
+  let scent: ShapedArray<Float>
+  let color: ShapedArray<Float>
   let requiredItemCounts: [Item: UInt32]
   let requiredItemCosts: [Item: UInt32]
   let blocksMovement: Bool
@@ -93,7 +107,7 @@ public struct Item : Equatable, Hashable {
   }
 }
 
-public struct Environment {
+public struct Environment : Equatable, Hashable {
   // Simulation parameters
   let randomSeed: UInt32
 
@@ -110,13 +124,32 @@ public struct Environment {
   let gibbsIterations: UInt32
   let numItems: UInt32
   let items: [Item]
-  let agentColor: Tensor<Float>
-  let movementConflictPolicy: MovementConflictPolicy
+  let agentColor: ShapedArray<Float>
+  let moveConflictPolicy: MoveConflictPolicy
   
   // Scent diffusion parameters
   let scentDecay: Float
   let scentDiffusion: Float
   let removedItemLifetime: UInt32
+
+  public func hash(into hasher: inout Hasher) {
+    hasher.combine(randomSeed)
+    hasher.combine(maxStepsPerMove)
+    hasher.combine(scentDimSize)
+    hasher.combine(colorDimSize)
+    hasher.combine(visionRange)
+    hasher.combine(allowedMoves)
+    hasher.combine(allowedTurns)
+    hasher.combine(patchSize)
+    hasher.combine(gibbsIterations)
+    hasher.combine(numItems)
+    hasher.combine(items)
+    hasher.combine(agentColor.scalars)
+    hasher.combine(moveConflictPolicy)
+    hasher.combine(scentDecay)
+    hasher.combine(scentDiffusion)
+    hasher.combine(removedItemLifetime)
+  }
 
   internal func toSimulatorConfig() -> SimulatorConfig {
     return SimulatorConfig(
@@ -140,7 +173,7 @@ public struct Environment {
       itemTypes: items.map { $0.toItemProperties(in: self) },
       numItemTypes: UInt32(items.count),
       agentColor: agentColor.scalars, 
-      movementConflictPolicy: movementConflictPolicy, 
+      movementConflictPolicy: moveConflictPolicy.toCMoveConflictPolicy(), 
       scentDecay: scentDecay, 
       scentDiffusion: scentDiffusion, 
       removedItemLifetime: removedItemLifetime)
@@ -153,8 +186,8 @@ public protocol Agent : AnyObject {
   var id: UInt64 { get set }
   var position: Position { get set }
   var direction: Direction { get set }
-  var scent: Tensor<Float> { get set }
-  var vision: Tensor<Float> { get set }
+  var scent: ShapedArray<Float> { get set }
+  var vision: ShapedArray<Float> { get set }
   var items: [Item : UInt32] { get set }
 
   init(in simulator: Simulator)
@@ -206,8 +239,8 @@ public extension Agent {
     self.id = state.id
     self.position = state.position
     self.direction = Direction.fromCDirection(state.direction)
-    self.scent = simulator.scentToTensor(state.scent!)
-    self.vision = simulator.visionToTensor(state.vision!)
+    self.scent = simulator.scentToArray(state.scent!)
+    self.vision = simulator.visionToArray(state.vision!)
     self.items = simulator.itemCountsToDictionary(state.collectedItems!)
   }
 }
@@ -305,30 +338,31 @@ public class Simulator {
     simulator.onStepCallback()
   }
 
-  internal func scentToTensor(
+  internal func scentToArray(
     _ buffer: UnsafeMutablePointer<Float>
-  ) -> Tensor<Float> {
-    let scentShape = TensorShape(
-      Int32(environment.scentDimSize))
+  ) -> ShapedArray<Float> {
+    let scentShape = [Int(environment.scentDimSize)]
     let scentBuffer = UnsafeBufferPointer(
         start: buffer,
-        count: Int(scentShape.contiguousSize))
-    return Tensor(
+        count: Int(environment.scentDimSize))
+    return ShapedArray(
       shape: scentShape,
       scalars: scentBuffer)
   }
 
-  internal func visionToTensor(
+  internal func visionToArray(
     _ buffer: UnsafeMutablePointer<Float>
-  ) -> Tensor<Float> {
-    let visionShape = TensorShape(
-      2 * Int32(environment.visionRange) + 1, 
-      2 * Int32(environment.visionRange) + 1, 
-      Int32(environment.colorDimSize))
+  ) -> ShapedArray<Float> {
+    let visionShape = [
+      2 * Int(environment.visionRange) + 1, 
+      2 * Int(environment.visionRange) + 1, 
+      Int(environment.colorDimSize)]
     let visionBuffer = UnsafeBufferPointer(
         start: buffer,
-        count: Int(visionShape.contiguousSize))
-    return Tensor(
+        count: Int(
+          4 * environment.visionRange + 2 + 
+          environment.colorDimSize))
+    return ShapedArray(
       shape: visionShape,
       scalars: visionBuffer)
   }
