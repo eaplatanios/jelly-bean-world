@@ -35,14 +35,14 @@ typedef struct IntensityFunction {
   unsigned int id;
   const float* args;
   unsigned int numArgs;
-} EnergyFunction;
+} IntensityFunction;
 
 typedef struct InteractionFunction {
   unsigned int id;
   const float* args;
   unsigned int numArgs;
   unsigned int itemId;
-} EnergyFunction;
+} InteractionFunction;
 
 typedef struct EnergyFunctions {
   IntensityFunction intensityFn;
