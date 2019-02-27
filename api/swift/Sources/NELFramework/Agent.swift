@@ -15,9 +15,11 @@ public protocol Agent : AnyObject {
   init(in simulator: Simulator)
 
   func act()
+  func load(from file: URL)
+  func save(to file: URL)
 }
 
-public extension Agent { 
+public extension Agent {
   init(in simulator: Simulator) {
     self.init(in: simulator)
     simulator.addAgent(self)
@@ -70,21 +72,5 @@ public extension Agent {
     self.items = itemCountsToDictionary(
       for: simulator.config, 
       state.collectedItems!)
-  }
-}
-
-public protocol StatefulAgent : Agent {
-  associatedtype S
-
-  var state: S { get set }
-  
-  static func load(from file: URL) -> S
-  func save(state: S, to file: URL) -> Void
-}
-
-extension StatefulAgent {
-  public init(in simulator: Simulator, from file: URL) {
-    self.init(in: simulator)
-    self.state = Self.load(from: file)
   }
 }
