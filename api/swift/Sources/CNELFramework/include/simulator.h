@@ -31,8 +31,6 @@ typedef struct Position {
   int64_t y;
 } Position;
 
-typedef void (*OnStepCallback)();
-typedef void (*LostConnectionCallback)();
 typedef float (*intensityFunction)(const Position, const float*);
 typedef float (*interactionFunction)(const Position, const Position, const float*);
 
@@ -65,6 +63,9 @@ typedef struct AgentState {
   float* vision;
   unsigned int* collectedItems;
 } AgentState;
+
+typedef void (*OnStepCallback)(const AgentState*, unsigned int, bool);
+typedef void (*LostConnectionCallback)();
 
 typedef struct SimulatorConfig {
   /* Simulation Parameters */
@@ -130,7 +131,6 @@ typedef struct SimulationClientInfo {
   void* handle;
   uint64_t simulationTime;
   AgentState* agentStates;
-  unsigned int numAgents;
 } SimulationClientInfo;
 
 void* simulatorCreate(

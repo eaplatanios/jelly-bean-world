@@ -125,7 +125,7 @@ struct py_client_data {
     /* storing the server responses */
     union response {
         bool action_result;
-        PyObject* agent_states;
+        PyObject* agent_state;
         hash_map<position, patch_state>* map;
     } response;
 
@@ -192,14 +192,14 @@ bool save(const simulator<py_simulator_data>* sim, uint64_t time)
 {
     int length = snprintf(NULL, 0, "%" PRIu64, time);
     if (length < 0) {
-        fprintf(stderr, "on_step ERROR: Error computing filepath to save simulation.\n");
+        fprintf(stderr, "save ERROR: Error computing filepath to save simulation.\n");
         return false;
     }
 
     const py_simulator_data& data = sim->get_data();
     char* filepath = (char*) malloc(sizeof(char) * (data.save_directory_length + length + 1));
     if (filepath == NULL) {
-        fprintf(stderr, "on_step ERROR: Insufficient memory for filepath.\n");
+        fprintf(stderr, "save ERROR: Insufficient memory for filepath.\n");
         return false;
     }
 
@@ -209,7 +209,7 @@ bool save(const simulator<py_simulator_data>* sim, uint64_t time)
 
     FILE* file = open_file(filepath, "wb");
     if (file == NULL) {
-        fprintf(stderr, "on_step: Unable to open '%s' for writing. ", filepath);
+        fprintf(stderr, "save ERROR: Unable to open '%s' for writing. ", filepath);
         perror(""); return false;
     }
 
@@ -355,9 +355,9 @@ static PyObject* build_py_agent(
 
 /**
  * The callback function invoked by the simulator when time is advanced. This
- * function is only called if the simulator is run in locally or as a server.
- * This function first checks if the simulator should be saved to file. Next,
- * in server mode, the simulator sends a step response message to all connected
+ * function is only called if the simulator is run locally or as a server. This
+ * function first checks if the simulator should be saved to file. Next, in
+ * server mode, the simulator sends a step response message to all connected
  * clients. Finally, it constructs a Python list of agent states and invokes
  * the Python callback in `data.callback`.
  *
@@ -412,7 +412,7 @@ void on_step(const simulator<py_simulator_data>* sim,
 /**
  * The callback invoked when the client receives an add_agent response from the
  * server. This function copies the agent state into a Python object, stores
- * it in `c.data.response.agent_states`, and wakes up the Python thread (which
+ * it in `c.data.response.agent_state`, and wakes up the Python thread (which
  * should be waiting in the `simulator_add_agent` function) so that it can
  * return the response back to Python.
  *
@@ -431,7 +431,7 @@ void on_add_agent(client<py_client_data>& c,
 
     std::unique_lock<std::mutex> lck(c.data.lock);
     c.data.waiting_for_server = false;
-    c.data.response.agent_states = agent;
+    c.data.response.agent_state = agent;
     c.data.cv.notify_one();
 }
 
@@ -1041,7 +1041,7 @@ static PyObject* simulator_start_client(PyObject *self, PyObject *args)
     PyObject* py_new_client = PyLong_FromVoidPtr(new_client);
     PyObject* to_return = Py_BuildValue("(LOO)", simulator_time, py_new_client, py_states);
     Py_DECREF(py_new_client); Py_DECREF(py_states);
-	return to_return;
+    return to_return;
 }
 
 /**
@@ -1121,13 +1121,13 @@ static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
         /* wait for response from server */
         wait_for_server(*client_handle);
 
-        if (client_handle->data.response.agent_states == NULL) {
+        if (client_handle->data.response.agent_state == NULL) {
             /* server returned failure */
             PyErr_SetString(add_agent_error, "Failed to add new agent.");
             return NULL;
         }
 
-        return client_handle->data.response.agent_states;
+        return client_handle->data.response.agent_state;
     }
 }
 
