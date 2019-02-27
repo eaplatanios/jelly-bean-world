@@ -1,8 +1,8 @@
 #include <inttypes.h>
 #include <stdbool.h>
 
-/** Represents all possible directions of motion 
- * in the environment. */
+/** Represents all possible directions of motion
+ *  in the environment. */
 typedef enum Direction {
   DirectionUp = 0,
   DirectionDown,
@@ -11,8 +11,8 @@ typedef enum Direction {
   DirectionCount
 } Direction;
 
-/** Represents all possible directions of turning 
- * in the environment. */
+/** Represents all possible directions of turning
+ *  in the environment. */
 typedef enum TurnDirection {
   TurnDirectionNoChange = 0,
   TurnDirectionReverse,
@@ -31,8 +31,17 @@ typedef struct Position {
   int64_t y;
 } Position;
 
-typedef float (*intensityFunction)(const Position, const float*);
-typedef float (*interactionFunction)(const Position, const Position, const float*);
+typedef struct EnergyFunctions {
+  /* Intensity function */
+  unsigned int intensityFnId;
+  float* intensityFnArgs;
+  unsigned int intensityFnArgCount;
+
+  /* Interaction functions */
+  unsigned int* interactionFnIds;
+  float** interactionFnArgs;
+  const unsigned int* interactionFnArgCounts;
+} EnergyFunctions;
 
 /** A structure containing the properties of an item type. */
 typedef struct ItemProperties {
@@ -46,13 +55,7 @@ typedef struct ItemProperties {
 
   bool blocksMovement;
 
-  intensityFunction intensityFn;
-  interactionFunction* interactionFns;
-
-  float* intensityFnArgs;
-  float** interactionFnArgs;
-  unsigned int intensityFnArgCount;
-  const unsigned int* interactionFnArgCounts;
+  EnergyFunctions energyFunctions;
 } ItemProperties;
 
 typedef struct AgentSimulationState {
