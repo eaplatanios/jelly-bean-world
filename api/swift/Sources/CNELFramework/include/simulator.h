@@ -140,28 +140,28 @@ void* simulatorCreate(
   const char* savePath);
 
 SimulatorInfo simulatorLoad(
-  const char* filePath, 
+  const char* filePath,
   OnStepCallback onStepCallback,
   unsigned int saveFrequency,
   const char* savePath);
 
 void simulatorDelete(
-  const void* simulator_handle);
+  void* simulator_handle);
 
-AgentState simulatorAddAgent(
-  const void* simulator_handle,
-  const void* client_handle);
+const AgentState* simulatorAddAgent(
+  void* simulator_handle,
+  void* client_handle);
 
 bool simulatorMoveAgent(
-  const void* simulator_handle,
-  const void* client_handle,
+  void* simulator_handle,
+  void* client_handle,
   uint64_t agentId,
   Direction direction,
   unsigned int numSteps);
 
 bool simulatorTurnAgent(
-  const void* simulator_handle,
-  const void* client_handle,
+  void* simulator_handle,
+  void* client_handle,
   uint64_t agentId,
   TurnDirection direction);
 
@@ -172,13 +172,13 @@ const SimulationMap simulatorMap(
   const Position* topRightCorner);
 
 void* simulationServerStart(
-  const void* simulator_handle,
+  void* simulator_handle,
   unsigned int port,
   unsigned int connectionQueueCapacity,
   unsigned int numWorkers);
 
 void simulationServerStop(
-  const void* server_handle);
+  void* server_handle);
 
 SimulationClientInfo simulationClientStart(
   const char* serverAddress,

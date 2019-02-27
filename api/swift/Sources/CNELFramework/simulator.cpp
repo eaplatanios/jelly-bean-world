@@ -11,6 +11,7 @@ using namespace nel;
 
 constexpr SimulatorInfo EMPTY_SIM_INFO = { nullptr, 0, nullptr, 0 };
 constexpr SimulationClientInfo EMPTY_CLIENT_INFO = { nullptr, 0, nullptr };
+constexpr SimulationMap EMPTY_SIM_MAP = { nullptr, 0 };
 
 
 inline Direction to_Direction(direction dir) {
@@ -22,6 +23,31 @@ inline Direction to_Direction(direction dir) {
   case direction::COUNT: break;
   }
   fprintf(stderr, "to_Direction ERROR: Unrecognized direction.\n");
+  exit(EXIT_FAILURE);
+}
+
+
+inline direction to_direction(Direction dir) {
+  switch (dir) {
+  case DirectionUp:    return direction::UP;
+  case DirectionDown:  return direction::DOWN;
+  case DirectionLeft:  return direction::LEFT;
+  case DirectionRight: return direction::RIGHT;
+  case DirectionCount: break;
+  }
+  fprintf(stderr, "to_direction ERROR: Unrecognized Direction.\n");
+  exit(EXIT_FAILURE);
+}
+
+
+inline direction to_direction(TurnDirection dir) {
+  switch (dir) {
+  case TurnDirectionNoChange:    return direction::UP;
+  case TurnDirectionReverse:  return direction::DOWN;
+  case TurnDirectionLeft:  return direction::LEFT;
+  case TurnDirectionRight: return direction::RIGHT;
+  }
+  fprintf(stderr, "to_direction ERROR: Unrecognized TurnDirection.\n");
   exit(EXIT_FAILURE);
 }
 
@@ -97,6 +123,86 @@ inline void free(AgentState& state) {
   free(state.scent);
   free(state.vision);
   free(state.collectedItems);
+}
+
+
+bool init(
+  SimulationMapPatch& patch,
+  const patch_state& src,
+  const simulator_config& config)
+{
+  unsigned int n = config.patch_size;
+  patch.items = (ItemInfo*) malloc(sizeof(ItemInfo) * src.item_count);
+  if (patch.items == nullptr) {
+    /* TODO: communicate out of memory error to swift */
+    return false;
+  }
+  patch.agents = (AgentInfo*) malloc(sizeof(AgentInfo) * src.agent_count);
+  if (patch.agents == nullptr) {
+    /* TODO: communicate out of memory error to swift */
+    free(patch.items); return false;
+  }
+  patch.scent = (float*) malloc(sizeof(float) * n * n * config.scent_dimension);
+  if (patch.scent == nullptr) {
+    /* TODO: communicate out of memory error to swift */
+    free(patch.items); free(patch.agents); return false;
+  }
+  patch.vision = (float*) malloc(sizeof(float) * n * n * config.color_dimension);
+  if (patch.vision == nullptr) {
+    /* TODO: communicate out of memory error to swift */
+    free(patch.items); free(patch.agents);
+    free(patch.scent); return false;
+  }
+
+  for (unsigned int i = 0; i < src.item_count; i++) {
+    patch.items[i].type = src.items[i].item_type;
+    patch.items[i].position.x = src.items[i].location.x;
+    patch.items[i].position.y = src.items[i].location.y;
+  }
+  for (unsigned int i = 0; i < src.agent_count; i++) {
+    patch.agents[i].position.x = src.agent_positions[i].x;
+    patch.agents[i].position.y = src.agent_positions[i].y;
+    patch.agents[i].direction = to_Direction(src.agent_directions[i]);
+  }
+  patch.position.x = src.patch_position.x;
+  patch.position.y = src.patch_position.y;
+  patch.numItems = src.item_count;
+  patch.numAgents = src.agent_count;
+  patch.fixed = src.fixed;
+
+  memcpy(patch.scent, src.scent, sizeof(float) * n * n * config.scent_dimension);
+  memcpy(patch.vision, src.vision, sizeof(float) * n * n * config.color_dimension);
+  return true;
+}
+
+
+inline void free(SimulationMapPatch& patch) {
+  free(patch.items);
+  free(patch.agents);
+  free(patch.scent);
+  free(patch.vision);
+}
+
+
+bool init(SimulationMap& map,
+  const hash_map<position, patch_state>& patches,
+  const simulator_config& config)
+{
+  unsigned int index = 0;
+  map.patches = (SimulationMapPatch*) malloc(max((size_t) 1, sizeof(SimulationMapPatch) * patches.table.size));
+  if (map.patches == nullptr) {
+    /* TODO: communicate out of memory error to swift */
+    return false;
+  }
+  for (const auto& entry : patches) {
+    if (!init(map.patches[index], entry.value, config)) {
+      for (unsigned int i = 0; i < index; i++) free(map.patches[i]);
+      free(map.patches); return false;
+    }
+    index++;
+  }
+  map.numPatches = patches.table.size;
+  return true;
 }
 
 
@@ -463,6 +569,19 @@ void on_lost_connection(client<client_data>& c) {
 }
 
 
+/**
+ * This functions waits for a response from the server, and for one of the
+ * above client callback functions to be invoked.
+ * \param   c       The client expecting a response from the server.
+ */
+inline void wait_for_server(client<client_data>& c)
+{
+    std::unique_lock<std::mutex> lck(c.data.lock);
+    while (c.data.waiting_for_server && c.client_running)
+        c.data.cv.wait(lck);
+}
+
+
 void* simulatorCreate(
   const SimulatorConfig* config, 
   OnStepCallback onStepCallback,
@@ -605,9 +724,60 @@ void simulatorDelete(
 }
 
 
-AgentState simulatorAddAgent(
+const AgentState* simulatorAddAgent(
   void* simulator_handle,
-  void* client_handle);
+  void* client_handle)
+{
+  if (client_handle == nullptr) {
+    AgentState* new_agent_state = (AgentState*) malloc(sizeof(AgentState));
+    if (new_agent_state == nullptr) {
+      /* TODO: communicate the error "Failed to add new agent." to swift */
+      return nullptr;
+    }
+
+    /* the simulation is local, so call add_agent directly */
+    simulator<simulator_data>* sim_handle =
+        (simulator<simulator_data>*) simulator_handle;
+    pair<uint64_t, agent_state*> new_agent = sim_handle->add_agent();
+    if (new_agent.key == UINT64_MAX) {
+      /* TODO: communicate the error "Failed to add new agent." to swift */
+      free(new_agent_state); return nullptr;
+    }
+
+    sim_handle->get_data().agent_ids.add(new_agent.key);
+
+    std::unique_lock<std::mutex> lock(new_agent.value->lock);
+    if (!init(*new_agent_state, *new_agent.value, sim_handle->get_config(), new_agent.key)) {
+      free(new_agent_state); return nullptr;
+    }
+    return new_agent_state;
+  } else {
+    /* this is a client, so send an add_agent message to the server */
+    client<client_data>* client_ptr =
+        (client<client_data>*) client_handle;
+    if (!client_ptr->client_running) {
+      /* TODO: communicate "Connection to the server was lost." error to swift */
+      return nullptr;
+    }
+
+    client_ptr->data.waiting_for_server = true;
+    if (!send_add_agent(*client_ptr)) {
+      /* TODO: communicate "Unable to send add_agent request." error to swift */
+      return nullptr;
+    }
+
+    /* wait for response from server */
+    wait_for_server(*client_ptr);
+
+    if (client_ptr->data.response.agent_state == nullptr) {
+      /* server returned failure */
+      /* TODO: communicate "Failed to add new agent." error to swift */
+      return nullptr;
+    }
+
+    return client_ptr->data.response.agent_state;
+  }
+}
 
 
 bool simulatorMove(
@@ -615,21 +785,122 @@ bool simulatorMove(
   void* client_handle,
   uint64_t agentId,
   Direction direction,
-  unsigned int numSteps);
+  unsigned int numSteps)
+{
+  if (client_handle == nullptr) {
+    /* the simulation is local, so call move directly */
+    simulator<simulator_data>* sim_handle =
+        (simulator<simulator_data>*) simulator_handle;
+    return sim_handle->move(agentId, to_direction(direction), numSteps);
+  } else {
+    /* this is a client, so send a move message to the server */
+    client<client_data>* client_ptr =
+        (client<client_data>*) client_handle;
+    if (!client_ptr->client_running) {
+      /* TODO: communicate "Connection to the server was lost." to swift */
+      return false;
+    }
+
+    client_ptr->data.waiting_for_server = true;
+    if (!send_move(*client_ptr, agentId, to_direction(direction), numSteps)) {
+      /* TODO: communicate "Unable to send move request." error to swift */
+      return false;
+    }
+
+    /* wait for response from server */
+    wait_for_server(*client_ptr);
+
+    return client_ptr->data.response.action_result;
+  }
+}
 
 
 bool simulatorTurn(
   void* simulator_handle,
   void* client_handle,
   uint64_t agentId,
-  TurnDirection direction);
+  TurnDirection direction)
+{
+  if (client_handle == nullptr) {
+    /* the simulation is local, so call turn directly */
+    simulator<simulator_data>* sim_handle =
+        (simulator<simulator_data>*) simulator_handle;
+    return sim_handle->turn(agentId, to_direction(direction));
+  } else {
+    /* this is a client, so send a turn message to the server */
+    client<client_data>* client_ptr =
+        (client<client_data>*) client_handle;
+    if (!client_ptr->client_running) {
+      /* TODO: communicate "Connection to the server was lost." to swift */
+      return false;
+    }
+
+    client_ptr->data.waiting_for_server = true;
+    if (!send_turn(*client_ptr, agentId, to_direction(direction))) {
+      /* TODO: communicate "Unable to send turn request." error to swift */
+      return false;
+    }
+
+    /* wait for response from server */
+    wait_for_server(*client_ptr);
+
+    return client_ptr->data.response.action_result;
+  }
+}
 
 
 const SimulationMap simulatorMap(
   void* simulator_handle,
   void* client_handle,
   const Position* bottomLeftCorner,
-  const Position* topRightCorner);
+  const Position* topRightCorner)
+{
+  position bottom_left = position(bottomLeftCorner->x, bottomLeftCorner->y);
+  position top_right = position(topRightCorner->x, topRightCorner->y);
+
+  if (client_handle == nullptr) {
+    /* the simulation is local, so call get_map directly */
+    simulator<simulator_data>* sim_handle =
+        (simulator<simulator_data>*) simulator_handle;
+    hash_map<position, patch_state> patches(16, alloc_position_keys);
+    if (!sim_handle->get_map(bottom_left, top_right, patches)) {
+      /* TODO: communicate "simulator.get_map failed." to swift */
+      return EMPTY_SIM_MAP;
+    }
+
+    SimulationMap map;
+    if (!init(map, patches, sim_handle->get_config()))
+      map = EMPTY_SIM_MAP;
+    for (auto entry : patches)
+      free(entry.value);
+    return map;
+  } else {
+    /* this is a client, so send a get_map message to the server */
+    client<client_data>* client_ptr =
+        (client<client_data>*) client_handle;
+    if (!client_ptr->client_running) {
+      /* TODO: communicate "Connection to the server was lost." error to swift */
+      return EMPTY_SIM_MAP;
+    }
+
+    client_ptr->data.waiting_for_server = true;
+    if (!send_get_map(*client_ptr, bottom_left, top_right)) {
+      /* TODO: communicate "Unable to send get_map request." error to swift */
+      return EMPTY_SIM_MAP;
+    }
+
+    /* wait for response from server */
+    wait_for_server(*client_ptr);
+    SimulationMap map;
+    if (!init(map, *client_ptr->data.response.map, client_ptr->config))
+      map = EMPTY_SIM_MAP;
+    for (auto entry : *client_ptr->data.response.map)
+      free(entry.value);
+    free(*client_ptr->data.response.map);
+    free(client_ptr->data.response.map);
+    return map;
+  }
+}
 
 
 void* simulationServerStart(
