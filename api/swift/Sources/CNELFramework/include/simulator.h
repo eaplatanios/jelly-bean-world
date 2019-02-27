@@ -169,7 +169,7 @@ bool simulatorTurnAgent(
   uint64_t agentId,
   TurnDirection direction);
 
-const SimulationMap simulatorMap(
+SimulationMap simulatorMap(
   const void* simulatorHandle,
   const void* clientHandle,
   Position bottomLeftCorner,
@@ -206,3 +206,6 @@ void simulatorDeleteSimulationClientInfo(
 
 void simulatorDeleteAgentSimulationState(
   AgentSimulationState agentState);
+
+void simulatorDeleteSimulationMap(
+  SimulationMap map);

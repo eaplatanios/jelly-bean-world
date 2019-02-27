@@ -1022,3 +1022,12 @@ void simulatorDeleteAgentSimulationState(
 {
   free(agentState);
 }
+
+
+void simulatorDeleteSimulationMap(
+  SimulationMap map)
+{
+  for (unsigned int i = 0; i < map.numPatches; i++)
+    free(map.patches[i]);
+  free(map.patches);
+}
