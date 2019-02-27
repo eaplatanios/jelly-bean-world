@@ -31,16 +31,22 @@ typedef struct Position {
   int64_t y;
 } Position;
 
-typedef struct EnergyFunction {
+typedef struct IntensityFunction {
   unsigned int id;
   const float* args;
   unsigned int numArgs;
 } EnergyFunction;
 
+typedef struct InteractionFunction {
+  unsigned int id;
+  const float* args;
+  unsigned int numArgs;
+  unsigned int itemId;
+} EnergyFunction;
+
 typedef struct EnergyFunctions {
-  EnergyFunction intensityFn;
-  const EnergyFunction* interactionFns;
-  unsigned int numInteractionFns;
+  IntensityFunction intensityFn;
+  const InteractionFunction* interactionFns;
 } EnergyFunctions;
 
 /** A structure containing the properties of an item type. */
