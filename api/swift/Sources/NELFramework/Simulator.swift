@@ -44,12 +44,10 @@ public enum MoveConflictPolicy: UInt32 {
   }
 }
 
-public class Simulator {
-  let config: SimulatorConfig
+public final class Simulator {
+  public let config: SimulatorConfig
 
-  internal var handle: UnsafeMutableRawPointer?
-  
-  private var onStepCallback: () -> Void = {}
+  private var handle: UnsafeMutableRawPointer?
 
   public private(set) var agents: [UInt64: Agent] = [:]
 
@@ -57,14 +55,18 @@ public class Simulator {
   /// been executed so far.
   public private(set) var time: UInt64 = 0
 
+  private let dispatchGroup = DispatchGroup()
+  private let dispatchQueue = DispatchQueue(
+    label: "SimulatorDispatchQueue", 
+    qos: .default, 
+    attributes: .concurrent)
+
   public init(
     using config: SimulatorConfig,
-    onStep callback: @escaping () -> Void,
     saveFrequency: UInt32, 
     savePath: String
   ) {
     self.config = config
-    self.onStepCallback = callback
     var cConfig = config.toCSimulatorConfig()
     let opaque = Unmanaged.passUnretained(self).toOpaque()
     let pointer = UnsafeMutableRawPointer(opaque)
@@ -77,18 +79,26 @@ public class Simulator {
   }
 
   // public init(
-  //   from file: URL, 
-  //   onStep callback: @escaping () -> Void,
-  //   saveFrequency: UInt32, 
+  //   using config: SimulatorConfig,
+  //   from file: URL,
+  //   saveFrequency: UInt32,
   //   savePath: String
   // ) {
-  //   self.handle = CNELFramework.simulatorLoad(
+  //   self.config = config
+  //   let opaque = Unmanaged.passUnretained(self).toOpaque()
+  //   let pointer = UnsafeMutableRawPointer(opaque)
+  //   let info = CNELFramework.simulatorLoad(
   //     file.absoluteString, 
-  //     self.toRawPointer(),
+  //     pointer,
   //     nativeOnStepCallback, 
   //     saveFrequency,
   //     savePath)
-  //   self.onStepCallback = callback
+  //   self.handle = info.handle
+  //   self.time = info.time
+  //   let agentInfo = Array(UnsafeBufferPointer(
+  //     start: info.agents!,
+  //     count: Int(info.numAgents)))
+  // 
   // }
 
   deinit {
@@ -112,11 +122,21 @@ public class Simulator {
     if saved {
       simulator.saveAgents()
     }
-    simulator.onStepCallback()
+    simulator.dispatchGroup.leave()
   }
 
-  private func saveAgents() -> Void {
+  public func step() {
+    self.dispatchGroup.enter()
+    for agent in self.agents.values {
+      self.dispatchQueue.async {
+        agent.act()
+      }
+    }
+    self.dispatchGroup.wait()
+  }
 
+  private func saveAgents() {
+    
   }
 
   /// Adds a new agent to this simulator, and updates

@@ -11,6 +11,7 @@ public protocol Agent : AnyObject {
   var scent: ShapedArray<Float> { get set }
   var vision: ShapedArray<Float> { get set }
   var items: [Item : UInt32] { get set }
+  var lastCollectedItems: [Item : UInt32] { get set }
 
   init(in simulator: Simulator)
 
@@ -22,6 +23,7 @@ public protocol Agent : AnyObject {
 public extension Agent {
   init(in simulator: Simulator) {
     self.init(in: simulator)
+    self.items = [:]
     simulator.addAgent(self)
   }
 
@@ -69,8 +71,14 @@ public extension Agent {
     self.vision = visionToShapedArray(
       for: simulator.config, 
       state.vision!)
+    let previousItems = self.items
     self.items = itemCountsToDictionary(
       for: simulator.config, 
       state.collectedItems!)
+    // TODO: Better way to do this.
+    self.lastCollectedItems = self.items
+    for (item, count) in previousItems {
+      self.lastCollectedItems[item] = self.items[item]! - count
+    }
   }
 }

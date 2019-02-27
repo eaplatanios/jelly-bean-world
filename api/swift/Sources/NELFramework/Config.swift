@@ -37,10 +37,10 @@ public struct Item : Equatable, Hashable {
       scent: scent.scalars, 
       color: color.scalars, 
       requiredItemCounts: config.items.map {
-        requiredItemCounts[$0] ?? 0
+        requiredItemCounts[$0, default: 0]
       }, 
       requiredItemCosts: config.items.map {
-        requiredItemCosts[$0] ?? 0
+        requiredItemCosts[$0, default: 0]
       }, 
       blocksMovement: blocksMovement, 
       intensityFn: nil, 
