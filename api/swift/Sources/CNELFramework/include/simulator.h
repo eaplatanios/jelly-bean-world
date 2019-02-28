@@ -176,6 +176,17 @@ bool simulatorTurnAgent(
   uint64_t agentId,
   TurnDirection direction);
 
+void simulatorSetActive(
+  void* simulatorHandle,
+  void* clientHandle,
+  uint64_t agentId,
+  bool active);
+
+bool simulatorIsActive(
+  void* simulatorHandle,
+  void* clientHandle,
+  uint64_t agentId);
+
 SimulationMap simulatorMap(
   const void* simulatorHandle,
   const void* clientHandle,

@@ -17,6 +17,10 @@ enum class message_type : uint64_t {
 	TURN_RESPONSE,
 	GET_MAP,
 	GET_MAP_RESPONSE,
+	SET_ACTIVE,
+	SET_ACTIVE_RESPONSE,
+	IS_ACTIVE,
+	IS_ACTIVE_RESPONSE,
 	STEP_RESPONSE
 };
 
@@ -49,11 +53,15 @@ inline bool print(const message_type& type, Stream& out) {
 	case message_type::MOVE:             return core::print("MOVE", out);
 	case message_type::TURN:             return core::print("TURN", out);
 	case message_type::GET_MAP:          return core::print("GET_MAP", out);
+	case message_type::SET_ACTIVE:       return core::print("SET_ACTIVE", out);
+	case message_type::IS_ACTIVE:        return core::print("IS_ACTIVE", out);
 
 	case message_type::ADD_AGENT_RESPONSE:        return core::print("ADD_AGENT_RESPONSE", out);
 	case message_type::MOVE_RESPONSE:             return core::print("MOVE_RESPONSE", out);
 	case message_type::TURN_RESPONSE:             return core::print("TURN_RESPONSE", out);
 	case message_type::GET_MAP_RESPONSE:          return core::print("GET_MAP_RESPONSE", out);
+	case message_type::SET_ACTIVE_RESPONSE:       return core::print("SET_ACTIVE_RESPONSE", out);
+	case message_type::IS_ACTIVE_RESPONSE:        return core::print("IS_ACTIVE_RESPONSE", out);
 	case message_type::STEP_RESPONSE:             return core::print("STEP_RESPONSE", out);
 	}
 	fprintf(stderr, "print ERROR: Unrecognized message_type.\n");
@@ -212,6 +220,35 @@ inline bool receive_get_map(Stream& in, socket_type& connection, simulator<Simul
 	return true;
 }
 
+template<typename Stream, typename SimulatorData>
+inline bool receive_set_active(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
+	uint64_t agent_id = UINT64_MAX;
+	bool active;
+	if (!read(agent_id, in) || !read(active, in))
+		return false;
+	sim.set_agent_active(agent_id, active);
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id));
+	fixed_width_stream<memory_stream> out(mem_stream);
+
+	return write(message_type::SET_ACTIVE_RESPONSE, out)
+		&& write(agent_id, out)
+		&& send_message(connection, mem_stream.buffer, mem_stream.position);
+}
+
+template<typename Stream, typename SimulatorData>
+inline bool receive_is_active(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
+	uint64_t agent_id = UINT64_MAX;
+	if (!read(agent_id, in))
+		return false;
+	bool result = sim.is_agent_active(agent_id);
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(result));
+	fixed_width_stream<memory_stream> out(mem_stream);
+
+	return write(message_type::IS_ACTIVE_RESPONSE, out)
+		&& write(agent_id, out) && write(result, out)
+		&& send_message(connection, mem_stream.buffer, mem_stream.position);
+}
+
 template<typename SimulatorData>
 void server_process_message(socket_type& connection,
 		hash_map<socket_type, connection_data>& connections,
@@ -229,11 +266,17 @@ void server_process_message(socket_type& connection,
 			receive_turn(in, connection, sim); return;
 		case message_type::GET_MAP:
 			receive_get_map(in, connection, sim); return;
+		case message_type::SET_ACTIVE:
+			receive_set_active(in, connection, sim); return;
+		case message_type::IS_ACTIVE:
+			receive_is_active(in, connection, sim); return;
 
 		case message_type::ADD_AGENT_RESPONSE:
 		case message_type::MOVE_RESPONSE:
 		case message_type::TURN_RESPONSE:
 		case message_type::GET_MAP_RESPONSE:
+		case message_type::SET_ACTIVE_RESPONSE:
+		case message_type::IS_ACTIVE_RESPONSE:
 		case message_type::STEP_RESPONSE:
 			break;
 	}
@@ -542,6 +585,39 @@ bool send_get_map(ClientType& c, position bottom_left, position top_right) {
 		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
 }
 
+/**
+ * Sends an `set_active` message to the server from the client `c`. Once the
+ * server responds, the function `on_set_active(ClientType&, uint64_t)` will be
+ * invoked, where the first argument is `c`, and the second is `agent_id`.
+ *
+ * \returns `true` if the sending is successful; `false` otherwise.
+ */
+template<typename ClientType>
+bool send_set_active(ClientType& c, uint64_t agent_id, bool active) {
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(active));
+	fixed_width_stream<memory_stream> out(mem_stream);
+	return write(message_type::SET_ACTIVE, out)
+		&& write(agent_id, out) && write(active, out)
+		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
+}
+
+/**
+ * Sends an `is_active` message to the server from the client `c`. Once the
+ * server responds, the function `on_is_active(ClientType&, uint64_t, bool)`
+ * will be invoked, where the first argument is `c`, and the second is
+ * `agent_id`, and the third is whether the agent is active.
+ *
+ * \returns `true` if the sending is successful; `false` otherwise.
+ */
+template<typename ClientType>
+bool send_is_active(ClientType& c, uint64_t agent_id) {
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id));
+	fixed_width_stream<memory_stream> out(mem_stream);
+	return write(message_type::IS_ACTIVE, out)
+		&& write(agent_id, out)
+		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
+}
+
 template<typename ClientType>
 inline bool receive_add_agent_response(ClientType& c) {
 	uint64_t agent_id;
@@ -595,6 +671,27 @@ inline bool receive_get_map_response(ClientType& c) {
 }
 
 template<typename ClientType>
+inline bool receive_set_active_response(ClientType& c) {
+	uint64_t agent_id = 0;
+	fixed_width_stream<socket_type> in(c.connection);
+	if (!read(agent_id, in))
+		return false;
+	on_set_active(c, agent_id);
+	return true;
+}
+
+template<typename ClientType>
+inline bool receive_is_active_response(ClientType& c) {
+	uint64_t agent_id = 0;
+	bool active;
+	fixed_width_stream<socket_type> in(c.connection);
+	if (!read(agent_id, in) || !read(active, in))
+		return false;
+	on_is_active(c, agent_id, active);
+	return true;
+}
+
+template<typename ClientType>
 inline bool receive_step_response(ClientType& c) {
 	array<uint64_t>& agent_ids = *((array<uint64_t>*) alloca(sizeof(array<uint64_t>)));
 
@@ -642,6 +739,10 @@ void run_response_listener(ClientType& c) {
 				receive_turn_response(c); continue;
 			case message_type::GET_MAP_RESPONSE:
 				receive_get_map_response(c); continue;
+			case message_type::SET_ACTIVE_RESPONSE:
+				receive_set_active_response(c); continue;
+			case message_type::IS_ACTIVE_RESPONSE:
+				receive_is_active_response(c); continue;
 			case message_type::STEP_RESPONSE:
 				receive_step_response(c); continue;
 
@@ -649,6 +750,8 @@ void run_response_listener(ClientType& c) {
 			case message_type::MOVE:
 			case message_type::TURN:
 			case message_type::GET_MAP:
+			case message_type::SET_ACTIVE:
+			case message_type::IS_ACTIVE:
 				break;
 		}
 		fprintf(stderr, "run_response_listener ERROR: Received invalid message type from server %" PRId64 ".\n", (uint64_t) type);

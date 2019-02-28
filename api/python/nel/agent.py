@@ -44,6 +44,12 @@ class Agent(object):
   def turn(self, direction):
     return self._simulator.turn(self, direction)
 
+  def set_active(self, active):
+    self._simulator.set_active(self, active)
+
+  def is_active(self):
+    return self._simulator.is_active(self)
+
   @abc.abstractmethod
   def do_next_action(self):
     pass

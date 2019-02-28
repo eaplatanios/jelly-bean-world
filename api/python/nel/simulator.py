@@ -274,7 +274,7 @@ class Simulator(object):
     action.
 
     Arguments:
-      agent:     The agent intending to move.
+      agent:     The agent intending to turn.
       direction: Direction to turn.
 
     Returns:
@@ -326,6 +326,26 @@ class Simulator(object):
       A list of tuples, where each tuple contains the state of a patch.
     """
     return simulator_c.map(self._handle, self._client_handle, bottom_left, top_right)
+
+  def set_active(self, agent, active):
+    """Sets whether the given agent is active or inactive.
+
+    Arguments:
+      agent:    The agent whose active status to set.
+      active:   Whether the agent should be set to active or inactive.
+    """
+    simulator_c.set_active(self._handle, self._client_handle, agent._id, active)
+
+  def is_active(self, agent):
+    """Gets whether the given agent is active or inactive.
+
+    Arguments:
+      agent:    The agent whose active status to set.
+
+    Returns:
+      Whether the agent is active or inactive.
+    """
+    return simulator_c.is_active(self._handle, self._client_handle, agent._id)
 
   def _load_agents(self, load_filepath, load_time):
     with open(load_filepath + str(load_time) + '.agent_info', 'rb') as fin:
