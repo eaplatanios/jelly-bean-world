@@ -75,15 +75,16 @@ public final class Simulator {
     savePath: String? = nil
   ) {
     self.config = config
-    var cConfig = config.toCSimulatorConfig()
+    var cConfig = config.toC()
     let opaque = Unmanaged.passUnretained(self).toOpaque()
-    let pointer = UnsafeMutableRawPointer(opaque)
+    let pointer = UnsafeRawPointer(opaque)
     self.handle = CNELFramework.simulatorCreate(
-      &cConfig,
+      &cConfig.simulatorConfig,
       nativeOnStepCallback,
       pointer,
       saveFrequency, 
       savePath)
+    cConfig.deallocate()
   }
 
   // public init(
@@ -110,20 +111,20 @@ public final class Simulator {
   // }
 
   deinit {
-    CNELFramework.simulatorDelete(&self.handle)
+    CNELFramework.simulatorDelete(self.handle)
   }
 
   private let nativeOnStepCallback: @convention(c) (
-      UnsafeMutableRawPointer?, 
+      UnsafeRawPointer?, 
       UnsafePointer<AgentSimulationState>?,
       UInt32, 
       Bool) -> Void = { (simulatorPointer, states, numStates, saved) in 
     let unmanagedSimulator = Unmanaged<Simulator>.fromOpaque(simulatorPointer!)
     let simulator = unmanagedSimulator.takeUnretainedValue()
+    simulator.time += 1
     let buffer = UnsafeBufferPointer(
       start: states!,
       count: Int(numStates))
-    simulator.time += 1
     for state in buffer {
       simulator.agents[state.id]!.updateSimulationState(state)
     }
@@ -154,7 +155,7 @@ public final class Simulator {
   ///   - agent: The agent to be added to this simulator.
   @inline(__always)
   internal func addAgent<A: Agent>(_ agent: A) {
-    let state = CNELFramework.simulatorAddAgent(&self.handle, nil)
+    let state = CNELFramework.simulatorAddAgent(self.handle, nil)
     agent.updateSimulationState(state)
     self.agents[state.id] = agent
     CNELFramework.simulatorDeleteAgentSimulationState(state)
@@ -167,7 +168,7 @@ public final class Simulator {
     by numSteps: UInt32
   ) -> Bool {
     return CNELFramework.simulatorMoveAgent(
-      &self.handle, nil, agent.id!, 
+      self.handle, nil, agent.id!, 
       direction.toCDirection(), numSteps)
   }
 
@@ -177,7 +178,7 @@ public final class Simulator {
     towards direction: TurnDirection
   ) -> Bool {
     return CNELFramework.simulatorTurnAgent(
-      &self.handle, nil, agent.id!, 
+      self.handle, nil, agent.id!, 
       direction.toCTurnDirection())
   }
 }

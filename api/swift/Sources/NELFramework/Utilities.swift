@@ -11,7 +11,8 @@ internal func visionToShapedArray(
   let visionBuffer = UnsafeBufferPointer(
       start: buffer,
       count: Int(
-        4 * config.visionRange + 2 + 
+        (2 * config.visionRange + 1) * 
+        (2 * config.visionRange + 1) * 
         config.colorDimSize))
   return ShapedArray(
     shape: visionShape,

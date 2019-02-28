@@ -78,7 +78,7 @@ typedef struct AgentSimulationState {
   unsigned int* collectedItems;
 } AgentSimulationState;
 
-typedef void (*OnStepCallback)(void*, const AgentSimulationState*, unsigned int, bool);
+typedef void (*OnStepCallback)(const void*, const AgentSimulationState*, unsigned int, bool);
 typedef void (*LostConnectionCallback)(void*);
 
 typedef struct SimulatorConfig {
@@ -146,14 +146,10 @@ typedef struct SimulationClientInfo {
   AgentSimulationState* agentStates;
 } SimulationClientInfo;
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 void* simulatorCreate(
   const SimulatorConfig* config,
   OnStepCallback onStepCallback,
-  void* callbackData,
+  const void* callbackData,
   unsigned int saveFrequency,
   const char* savePath);
 

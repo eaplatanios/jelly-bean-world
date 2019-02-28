@@ -28,21 +28,45 @@ public struct Item : Equatable, Hashable {
     self.energyFunctions = energyFunctions
   }
 
-  internal func toItemProperties(
+  internal func toC(
     in config: SimulatorConfig
-  ) -> ItemProperties {
-    return ItemProperties(
-      name: name, 
-      scent: scent.scalars,
-      color: color.scalars,
-      requiredItemCounts: config.items.indices.map {
-        requiredItemCounts[$0, default: 0]
-      }, 
-      requiredItemCosts: config.items.indices.map {
-        requiredItemCosts[$0, default: 0]
-      }, 
-      blocksMovement: blocksMovement,
-      energyFunctions: energyFunctions.toC())
+  ) -> (
+    itemProperties: CNELFramework.ItemProperties, 
+    deallocate: () -> Void
+  ) {
+    let scent = self.scent.scalars
+    let color = self.color.scalars
+    let counts = config.items.indices.map { requiredItemCounts[$0, default: 0] }
+    let costs = config.items.indices.map { requiredItemCosts[$0, default: 0] }
+
+    // Allocate C arrays and copy data.
+    let cScent = UnsafeMutablePointer<Float>.allocate(capacity: scent.count)
+    let cColor = UnsafeMutablePointer<Float>.allocate(capacity: color.count)
+    let cCounts = UnsafeMutablePointer<UInt32>.allocate(capacity: counts.count)
+    let cCosts = UnsafeMutablePointer<UInt32>.allocate(capacity: costs.count)
+    cScent.initialize(from: scent, count: scent.count)
+    cColor.initialize(from: color, count: color.count)
+    cCounts.initialize(from: counts, count: counts.count)
+    cCosts.initialize(from: costs, count: costs.count)
+
+    let cEnergyFunctions = energyFunctions.toC()
+
+    return (
+      itemProperties: CNELFramework.ItemProperties(
+        name: name,
+        scent: cScent,
+        color: cColor,
+        requiredItemCounts: cCounts, 
+        requiredItemCosts: cCosts, 
+        blocksMovement: blocksMovement,
+        energyFunctions: cEnergyFunctions.energyFunctions),
+      deallocate: { () in 
+        cScent.deallocate()
+        cColor.deallocate()
+        cCounts.deallocate()
+        cCosts.deallocate()
+        cEnergyFunctions.deallocate()
+      })
   }
 }
 
@@ -104,31 +128,54 @@ public struct SimulatorConfig : Equatable, Hashable {
     self.removedItemLifetime = removedItemLifetime
   }
 
-  internal func toCSimulatorConfig() -> CNELFramework.SimulatorConfig {
-    return CNELFramework.SimulatorConfig(
-      randomSeed: randomSeed, 
-      maxStepsPerMove: maxStepsPerMove, 
-      scentDimSize: scentDimSize, 
-      colorDimSize: colorDimSize, 
-      visionRange: visionRange, 
-      allowedMoveDirections: (
-        allowedMoves.contains(.up),
-        allowedMoves.contains(.down),
-        allowedMoves.contains(.left),
-        allowedMoves.contains(.right)), 
-      allowedRotations: (
-        allowedTurns.contains(.front),
-        allowedTurns.contains(.back),
-        allowedTurns.contains(.left),
-        allowedTurns.contains(.right)),
-      patchSize: patchSize, 
-      gibbsIterations: gibbsIterations, 
-      itemTypes: items.map { $0.toItemProperties(in: self) },
-      numItemTypes: UInt32(items.count),
-      agentColor: agentColor.scalars, 
-      movementConflictPolicy: moveConflictPolicy.toCMoveConflictPolicy(), 
-      scentDecay: scentDecay, 
-      scentDiffusion: scentDiffusion, 
-      removedItemLifetime: removedItemLifetime)
+  internal func toC() -> (
+    simulatorConfig: CNELFramework.SimulatorConfig, 
+    deallocate: () -> Void
+  ) {
+    let (itemTypes, itemTypeDeallocators) = items
+      .map { $0.toC(in: self) }
+      .reduce(into: ([CNELFramework.ItemProperties](), [() -> Void]())) {
+        $0.0.append($1.itemProperties)
+        $0.1.append($1.deallocate)
+      }
+    let color = agentColor.scalars
+    let cItemTypes = UnsafeMutablePointer<CNELFramework.ItemProperties>.allocate(capacity: itemTypes.count)
+    let cColor = UnsafeMutablePointer<Float>.allocate(capacity: color.count)
+    cItemTypes.initialize(from: itemTypes, count: itemTypes.count)
+    cColor.initialize(from: color, count: color.count)
+
+    return (
+      simulatorConfig: CNELFramework.SimulatorConfig(
+        randomSeed: randomSeed,
+        maxStepsPerMove: maxStepsPerMove, 
+        scentDimSize: scentDimSize, 
+        colorDimSize: colorDimSize, 
+        visionRange: visionRange, 
+        allowedMoveDirections: (
+          allowedMoves.contains(.up),
+          allowedMoves.contains(.down),
+          allowedMoves.contains(.left),
+          allowedMoves.contains(.right)), 
+        allowedRotations: (
+          allowedTurns.contains(.front),
+          allowedTurns.contains(.back),
+          allowedTurns.contains(.left),
+          allowedTurns.contains(.right)),
+        patchSize: patchSize, 
+        gibbsIterations: gibbsIterations, 
+        itemTypes: cItemTypes,
+        numItemTypes: UInt32(items.count),
+        agentColor: cColor,
+        movementConflictPolicy: moveConflictPolicy.toCMoveConflictPolicy(), 
+        scentDecay: scentDecay, 
+        scentDiffusion: scentDiffusion, 
+        removedItemLifetime: removedItemLifetime),
+      deallocate: { () in 
+        cItemTypes.deallocate()
+        cColor.deallocate()
+        for deallocate in itemTypeDeallocators {
+          deallocate()
+        }
+      })
   }
 }

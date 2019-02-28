@@ -105,6 +105,7 @@ let config = SimulatorConfig(
 let simulator = Simulator(using: config)
 
 // Create the agents.
+print("Creating agents.")
 let numAgents = 1
 var agents = [Agent]()
 while agents.count < numAgents {
@@ -113,6 +114,7 @@ while agents.count < numAgents {
     with: DummyAgentDelegate()))
 }
 
+print("Starting simulation.")
 var startTime = CFAbsoluteTimeGetCurrent()
 var elapsed = Float(0.0)
 var simulationStartTime = simulator.time
