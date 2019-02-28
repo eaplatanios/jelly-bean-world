@@ -678,7 +678,7 @@ inline void wait_for_server(client<client_data>& c)
 }
 
 
-void* simulatorCreate(
+extern "C" void* simulatorCreate(
   const SimulatorConfig* config, 
   OnStepCallback onStepCallback,
   void* callbackData,
@@ -740,7 +740,7 @@ void* simulatorCreate(
 }
 
 
-SimulatorInfo simulatorLoad(
+extern "C" SimulatorInfo simulatorLoad(
   const char* filePath, 
   OnStepCallback onStepCallback,
   void* callbackData,
@@ -813,7 +813,7 @@ SimulatorInfo simulatorLoad(
 }
 
 
-void simulatorDelete(
+extern "C" void simulatorDelete(
   void* simulatorHandle)
 {
   simulator<simulator_data>* sim =
@@ -822,7 +822,7 @@ void simulatorDelete(
 }
 
 
-AgentSimulationState simulatorAddAgent(
+extern "C" AgentSimulationState simulatorAddAgent(
   void* simulatorHandle,
   void* clientHandle)
 {
@@ -867,7 +867,7 @@ AgentSimulationState simulatorAddAgent(
 }
 
 
-bool simulatorMoveAgent(
+extern "C" bool simulatorMoveAgent(
   void* simulatorHandle,
   void* clientHandle,
   uint64_t agentId,
@@ -902,7 +902,7 @@ bool simulatorMoveAgent(
 }
 
 
-bool simulatorTurnAgent(
+extern "C" bool simulatorTurnAgent(
   void* simulatorHandle,
   void* clientHandle,
   uint64_t agentId,
@@ -936,7 +936,7 @@ bool simulatorTurnAgent(
 }
 
 
-void simulatorSetActive(
+extern "C" void simulatorSetActive(
   void* simulatorHandle,
   void* clientHandle,
   uint64_t agentId,
@@ -967,7 +967,7 @@ void simulatorSetActive(
 }
 
 
-bool simulatorIsActive(
+extern "C" bool simulatorIsActive(
   void* simulatorHandle,
   void* clientHandle,
   uint64_t agentId)
@@ -998,7 +998,7 @@ bool simulatorIsActive(
 }
 
 
-const SimulationMap simulatorMap(
+extern "C" const SimulationMap simulatorMap(
   void* simulatorHandle,
   void* clientHandle,
   Position bottomLeftCorner,
@@ -1052,7 +1052,7 @@ const SimulationMap simulatorMap(
 }
 
 
-void* simulationServerStart(
+extern "C" void* simulationServerStart(
   void* simulatorHandle,
   unsigned int port,
   unsigned int connectionQueueCapacity,
@@ -1074,7 +1074,7 @@ void* simulationServerStart(
 }
 
 
-void simulationServerStop(
+extern "C" void simulationServerStop(
   void* serverHandle)
 {
   async_server* server = (async_server*) serverHandle;
@@ -1083,7 +1083,7 @@ void simulationServerStop(
 }
 
 
-SimulationClientInfo simulationClientStart(
+extern "C" SimulationClientInfo simulationClientStart(
   const char* serverAddress,
   unsigned int serverPort,
   OnStepCallback onStepCallback,
@@ -1143,7 +1143,7 @@ SimulationClientInfo simulationClientStart(
 }
 
 
-void simulationClientStop(
+extern "C" void simulationClientStop(
   void* clientHandle)
 {
   client<client_data>* client_ptr =
@@ -1153,7 +1153,7 @@ void simulationClientStop(
 }
 
 
-void simulatorDeleteSimulatorInfo(
+extern "C" void simulatorDeleteSimulatorInfo(
   SimulatorInfo info)
 {
   for (unsigned int i = 0; i < info.numAgents; i++)
@@ -1162,7 +1162,7 @@ void simulatorDeleteSimulatorInfo(
 }
 
 
-void simulatorDeleteSimulationClientInfo(
+extern "C" void simulatorDeleteSimulationClientInfo(
   SimulationClientInfo clientInfo,
   unsigned int numAgents)
 {
@@ -1172,14 +1172,14 @@ void simulatorDeleteSimulationClientInfo(
 }
 
 
-void simulatorDeleteAgentSimulationState(
+extern "C" void simulatorDeleteAgentSimulationState(
   AgentSimulationState agentState)
 {
   free(agentState);
 }
 
 
-void simulatorDeleteSimulationMap(
+extern "C" void simulatorDeleteSimulationMap(
   SimulationMap map)
 {
   for (unsigned int i = 0; i < map.numPatches; i++)

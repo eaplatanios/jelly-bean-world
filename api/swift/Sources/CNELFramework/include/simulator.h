@@ -142,6 +142,10 @@ typedef struct SimulationClientInfo {
   AgentSimulationState* agentStates;
 } SimulationClientInfo;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void* simulatorCreate(
   const SimulatorConfig* config,
   OnStepCallback onStepCallback,
@@ -187,9 +191,9 @@ bool simulatorIsActive(
   void* clientHandle,
   uint64_t agentId);
 
-SimulationMap simulatorMap(
-  const void* simulatorHandle,
-  const void* clientHandle,
+const SimulationMap simulatorMap(
+  void* simulatorHandle,
+  void* clientHandle,
   Position bottomLeftCorner,
   Position topRightCorner);
 
@@ -226,3 +230,7 @@ void simulatorDeleteAgentSimulationState(
 
 void simulatorDeleteSimulationMap(
   SimulationMap map);
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
