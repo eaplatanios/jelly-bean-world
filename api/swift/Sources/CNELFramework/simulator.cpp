@@ -828,7 +828,7 @@ AgentSimulationState simulatorAddAgent(
 }
 
 
-bool simulatorMove(
+bool simulatorMoveAgent(
   void* simulatorHandle,
   void* clientHandle,
   uint64_t agentId,
@@ -863,7 +863,7 @@ bool simulatorMove(
 }
 
 
-bool simulatorTurn(
+bool simulatorTurnAgent(
   void* simulatorHandle,
   void* clientHandle,
   uint64_t agentId,

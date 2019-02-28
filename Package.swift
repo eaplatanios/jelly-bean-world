@@ -16,7 +16,7 @@ let package = Package(
             name: "CNELFramework",
             path: ".", 
             sources: [
-                "./api/swift/Sources/CNELFramework", 
+                "./api/swift/Sources/CNELFramework",
                 "./nel/simulator.cpp"],
             publicHeadersPath: "./api/swift/Sources/CNELFramework",
             cxxSettings: [
@@ -32,5 +32,9 @@ let package = Package(
             name: "NELFramework",
             dependencies: ["CNELFramework"],
             path: "api/swift/Sources/NELFramework"),
+        .target(
+            name: "NELExperiments",
+            dependencies: ["NELFramework"],
+            path: "api/swift/Sources/NELExperiments"),
     ]
 )

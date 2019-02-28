@@ -2,15 +2,19 @@ import CNELFramework
 import Foundation
 import TensorFlow
 
+public typealias Position = CNELFramework.Position
+
 public enum Direction: UInt32 {
   case up = 0, down, left, right
 
+  @inline(__always)
   internal static func fromCDirection(
     _ value: CNELFramework.Direction
   ) -> Direction {
     return Direction(rawValue: value.rawValue)!
   }
 
+  @inline(__always)
   internal func toCDirection() -> CNELFramework.Direction {
     return CNELFramework.Direction(rawValue: self.rawValue)
   }
@@ -19,12 +23,14 @@ public enum Direction: UInt32 {
 public enum TurnDirection: UInt32 {
   case front = 0, back, left, right
 
+  @inline(__always)
   internal static func fromCTurnDirection(
     _ value: CNELFramework.TurnDirection
   ) -> TurnDirection {
     return TurnDirection(rawValue: value.rawValue)!
   }
 
+  @inline(__always)
   internal func toCTurnDirection() -> CNELFramework.TurnDirection {
     return CNELFramework.TurnDirection(rawValue: self.rawValue)
   }
@@ -33,12 +39,14 @@ public enum TurnDirection: UInt32 {
 public enum MoveConflictPolicy: UInt32 {
   case noCollisions = 0, firstComeFirstServe, random
 
+  @inline(__always)
   internal static func fromCMoveConflictPolicy(
     _ value: CNELFramework.MovementConflictPolicy
   ) -> MoveConflictPolicy {
     return MoveConflictPolicy(rawValue: value.rawValue)!
   }
 
+  @inline(__always)
   internal func toCMoveConflictPolicy() -> CNELFramework.MovementConflictPolicy {
     return CNELFramework.MovementConflictPolicy(rawValue: self.rawValue)
   }
@@ -47,7 +55,7 @@ public enum MoveConflictPolicy: UInt32 {
 public final class Simulator {
   public let config: SimulatorConfig
 
-  private var handle: UnsafeMutableRawPointer?
+  internal var handle: UnsafeMutableRawPointer?
 
   public private(set) var agents: [UInt64: Agent] = [:]
 
@@ -63,8 +71,8 @@ public final class Simulator {
 
   public init(
     using config: SimulatorConfig,
-    saveFrequency: UInt32, 
-    savePath: String
+    saveFrequency: UInt32 = 1000, 
+    savePath: String? = nil
   ) {
     self.config = config
     var cConfig = config.toCSimulatorConfig()
@@ -148,8 +156,8 @@ public final class Simulator {
   internal func addAgent<A: Agent>(_ agent: A) {
     let state = CNELFramework.simulatorAddAgent(&self.handle, nil)
     agent.updateSimulationState(state)
-    CNELFramework.simulatorDeleteAgentSimulationState(state)
     self.agents[state.id] = agent
+    CNELFramework.simulatorDeleteAgentSimulationState(state)
   }
 
   @inline(__always)
@@ -159,7 +167,7 @@ public final class Simulator {
     by numSteps: UInt32
   ) -> Bool {
     return CNELFramework.simulatorMoveAgent(
-      &self.handle, nil, agent.id, 
+      &self.handle, nil, agent.id!, 
       direction.toCDirection(), numSteps)
   }
 
@@ -169,7 +177,7 @@ public final class Simulator {
     towards direction: TurnDirection
   ) -> Bool {
     return CNELFramework.simulatorTurnAgent(
-      &self.handle, nil, agent.id, 
+      &self.handle, nil, agent.id!, 
       direction.toCTurnDirection())
   }
 }

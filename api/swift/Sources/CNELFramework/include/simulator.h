@@ -1,6 +1,10 @@
 #include <inttypes.h>
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /** Represents all possible directions of motion
  *  in the environment. */
 typedef enum Direction {
@@ -39,9 +43,9 @@ typedef struct IntensityFunction {
 
 typedef struct InteractionFunction {
   unsigned int id;
+  unsigned int itemId;
   const float* args;
   unsigned int numArgs;
-  unsigned int itemId;
 } InteractionFunction;
 
 typedef struct EnergyFunctions {
@@ -215,3 +219,7 @@ void simulatorDeleteAgentSimulationState(
 
 void simulatorDeleteSimulationMap(
   SimulationMap map);
+
+#ifdef __cplusplus
+}
+#endif
