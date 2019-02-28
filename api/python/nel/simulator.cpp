@@ -493,6 +493,41 @@ void on_get_map(client<py_client_data>& c,
 }
 
 /**
+ * The callback invoked when the client receives a set_active response from the
+ * server. This function wakes up the Python thread (which should be waiting in
+ * the `simulator_set_active` function) so that it can return the response back
+ * to Python.
+ *
+ * \param   c        The client that received the response.
+ * \param   agent_id The ID of the agent whose active status was set.
+ */
+void on_set_active(client<py_client_data>& c, uint64_t agent_id)
+{
+    std::unique_lock<std::mutex> lck(c.data.lock);
+    c.data.waiting_for_server = false;
+    c.data.cv.notify_one();
+}
+
+/**
+ * The callback invoked when the client receives an is_active response from the
+ * server. This function moves the result into `c.data.response.action_result`
+ * and wakes up the Python thread (which should be waiting in the
+ * `simulator_is_active` function) so that it can return the response back to
+ * Python.
+ *
+ * \param   c        The client that received the response.
+ * \param   agent_id The ID of the agent whose active status was requested.
+ * \param   active   Whether the agent is active or inactive.
+ */
+void on_is_active(client<py_client_data>& c, uint64_t agent_id, bool active)
+{
+    std::unique_lock<std::mutex> lck(c.data.lock);
+    c.data.waiting_for_server = false;
+    c.data.response.action_result = active;
+    c.data.cv.notify_one();
+}
+
+/**
  * The callback invoked when the client receives a step response from the
  * server. This function constructs a Python list of agent states governed by
  * this client and invokes the Python function `c.data.step_callback`.
@@ -1398,6 +1433,116 @@ static PyObject* simulator_map(PyObject *self, PyObject *args) {
     }
 }
 
+/**
+ * Sets whether the agent is active or inactive.
+ *
+ * \param   self    Pointer to the Python object calling this method.
+ * \param   args    Arguments:
+ *                  - Handle to the native simulator object as a PyLong.
+ *                  - Handle to the native client object as a PyLong. If this
+ *                    is None, `set_active` is directly invoked on the
+ *                    simulator object. Otherwise, the client sends a
+ *                    set_active message to the server and waits for its
+ *                    response.
+ *                  - Agent ID.
+ *                  - A boolean indicating whether to make this agent active.
+ * \returns None.
+ */
+static PyObject* simulator_set_active(PyObject *self, PyObject *args) {
+    PyObject* py_sim_handle;
+    PyObject* py_client_handle;
+    unsigned long long agent_id;
+    PyObject* py_active;
+    if (!PyArg_ParseTuple(args, "OOKO", &py_sim_handle, &py_client_handle, &agent_id, &py_active))
+        return NULL;
+    int result = PyObject_IsTrue(py_active);
+    bool active;
+    if (result == 1) active = true;
+    else if (result == 0) active = false;
+    else {
+        PyErr_SetString(PyExc_TypeError, "`active` must be boolean.\n");
+        return NULL;
+    }
+
+    if (py_client_handle == Py_None) {
+        /* the simulation is local, so call get_map directly */
+        simulator<py_simulator_data>* sim_handle =
+                (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
+        sim_handle->set_agent_active(agent_id, active);
+        Py_INCREF(Py_None);
+        return Py_None;
+    } else {
+        /* this is a client, so send a get_map message to the server */
+        client<py_client_data>* client_handle =
+                (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
+        if (!client_handle->client_running) {
+            PyErr_SetString(mpi_error, "Connection to the server was lost.");
+            return NULL;
+        }
+
+        client_handle->data.waiting_for_server = true;
+        if (!send_set_active(*client_handle, agent_id, active)) {
+            PyErr_SetString(PyExc_RuntimeError, "Unable to send set_active request.");
+            return NULL;
+        }
+
+        /* wait for response from server */
+        wait_for_server(*client_handle);
+        Py_INCREF(Py_None);
+        return Py_None;
+    }
+}
+
+/**
+ * Gets whether the agent is active or inactive.
+ *
+ * \param   self    Pointer to the Python object calling this method.
+ * \param   args    Arguments:
+ *                  - Handle to the native simulator object as a PyLong.
+ *                  - Handle to the native client object as a PyLong. If this
+ *                    is None, `set_active` is directly invoked on the
+ *                    simulator object. Otherwise, the client sends a
+ *                    set_active message to the server and waits for its
+ *                    response.
+ *                  - Agent ID.
+ * \returns `True` if the agent is active; `False` otherwise.
+ */
+static PyObject* simulator_is_active(PyObject *self, PyObject *args) {
+    PyObject* py_sim_handle;
+    PyObject* py_client_handle;
+    unsigned long long agent_id;
+    if (!PyArg_ParseTuple(args, "OOK", &py_sim_handle, &py_client_handle, &agent_id))
+        return NULL;
+
+    if (py_client_handle == Py_None) {
+        /* the simulation is local, so call get_map directly */
+        simulator<py_simulator_data>* sim_handle =
+                (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
+        bool active = sim_handle->is_agent_active(agent_id);
+        PyObject* py_result = (active ? Py_True : Py_False);
+        Py_INCREF(py_result); return py_result;
+    } else {
+        /* this is a client, so send a get_map message to the server */
+        client<py_client_data>* client_handle =
+                (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
+        if (!client_handle->client_running) {
+            PyErr_SetString(mpi_error, "Connection to the server was lost.");
+            return NULL;
+        }
+
+        client_handle->data.waiting_for_server = true;
+        if (!send_is_active(*client_handle, agent_id)) {
+            PyErr_SetString(PyExc_RuntimeError, "Unable to send is_active request.");
+            return NULL;
+        }
+
+        /* wait for response from server */
+        wait_for_server(*client_handle);
+        PyObject* py_result = (client_handle->data.response.action_result ? Py_True : Py_False);
+        Py_INCREF(py_result); return py_result;
+    }
+}
+
 } /* namespace nel */
 
 static PyMethodDef SimulatorMethods[] = {
@@ -1412,6 +1557,8 @@ static PyMethodDef SimulatorMethods[] = {
     {"move",  nel::simulator_move, METH_VARARGS, "Attempts to move the agent in the simulation environment."},
     {"turn",  nel::simulator_turn, METH_VARARGS, "Attempts to turn the agent in the simulation environment."},
     {"map",  nel::simulator_map, METH_VARARGS, "Returns a list of patches within a given bounding box."},
+    {"set_active",  nel::simulator_set_active, METH_VARARGS, "Sets whether the agent is active or inactive."},
+    {"is_active",  nel::simulator_is_active, METH_VARARGS, "Gets whether the agent is active or inactive."},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 

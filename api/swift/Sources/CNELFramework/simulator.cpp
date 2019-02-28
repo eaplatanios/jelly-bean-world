@@ -137,6 +137,10 @@ inline bool init(
     src.requiredItemCosts, src.blocksMovement,
     intensity_fn, interaction_fns,
     scent_dimension, color_dimension, item_type_count);
+
+  for (auto entry : interaction_fns) free(entry.value);
+  free(intensity_fn);
+  return success;
 }
 
 
@@ -574,6 +578,41 @@ void on_get_map(client<client_data>& c,
 
 
 /**
+ * The callback invoked when the client receives a set_active response from the
+ * server. This function wakes up the parent thread (which should be waiting in
+ * the `simulatorSetActive` function) so that it can return the response back.
+ *
+ * \param   c        The client that received the response.
+ * \param   agent_id The ID of the agent whose active status was set.
+ */
+void on_set_active(client<client_data>& c, uint64_t agent_id)
+{
+    std::unique_lock<std::mutex> lck(c.data.lock);
+    c.data.waiting_for_server = false;
+    c.data.cv.notify_one();
+}
+
+
+/**
+ * The callback invoked when the client receives an is_active response from the
+ * server. This function moves the result into `c.data.response.action_result`
+ * and wakes up the parent thread (which should be waiting in the
+ * `simulatorIsActive` function) so that it can return the response back.
+ *
+ * \param   c        The client that received the response.
+ * \param   agent_id The ID of the agent whose active status was requested.
+ * \param   active   Whether the agent is active or inactive.
+ */
+void on_is_active(client<client_data>& c, uint64_t agent_id, bool active)
+{
+    std::unique_lock<std::mutex> lck(c.data.lock);
+    c.data.waiting_for_server = false;
+    c.data.response.action_result = active;
+    c.data.cv.notify_one();
+}
+
+
+/**
  * The callback invoked when the client receives a step response from the
  * server. This function constructs a list of AgentSimulationState objects governed by
  * this client and invokes the function `c.data.step_callback`.
@@ -639,7 +678,7 @@ inline void wait_for_server(client<client_data>& c)
 }
 
 
-void* simulatorCreate(
+extern "C" void* simulatorCreate(
   const SimulatorConfig* config, 
   OnStepCallback onStepCallback,
   void* callbackData,
@@ -701,7 +740,7 @@ void* simulatorCreate(
 }
 
 
-SimulatorInfo simulatorLoad(
+extern "C" SimulatorInfo simulatorLoad(
   const char* filePath, 
   OnStepCallback onStepCallback,
   void* callbackData,
@@ -774,7 +813,7 @@ SimulatorInfo simulatorLoad(
 }
 
 
-void simulatorDelete(
+extern "C" void simulatorDelete(
   void* simulatorHandle)
 {
   simulator<simulator_data>* sim =
@@ -783,7 +822,7 @@ void simulatorDelete(
 }
 
 
-AgentSimulationState simulatorAddAgent(
+extern "C" AgentSimulationState simulatorAddAgent(
   void* simulatorHandle,
   void* clientHandle)
 {
@@ -828,7 +867,7 @@ AgentSimulationState simulatorAddAgent(
 }
 
 
-bool simulatorMoveAgent(
+extern "C" bool simulatorMoveAgent(
   void* simulatorHandle,
   void* clientHandle,
   uint64_t agentId,
@@ -863,7 +902,7 @@ bool simulatorMoveAgent(
 }
 
 
-bool simulatorTurnAgent(
+extern "C" bool simulatorTurnAgent(
   void* simulatorHandle,
   void* clientHandle,
   uint64_t agentId,
@@ -897,7 +936,69 @@ bool simulatorTurnAgent(
 }
 
 
-const SimulationMap simulatorMap(
+extern "C" void simulatorSetActive(
+  void* simulatorHandle,
+  void* clientHandle,
+  uint64_t agentId,
+  bool active)
+{
+  if (clientHandle == nullptr) {
+    /* the simulation is local, so call get_map directly */
+    simulator<simulator_data>* sim_handle =
+        (simulator<simulator_data>*) simulatorHandle;
+    sim_handle->set_agent_active(agentId, active);
+  } else {
+    /* this is a client, so send a get_map message to the server */
+    client<client_data>* client_handle = (client<client_data>*) clientHandle;
+    if (!client_handle->client_running) {
+      /* TODO: communicate "Connection to the server was lost." error to swift */
+      return;
+    }
+
+    client_handle->data.waiting_for_server = true;
+    if (!send_set_active(*client_handle, agentId, active)) {
+      /* TODO: communicate "Unable to send set_active request." to swift */
+      return;
+    }
+
+    /* wait for response from server */
+    wait_for_server(*client_handle);
+  }
+}
+
+
+extern "C" bool simulatorIsActive(
+  void* simulatorHandle,
+  void* clientHandle,
+  uint64_t agentId)
+{
+  if (clientHandle == nullptr) {
+    /* the simulation is local, so call get_map directly */
+    simulator<simulator_data>* sim_handle =
+        (simulator<simulator_data>*) simulatorHandle;
+    return sim_handle->is_agent_active(agentId);
+  } else {
+    /* this is a client, so send a get_map message to the server */
+    client<client_data>* client_handle = (client<client_data>*) clientHandle;
+    if (!client_handle->client_running) {
+      /* TODO: communicate "Connection to the server was lost." error to swift */
+      return false;
+    }
+
+    client_handle->data.waiting_for_server = true;
+    if (!send_is_active(*client_handle, agentId)) {
+      /* TODO: communicate "Unable to send is_active request." error to swift */
+      return NULL;
+    }
+
+    /* wait for response from server */
+    wait_for_server(*client_handle);
+    return client_handle->data.response.action_result;
+  }
+}
+
+
+extern "C" const SimulationMap simulatorMap(
   void* simulatorHandle,
   void* clientHandle,
   Position bottomLeftCorner,
@@ -951,7 +1052,7 @@ const SimulationMap simulatorMap(
 }
 
 
-void* simulationServerStart(
+extern "C" void* simulationServerStart(
   void* simulatorHandle,
   unsigned int port,
   unsigned int connectionQueueCapacity,
@@ -973,7 +1074,7 @@ void* simulationServerStart(
 }
 
 
-void simulationServerStop(
+extern "C" void simulationServerStop(
   void* serverHandle)
 {
   async_server* server = (async_server*) serverHandle;
@@ -982,7 +1083,7 @@ void simulationServerStop(
 }
 
 
-SimulationClientInfo simulationClientStart(
+extern "C" SimulationClientInfo simulationClientStart(
   const char* serverAddress,
   unsigned int serverPort,
   OnStepCallback onStepCallback,
@@ -1042,7 +1143,7 @@ SimulationClientInfo simulationClientStart(
 }
 
 
-void simulationClientStop(
+extern "C" void simulationClientStop(
   void* clientHandle)
 {
   client<client_data>* client_ptr =
@@ -1052,7 +1153,7 @@ void simulationClientStop(
 }
 
 
-void simulatorDeleteSimulatorInfo(
+extern "C" void simulatorDeleteSimulatorInfo(
   SimulatorInfo info)
 {
   for (unsigned int i = 0; i < info.numAgents; i++)
@@ -1061,7 +1162,7 @@ void simulatorDeleteSimulatorInfo(
 }
 
 
-void simulatorDeleteSimulationClientInfo(
+extern "C" void simulatorDeleteSimulationClientInfo(
   SimulationClientInfo clientInfo,
   unsigned int numAgents)
 {
@@ -1071,14 +1172,14 @@ void simulatorDeleteSimulationClientInfo(
 }
 
 
-void simulatorDeleteAgentSimulationState(
+extern "C" void simulatorDeleteAgentSimulationState(
   AgentSimulationState agentState)
 {
   free(agentState);
 }
 
 
-void simulatorDeleteSimulationMap(
+extern "C" void simulatorDeleteSimulationMap(
   SimulationMap map)
 {
   for (unsigned int i = 0; i < map.numPatches; i++)
