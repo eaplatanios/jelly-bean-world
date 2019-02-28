@@ -5,28 +5,28 @@
 
 namespace nel {
 
-typedef float (*intensity_function)(const position&, const float*);
-typedef float (*interaction_function)(const position&, const position&, const float*);
+typedef float (*intensity_function)(const position, const float*);
+typedef float (*interaction_function)(const position, const position, const float*);
 
-typedef uint8_t intensity_fns_type;
+typedef uint64_t intensity_fns_type;
 enum class intensity_fns : intensity_fns_type {
 	ZERO = 0, CONSTANT
 };
 
-typedef uint8_t interaction_fns_type;
+typedef uint64_t interaction_fns_type;
 enum class interaction_fns : interaction_fns_type {
 	ZERO = 0, PIECEWISE_BOX, CROSS
 };
 
-constexpr float zero_intensity_fn(const position& pos, const float* args) {
+float zero_intensity_fn(const position pos, const float* args) {
 	return 0.0;
 }
 
-float constant_intensity_fn(const position& pos, const float* args) {
+float constant_intensity_fn(const position pos, const float* args) {
 	return args[0];
 }
 
-intensity_function get_intensity_fn(intensity_fns type, float* args, unsigned int num_args)
+intensity_function get_intensity_fn(intensity_fns type, const float* args, unsigned int num_args)
 {
 	switch (type) {
 	case intensity_fns::ZERO:
@@ -46,11 +46,11 @@ intensity_function get_intensity_fn(intensity_fns type, float* args, unsigned in
 	return NULL;
 }
 
-constexpr float zero_interaction_fn(const position& pos1, const position& pos2, const float* args) {
+float zero_interaction_fn(const position pos1, const position pos2, const float* args) {
 	return 0.0;
 }
 
-float piecewise_box_interaction_fn(const position& pos1, const position& pos2, const float* args)
+float piecewise_box_interaction_fn(const position pos1, const position pos2, const float* args)
 {
 	float first_cutoff = args[0];
 	float second_cutoff = args[1];
@@ -65,7 +65,7 @@ float piecewise_box_interaction_fn(const position& pos1, const position& pos2, c
 	else return 0.0f;
 }
 
-float cross_interaction_fn(const position& pos1, const position& pos2, const float* args)
+float cross_interaction_fn(const position pos1, const position pos2, const float* args)
 {
 	const position diff = pos1 - pos2;
 	uint64_t dist = max(abs(diff.x), abs(diff.y));
@@ -82,7 +82,7 @@ float cross_interaction_fn(const position& pos1, const position& pos2, const flo
 	}
 }
 
-interaction_function get_interaction_fn(interaction_fns type, float* args, unsigned int num_args)
+interaction_function get_interaction_fn(interaction_fns type, const float* args, unsigned int num_args)
 {
 	switch (type) {
 	case interaction_fns::ZERO:

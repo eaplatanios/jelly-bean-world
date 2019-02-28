@@ -33,19 +33,19 @@ struct gibbs_field_cache
 	~gibbs_field_cache() { free_helper(); }
 
 	inline float intensity(const position& pos, unsigned int item_type) {
-		if (is_stationary(item_types[item_type].intensity_fn))
+		if (is_stationary(item_types[item_type].intensity_fn.fn))
 			return intensities[item_type];
-		else return item_types[item_type].intensity_fn(pos, item_types[item_type].intensity_fn_args);
+		else return item_types[item_type].intensity_fn.fn(pos, item_types[item_type].intensity_fn.args);
 	}
 
 	inline float interaction(
 			const position& first_position, const position& second_position,
 			unsigned int first_item_type, unsigned int second_item_type)
 	{
-		interaction_function interaction = item_types[first_item_type].interaction_fns[second_item_type];
+		interaction_function interaction = item_types[first_item_type].interaction_fns[second_item_type].fn;
 		if (is_constant(interaction) || !is_stationary(interaction)) {
 			if (first_position == second_position) return 0.0f;
-			return interaction(first_position, second_position, item_types[first_item_type].interaction_fn_args[second_item_type]);
+			return interaction(first_position, second_position, item_types[first_item_type].interaction_fns[second_item_type].args);
 		} else {
 			position diff = first_position - second_position + position(two_n, two_n);
 #if !defined(NDEBUG)
@@ -75,11 +75,11 @@ private:
 			return false;
 		}
 		for (unsigned int i = 0; i < item_type_count; i++) {
-			if (is_stationary(item_types[i].intensity_fn))
-				intensities[i] = item_types[i].intensity_fn(position(0, 0), item_types[i].intensity_fn_args);
+			if (is_stationary(item_types[i].intensity_fn.fn))
+				intensities[i] = item_types[i].intensity_fn.fn(position(0, 0), item_types[i].intensity_fn.args);
 
 			for (unsigned int j = 0; j < item_type_count; j++) {
-				interaction_function interaction = item_types[i].interaction_fns[j];
+				interaction_function interaction = item_types[i].interaction_fns[j].fn;
 				if (!is_constant(interaction) && is_stationary(interaction)) {
 					interactions[i*item_type_count + j] = (float*) malloc(sizeof(float) * four_n * four_n);
 					if (interactions[i*item_type_count + j] == NULL) {
@@ -92,7 +92,7 @@ private:
 							float value;
 							if (x == two_n && y == two_n)
 								value = 0.0f;
-							else value = interaction(position(two_n, two_n), position(x, y), item_types[i].interaction_fn_args[j]);
+							else value = interaction(position(two_n, two_n), position(x, y), item_types[i].interaction_fns[j].args);
 							interactions[i*item_type_count + j][x*four_n + y] = value;
 						}
 					}

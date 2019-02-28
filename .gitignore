@@ -11,3 +11,6 @@ temp/
 # Python API
 **/build/**/*
 **/__pycache__/**/*
+
+# Swift Package Manager
+**/.build/**/*
