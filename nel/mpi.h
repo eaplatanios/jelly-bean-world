@@ -149,12 +149,12 @@ inline bool send_message(socket_type& socket, const void* data, unsigned int len
 template<typename Stream, typename SimulatorData>
 inline bool receive_add_agent(
 		Stream& in, socket_type& connection,
-		hash_map<socket_type, connection_data>& connections,
+		connection_data& data,
 		simulator<SimulatorData>& sim)
 {
 	pair<uint64_t, agent_state*> new_agent = sim.add_agent();
 	if (new_agent.value != NULL)
-		connections.get(connection).agent_ids.add(new_agent.key);
+		data.agent_ids.add(new_agent.key);
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(new_agent.key) + sizeof(new_agent.value));
 	fixed_width_stream<memory_stream> out(mem_stream);
 	std::unique_lock<std::mutex> lock(new_agent.value->lock);
@@ -165,13 +165,20 @@ inline bool receive_add_agent(
 }
 
 template<typename Stream, typename SimulatorData>
-inline bool receive_move(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
+inline bool receive_move(
+		Stream& in, socket_type& connection,
+		connection_data& data,
+		simulator<SimulatorData>& sim)
+{
 	uint64_t agent_id = UINT64_MAX;
 	direction dir;
 	unsigned int num_steps;
 	if (!read(agent_id, in) || !read(dir, in) || !read(num_steps, in))
 		return false;
-	bool result = sim.move(agent_id, dir, num_steps);
+	bool result;
+	if (data.agent_ids.contains(agent_id))
+		result = sim.move(agent_id, dir, num_steps);
+	else result = false;
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(result));
 	fixed_width_stream<memory_stream> out(mem_stream);
 
@@ -181,12 +188,19 @@ inline bool receive_move(Stream& in, socket_type& connection, simulator<Simulato
 }
 
 template<typename Stream, typename SimulatorData>
-inline bool receive_turn(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
+inline bool receive_turn(
+		Stream& in, socket_type& connection,
+		connection_data& data,
+		simulator<SimulatorData>& sim)
+{
 	uint64_t agent_id = UINT64_MAX;
 	direction dir;
 	if (!read(agent_id, in) || !read(dir, in))
 		return false;
-	bool result = sim.turn(agent_id, dir);
+	bool result;
+	if (data.agent_ids.contains(agent_id))
+		result = sim.turn(agent_id, dir);
+	else result = false;
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(result));
 	fixed_width_stream<memory_stream> out(mem_stream);
 
@@ -196,7 +210,10 @@ inline bool receive_turn(Stream& in, socket_type& connection, simulator<Simulato
 }
 
 template<typename Stream, typename SimulatorData>
-inline bool receive_get_map(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
+inline bool receive_get_map(
+		Stream& in, socket_type& connection,
+		simulator<SimulatorData>& sim)
+{
 	position bottom_left, top_right;
 	if (!read(bottom_left, in) || !read(top_right, in))
 		return false;
@@ -221,12 +238,17 @@ inline bool receive_get_map(Stream& in, socket_type& connection, simulator<Simul
 }
 
 template<typename Stream, typename SimulatorData>
-inline bool receive_set_active(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
+inline bool receive_set_active(
+		Stream& in, socket_type& connection,
+		connection_data& data,
+		simulator<SimulatorData>& sim)
+{
 	uint64_t agent_id = UINT64_MAX;
 	bool active;
 	if (!read(agent_id, in) || !read(active, in))
 		return false;
-	sim.set_agent_active(agent_id, active);
+	if (data.agent_ids.contains(agent_id))
+		sim.set_agent_active(agent_id, active);
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id));
 	fixed_width_stream<memory_stream> out(mem_stream);
 
@@ -236,11 +258,18 @@ inline bool receive_set_active(Stream& in, socket_type& connection, simulator<Si
 }
 
 template<typename Stream, typename SimulatorData>
-inline bool receive_is_active(Stream& in, socket_type& connection, simulator<SimulatorData>& sim) {
+inline bool receive_is_active(
+		Stream& in, socket_type& connection,
+		connection_data& data,
+		simulator<SimulatorData>& sim)
+{
 	uint64_t agent_id = UINT64_MAX;
 	if (!read(agent_id, in))
 		return false;
-	bool result = sim.is_agent_active(agent_id);
+	bool result;
+	if (data.agent_ids.contains(agent_id))
+		result = sim.is_agent_active(agent_id);
+	else result = true;
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(result));
 	fixed_width_stream<memory_stream> out(mem_stream);
 
@@ -259,17 +288,17 @@ void server_process_message(socket_type& connection,
 	if (!read(type, in)) return;
 	switch (type) {
 		case message_type::ADD_AGENT:
-			receive_add_agent(in, connection, connections, sim); return;
+			receive_add_agent(in, connection, connections.get(connection), sim); return;
 		case message_type::MOVE:
-			receive_move(in, connection, sim); return;
+			receive_move(in, connection, connections.get(connection), sim); return;
 		case message_type::TURN:
-			receive_turn(in, connection, sim); return;
+			receive_turn(in, connection, connections.get(connection), sim); return;
 		case message_type::GET_MAP:
 			receive_get_map(in, connection, sim); return;
 		case message_type::SET_ACTIVE:
-			receive_set_active(in, connection, sim); return;
+			receive_set_active(in, connection, connections.get(connection), sim); return;
 		case message_type::IS_ACTIVE:
-			receive_is_active(in, connection, sim); return;
+			receive_is_active(in, connection, connections.get(connection), sim); return;
 
 		case message_type::ADD_AGENT_RESPONSE:
 		case message_type::MOVE_RESPONSE:
