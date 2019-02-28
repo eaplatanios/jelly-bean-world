@@ -79,7 +79,7 @@ typedef struct AgentSimulationState {
 } AgentSimulationState;
 
 typedef void (*OnStepCallback)(const void*, const AgentSimulationState*, unsigned int, bool);
-typedef void (*LostConnectionCallback)(void*);
+typedef void (*LostConnectionCallback)(const void*);
 
 typedef struct SimulatorConfig {
   /* Simulation Parameters */
@@ -156,7 +156,7 @@ void* simulatorCreate(
 SimulatorInfo simulatorLoad(
   const char* filePath,
   OnStepCallback onStepCallback,
-  void* callbackData,
+  const void* callbackData,
   unsigned int saveFrequency,
   const char* savePath);
 
@@ -211,7 +211,7 @@ SimulationClientInfo simulationClientStart(
   unsigned int serverPort,
   OnStepCallback onStepCallback,
   LostConnectionCallback lostConnectionCallback,
-  void* callbackData,
+  const void* callbackData,
   const uint64_t* agents,
   unsigned int numAgents);
 

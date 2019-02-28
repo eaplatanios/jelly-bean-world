@@ -1,5 +1,6 @@
 import Foundation
 import NELFramework
+import TensorFlow
 
 // Create a dummy agent delegate.
 final class DummyAgentDelegate : AgentDelegate {
@@ -11,6 +12,7 @@ final class DummyAgentDelegate : AgentDelegate {
       case 0:  agent.turn(towards: .left)
       case 5:  agent.turn(towards: .left)
       case 10: agent.turn(towards: .right)
+      case 15: agent.turn(towards: .right)
       default: agent.move(towards: .up, by: 1)
     }
   }
@@ -33,8 +35,8 @@ final class DummyAgentDelegate : AgentDelegate {
 
 let banana = Item(
   name: "banana",
-  scent: [0.0, 1.0, 0.0],
-  color: [0.0, 1.0, 0.0],
+  scent: ShapedArray([0.0, 1.0, 0.0]),
+  color: ShapedArray([0.0, 1.0, 0.0]),
   requiredItemCounts: [0: 1], // Make bananas impossible to collect.
   requiredItemCosts: [:],
   blocksMovement: false,
@@ -47,8 +49,8 @@ let banana = Item(
 
 let onion = Item(
   name: "onion",
-  scent: [1.0, 0.0, 0.0],
-  color: [1.0, 0.0, 0.0],
+  scent: ShapedArray([1.0, 0.0, 0.0]),
+  color: ShapedArray([1.0, 0.0, 0.0]),
   requiredItemCounts: [1: 1], // Make onions impossible to collect.
   requiredItemCosts: [:],
   blocksMovement: false,
@@ -60,8 +62,8 @@ let onion = Item(
 
 let jellyBean = Item(
   name: "jellyBean",
-  scent: [0.0, 0.0, 1.0],
-  color: [0.0, 0.0, 1.0],
+  scent: ShapedArray([0.0, 0.0, 1.0]),
+  color: ShapedArray([0.0, 0.0, 1.0]),
   requiredItemCounts: [:],
   requiredItemCosts: [:],
   blocksMovement: false,
@@ -74,8 +76,8 @@ let jellyBean = Item(
 
 let wall = Item(
   name: "wall",
-  scent: [0.0, 0.0, 0.0],
-  color: [0.5, 0.5, 0.5],
+  scent: ShapedArray([0.0, 0.0, 0.0]),
+  color: ShapedArray([0.5, 0.5, 0.5]),
   requiredItemCounts: [3: 1], // Make walls impossible to collect.
   requiredItemCosts: [:],
   blocksMovement: true,
@@ -118,7 +120,7 @@ print("Starting simulation.")
 var startTime = CFAbsoluteTimeGetCurrent()
 var elapsed = Float(0.0)
 var simulationStartTime = simulator.time
-for _ in 0..<10000 {
+for _ in 0..<100000000 {
   simulator.step()
   let interval = CFAbsoluteTimeGetCurrent() - startTime
   if interval > 1.0 {

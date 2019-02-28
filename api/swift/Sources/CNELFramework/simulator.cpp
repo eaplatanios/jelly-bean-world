@@ -355,6 +355,7 @@ inline bool init(simulator_data& data, const simulator_data& src)
   data.save_frequency = src.save_frequency;
   data.server = src.server;
   data.callback = src.callback;
+  data.callback_data = src.callback_data;
   return true;
 }
 
@@ -380,7 +381,7 @@ struct client_data {
 
   OnStepCallback step_callback;
   LostConnectionCallback lost_connection_callback;
-  void* callback_data;
+  const void* callback_data;
 
   static inline void free(client_data& data) {
     data.lock.~mutex();
@@ -475,7 +476,7 @@ void on_step(const simulator<simulator_data>* sim,
   for (size_t i = 0; i < data.agent_ids.length; i++) {
     if (!init(agent_states[i], *agents[(size_t) data.agent_ids[i]], config, data.agent_ids[i])) {
       fprintf(stderr, "on_step ERROR: Insufficient memory for agent_state.\n");
-      for (size_t j = 0; j < i; j++) free(agent_states[i]);
+      for (size_t j = 0; j < i; j++) free(agent_states[j]);
       free(agent_states); return;
     }
   }

@@ -23,9 +23,9 @@ let package = Package(
                 .headerSearchPath("."),
                 .headerSearchPath("./deps"),
                 .unsafeFlags([
-                    "-std=c++11", "-Wall", "-Wpedantic", "-Og", "-g", "-DNDEBUG", 
+                    "-std=c++11", "-Wall", "-Wpedantic", "-Ofast", "-DNDEBUG", 
                     "-fno-stack-protector", "-mtune=native", "-march=native",
-                ]),
+               ]),
             ]),
         .target(
             name: "NELFramework",

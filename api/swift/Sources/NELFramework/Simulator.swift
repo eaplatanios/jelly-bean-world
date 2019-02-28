@@ -76,8 +76,7 @@ public final class Simulator {
   ) {
     self.config = config
     var cConfig = config.toC()
-    let opaque = Unmanaged.passUnretained(self).toOpaque()
-    let pointer = UnsafeRawPointer(opaque)
+    let pointer = Unmanaged.passUnretained(self).toOpaque()
     self.handle = CNELFramework.simulatorCreate(
       &cConfig.simulatorConfig,
       nativeOnStepCallback,
