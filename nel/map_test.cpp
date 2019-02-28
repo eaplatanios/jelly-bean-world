@@ -16,32 +16,38 @@ inline bool print(const item& item, Stream& out, const item_position_printer& pr
 	return print(item.location, out);
 }
 
+template<typename FunctionType>
+struct energy_function {
+    FunctionType fn;
+    float* args;
+    unsigned int arg_count;
+
+    static inline void free(energy_function<FunctionType>& info) {
+        core::free(info.args);
+    }
+};
+
 struct item_properties {
-	intensity_function intensity_fn;
-	interaction_function* interaction_fns;
-
-	float* intensity_fn_args;
-	unsigned int intensity_fn_arg_count;
-
-	float** interaction_fn_args;
-	unsigned int* interaction_fn_arg_counts;
+	energy_function<intensity_function> intensity_fn;
+	energy_function<interaction_function>* interaction_fns;
 };
 
 int main(int argc, const char** argv) {
+
 	static constexpr int n = 32;
 	float intensity_per_item[] = { -2.0f };
-	interaction_function interaction_fns[] = { piecewise_box_interaction_fn };
 	float interaction_arg[] = { 40.0f, 200.0f, 0.0f, -40.0f };
-	float* interaction_args[] = { interaction_arg };
-	unsigned int interaction_fn_arg_count = 4;
+
+	energy_function<interaction_function> interaction_fn;
+	interaction_fn.fn = piecewise_box_interaction_fn;
+	interaction_fn.args = interaction_arg;
+	interaction_fn.arg_count = 4;
 
 	item_properties item_type;
-	item_type.intensity_fn = constant_intensity_fn;
-	item_type.interaction_fns = interaction_fns;
-	item_type.intensity_fn_args = intensity_per_item;
-	item_type.intensity_fn_arg_count = 1;
-	item_type.interaction_fn_args = interaction_args;
-	item_type.interaction_fn_arg_counts = &interaction_fn_arg_count;
+	item_type.intensity_fn.fn = constant_intensity_fn;
+	item_type.intensity_fn.args = intensity_per_item;
+	item_type.intensity_fn.arg_count = 1;
+	item_type.interaction_fns = &interaction_fn;
 	auto m = map<empty_data, item_properties>(n, 10, &item_type, 1);
 
 	patch<empty_data>* neighborhood[4];
