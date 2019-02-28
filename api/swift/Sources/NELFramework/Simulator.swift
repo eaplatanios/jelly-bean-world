@@ -173,4 +173,11 @@ public final class Simulator {
   internal func turnAgent(agent: Agent, towards direction: TurnDirection) -> Bool {
     return CNELFramework.simulatorTurnAgent(self.handle, nil, agent.id!, direction.toC())
   }
+
+  // TODO: Map deallocator.
+  @inline(__always)
+  internal func map(bottomLeft: Position, topRight: Position) -> SimulationMap {
+    let cSimulationMap = CNELFramework.simulatorMap(self.handle, nil, bottomLeft, topRight)
+    return SimulationMap.fromC(cSimulationMap, for: self)
+  }
 }

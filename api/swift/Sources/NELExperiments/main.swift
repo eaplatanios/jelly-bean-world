@@ -1,6 +1,11 @@
 import Foundation
 import NELFramework
+import Python
 import TensorFlow
+
+PythonLibrary.useVersion(3, 7)
+let mpl = Python.import("matplotlib")
+mpl.use("TkAgg")
 
 // Create a dummy agent delegate.
 final class DummyAgentDelegate : AgentDelegate {
@@ -117,6 +122,10 @@ while agents.count < numAgents {
 }
 
 print("Starting simulation.")
+let painter = MapVisualizer(
+  for: simulator, 
+  bottomLeft: Position(x: -70, y: -70), 
+  topRight: Position(x: 70, y: 70))
 var startTime = CFAbsoluteTimeGetCurrent()
 var elapsed = Float(0.0)
 var simulationStartTime = simulator.time
@@ -129,4 +138,5 @@ for _ in 0..<100000000 {
     print("\(speed) simulation steps per second.")
     startTime = CFAbsoluteTimeGetCurrent()
   }
+  painter.draw()
 }

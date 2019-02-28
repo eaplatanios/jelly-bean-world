@@ -5,13 +5,13 @@ internal typealias CItem = CNELFramework.ItemProperties
 internal typealias CSimulatorConfig = CNELFramework.SimulatorConfig
 
 public struct Item : Equatable, Hashable {
-  let name: String
-  let scent: ShapedArray<Float>
-  let color: ShapedArray<Float>
-  let requiredItemCounts: [Int: UInt32]
-  let requiredItemCosts: [Int: UInt32]
-  let blocksMovement: Bool
-  let energyFunctions: EnergyFunctions
+  public let name: String
+  public let scent: ShapedArray<Float>
+  public let color: ShapedArray<Float>
+  public let requiredItemCounts: [Int: UInt32]
+  public let requiredItemCosts: [Int: UInt32]
+  public let blocksMovement: Bool
+  public let energyFunctions: EnergyFunctions
 
   public init(
     name: String,
