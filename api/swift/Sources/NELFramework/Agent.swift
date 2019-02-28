@@ -6,18 +6,35 @@ public class Agent {
   let simulator: Simulator
   let delegate: AgentDelegate
 
-  var id: UInt64? = nil
-  var position: Position? = nil
-  var direction: Direction? = nil
-  var scent: ShapedArray<Float>? = nil
-  var vision: ShapedArray<Float>? = nil
-  var items: [Item : UInt32]? = nil
-  var lastCollectedItems: [Item : UInt32]? = nil
+  internal var rawScent: (shape: [Int], values: [Float])? = nil
+  internal var rawVision: (shape: [Int], values: [Float])? = nil
+  internal var rawItems: [UInt32]? = nil
+
+  public internal(set) var id: UInt64? = nil
+  public internal(set) var position: Position? = nil
+  public internal(set) var direction: Direction? = nil
+  
+  public var scent: ShapedArray<Float>? {
+    return rawScent.map { ShapedArray(shape: $0.shape, scalars: $0.values) }
+  }
+
+  public var vision: ShapedArray<Float>? {
+    return rawVision.map { ShapedArray(shape: $0.shape, scalars: $0.values) }
+  }
+
+  public var items: [Item : UInt32]? {
+    return rawItems.map {
+      var counts = [Item: UInt32]()
+      for (index, item) in simulator.config.items.enumerated() {
+        counts[item] = $0[index]
+      }
+      return counts
+    }
+  }
 
   public init(in simulator: Simulator, with delegate: AgentDelegate) {
     self.simulator = simulator
     self.delegate = delegate
-    self.items = [:]
     simulator.addAgent(self)
   }
 
@@ -33,14 +50,8 @@ public class Agent {
   /// about that event. The simulator only advances the 
   /// time step once all agents have requested to move.
   @inline(__always) @discardableResult
-  public func move(
-    towards direction: Direction, 
-    by numSteps: UInt32
-  ) -> Bool {
-    return self.simulator.moveAgent(
-      agent: self,
-      towards: direction,
-      by: numSteps)
+  public func move(towards direction: Direction, by numSteps: UInt32 = 1) -> Bool {
+    return self.simulator.moveAgent(agent: self, towards: direction, by: numSteps)
   }
   
   /// Turns this agent in the simulated environment.
@@ -50,35 +61,17 @@ public class Agent {
   /// about that event. The simulator only advances the 
   /// time step once all agents have requested to move.
   @inline(__always) @discardableResult
-  public func turn(
-    towards direction: TurnDirection
-  ) -> Bool {
-    return self.simulator.turnAgent(
-      agent: self,
-      towards: direction)
+  public func turn(towards direction: TurnDirection) -> Bool {
+    return self.simulator.turnAgent(agent: self, towards: direction)
   }
 
-  internal func updateSimulationState(
-    _ state: AgentSimulationState
-  ) {
+  internal func updateSimulationState(_ state: AgentSimulationState) {
     self.id = state.id
     self.position = state.position
-    self.direction = Direction.fromCDirection(state.direction)
-    self.scent = scentToShapedArray(
-      for: simulator.config, 
-      state.scent!)
-    self.vision = visionToShapedArray(
-      for: simulator.config, 
-      state.vision!)
-    let previousItems = self.items!
-    self.items = itemCountsToDictionary(
-      for: simulator.config, 
-      state.collectedItems!)
-    // TODO: Better way to do this.
-    self.lastCollectedItems = self.items
-    for (item, count) in previousItems {
-      self.lastCollectedItems![item] = self.items![item]! - count
-    }
+    self.direction = Direction.fromC(state.direction)
+    self.rawScent = scentToArray(for: simulator.config, state.scent!)
+    self.rawVision = visionToArray(for: simulator.config, state.vision!)
+    self.rawItems = itemCountsToArray(for: simulator.config, state.collectedItems!)
   }
 }
 

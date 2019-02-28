@@ -1,5 +1,9 @@
 import CNELFramework
 
+internal typealias CEnergyFunctions = CNELFramework.EnergyFunctions
+internal typealias CIntensityFunction = CNELFramework.IntensityFunction
+internal typealias CInteractionFunction = CNELFramework.InteractionFunction
+
 public struct EnergyFunctions : Hashable {
   let intensityFn: IntensityFunction
   let interactionFns: [InteractionFunction]
@@ -13,25 +17,23 @@ public struct EnergyFunctions : Hashable {
   }
 
   internal func toC() -> (
-    energyFunctions: CNELFramework.EnergyFunctions,
+    energyFunctions: CEnergyFunctions,
     deallocate: () -> Void
   ) {
     let cIntensityFn = intensityFn.toC()
     let (interactionFns, interactionFnDeallocators) = self.interactionFns
       .map { $0.toC() }
-      .reduce(into: ([CNELFramework.InteractionFunction](), [() -> Void]())) {
+      .reduce(into: ([CInteractionFunction](), [() -> Void]())) {
         $0.0.append($1.interactionFunction)
         $0.1.append($1.deallocate)
       }
 
-    let cInteractionFns = UnsafeMutablePointer<CNELFramework.InteractionFunction>.allocate(
+    let cInteractionFns = UnsafeMutablePointer<CInteractionFunction>.allocate(
       capacity: interactionFns.count)
-    cInteractionFns.initialize(
-      from: interactionFns, 
-      count: interactionFns.count)
+    cInteractionFns.initialize(from: interactionFns, count: interactionFns.count)
 
     return (
-      energyFunctions: CNELFramework.EnergyFunctions(
+      energyFunctions: CEnergyFunctions(
         intensityFn: cIntensityFn.intensityFunction,
         interactionFns: cInteractionFns,
         numInteractionFns: UInt32(interactionFns.count)),
@@ -55,13 +57,13 @@ public struct IntensityFunction : Hashable {
   }
 
   internal func toC() -> (
-    intensityFunction: CNELFramework.IntensityFunction,
+    intensityFunction: CIntensityFunction,
     deallocate: () -> Void
   ) {
     let cArgs = UnsafeMutablePointer<Float>.allocate(capacity: arguments.count)
     cArgs.initialize(from: arguments, count: arguments.count)
     return (
-      intensityFunction: CNELFramework.IntensityFunction(
+      intensityFunction: CIntensityFunction(
         id: id,
         args: cArgs,
         numArgs: UInt32(arguments.count)),
@@ -81,13 +83,13 @@ public struct InteractionFunction : Hashable {
   }
 
   internal func toC() -> (
-    interactionFunction: CNELFramework.InteractionFunction,
+    interactionFunction: CInteractionFunction,
     deallocate: () -> Void
   ) {
     let cArgs = UnsafeMutablePointer<Float>.allocate(capacity: arguments.count)
     cArgs.initialize(from: arguments, count: arguments.count)
     return (
-      interactionFunction: CNELFramework.InteractionFunction(
+      interactionFunction: CInteractionFunction(
         id: id,
         itemId: itemId,
         args: cArgs,

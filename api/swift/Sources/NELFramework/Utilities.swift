@@ -1,47 +1,36 @@
-import TensorFlow
-
-internal func visionToShapedArray(
+@inline(__always)
+internal func scentToArray(
   for config: SimulatorConfig,
   _ buffer: UnsafeMutablePointer<Float>
-) -> ShapedArray<Float> {
+) -> (shape: [Int], values: [Float]) {
+  let scentShape = [Int(config.scentDimSize)]
+  let scentBuffer = UnsafeBufferPointer(start: buffer, count: scentShape[0])
+  return (shape: scentShape, values: Array(scentBuffer))
+}
+
+@inline(__always)
+internal func visionToArray(
+  for config: SimulatorConfig,
+  _ buffer: UnsafeMutablePointer<Float>
+) -> (shape: [Int], values: [Float]) {
   let visionShape = [
     2 * Int(config.visionRange) + 1, 
     2 * Int(config.visionRange) + 1, 
     Int(config.colorDimSize)]
-  let visionBuffer = UnsafeBufferPointer(
-      start: buffer,
-      count: Int(
-        (2 * config.visionRange + 1) * 
-        (2 * config.visionRange + 1) * 
-        config.colorDimSize))
-  return ShapedArray(
-    shape: visionShape,
-    scalars: visionBuffer)
+  let visionSize = Int(
+    (2 * config.visionRange + 1) * 
+    (2 * config.visionRange + 1) * 
+    config.colorDimSize)
+  let visionBuffer = UnsafeBufferPointer(start: buffer, count: visionSize)
+  return (shape: visionShape, values: Array(visionBuffer))
 }
 
-internal func scentToShapedArray(
-  for config: SimulatorConfig,
-  _ buffer: UnsafeMutablePointer<Float>
-) -> ShapedArray<Float> {
-  let scentShape = [Int(config.scentDimSize)]
-  let scentBuffer = UnsafeBufferPointer(
-      start: buffer,
-      count: Int(config.scentDimSize))
-  return ShapedArray(
-    shape: scentShape,
-    scalars: scentBuffer)
-}
-
-internal func itemCountsToDictionary(
+@inline(__always)
+internal func itemCountsToArray(
   for config: SimulatorConfig,
   _ countsPointer: UnsafeMutablePointer<UInt32>
-) -> [Item: UInt32] {
-  let counts = Array(UnsafeBufferPointer(
+) -> [UInt32] {
+  return Array(UnsafeBufferPointer(
     start: countsPointer, 
     count: Int(config.items.count)))
-  var dict = [Item: UInt32]()
-  for (index, item) in config.items.enumerated() {
-    dict[item] = counts[index]
-  }
-  return dict
 }

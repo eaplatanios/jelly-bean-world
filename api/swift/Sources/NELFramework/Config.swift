@@ -1,6 +1,9 @@
 import CNELFramework
 import TensorFlow
 
+internal typealias CItem = CNELFramework.ItemProperties
+internal typealias CSimulatorConfig = CNELFramework.SimulatorConfig
+
 public struct Item : Equatable, Hashable {
   let name: String
   let scent: ShapedArray<Float>
@@ -30,10 +33,7 @@ public struct Item : Equatable, Hashable {
 
   internal func toC(
     in config: SimulatorConfig
-  ) -> (
-    itemProperties: CNELFramework.ItemProperties, 
-    deallocate: () -> Void
-  ) {
+  ) -> (item: CItem, deallocate: () -> Void) {
     let scent = self.scent.scalars
     let color = self.color.scalars
     let counts = config.items.indices.map { requiredItemCounts[$0, default: 0] }
@@ -52,7 +52,7 @@ public struct Item : Equatable, Hashable {
     let cEnergyFunctions = energyFunctions.toC()
 
     return (
-      itemProperties: CNELFramework.ItemProperties(
+      item: CItem(
         name: name,
         scent: cScent,
         color: cColor,
@@ -129,23 +129,23 @@ public struct SimulatorConfig : Equatable, Hashable {
   }
 
   internal func toC() -> (
-    simulatorConfig: CNELFramework.SimulatorConfig, 
+    simulatorConfig: CSimulatorConfig, 
     deallocate: () -> Void
   ) {
-    let (itemTypes, itemTypeDeallocators) = items
+    let (items, itemDeallocators) = self.items
       .map { $0.toC(in: self) }
-      .reduce(into: ([CNELFramework.ItemProperties](), [() -> Void]())) {
-        $0.0.append($1.itemProperties)
+      .reduce(into: ([CItem](), [() -> Void]())) {
+        $0.0.append($1.item)
         $0.1.append($1.deallocate)
       }
     let color = agentColor.scalars
-    let cItemTypes = UnsafeMutablePointer<CNELFramework.ItemProperties>.allocate(capacity: itemTypes.count)
+    let cItems = UnsafeMutablePointer<CItem>.allocate(capacity: items.count)
     let cColor = UnsafeMutablePointer<Float>.allocate(capacity: color.count)
-    cItemTypes.initialize(from: itemTypes, count: itemTypes.count)
+    cItems.initialize(from: items, count: items.count)
     cColor.initialize(from: color, count: color.count)
 
     return (
-      simulatorConfig: CNELFramework.SimulatorConfig(
+      simulatorConfig: CSimulatorConfig(
         randomSeed: randomSeed,
         maxStepsPerMove: maxStepsPerMove, 
         scentDimSize: scentDimSize, 
@@ -163,17 +163,17 @@ public struct SimulatorConfig : Equatable, Hashable {
           allowedTurns.contains(.right)),
         patchSize: patchSize, 
         gibbsIterations: gibbsIterations, 
-        itemTypes: cItemTypes,
+        itemTypes: cItems,
         numItemTypes: UInt32(items.count),
         agentColor: cColor,
-        movementConflictPolicy: moveConflictPolicy.toCMoveConflictPolicy(), 
+        movementConflictPolicy: moveConflictPolicy.toC(), 
         scentDecay: scentDecay, 
         scentDiffusion: scentDiffusion, 
         removedItemLifetime: removedItemLifetime),
       deallocate: { () in 
-        cItemTypes.deallocate()
+        cItems.deallocate()
         cColor.deallocate()
-        for deallocate in itemTypeDeallocators {
+        for deallocate in itemDeallocators {
           deallocate()
         }
       })
