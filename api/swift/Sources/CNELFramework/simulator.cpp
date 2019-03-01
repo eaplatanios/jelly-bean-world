@@ -368,11 +368,11 @@ inline bool init(simulator_data& data, const simulator_data& src)
  */
 struct client_data {
   /* storing the server responses */
-  union response {
-    bool action_result;
+  mpi_response server_response;
+  union response_data {
     AgentSimulationState agent_state;
     hash_map<position, patch_state>* map;
-  } response;
+  } response_data;
 
   /* for synchronization */
   bool waiting_for_server;
@@ -494,86 +494,131 @@ void on_step(const simulator<simulator_data>* sim,
  * Client callback functions.
  */
 
+inline char* concat(const char* first, const char* second) {
+  size_t first_length = strlen(first);
+  size_t second_length = strlen(second);
+  char* buf = (char*) malloc(sizeof(char) * (first_length + second_length + 1));
+  if (buf == NULL) {
+    fprintf(stderr, "concat ERROR: Out of memory.\n");
+    return NULL;
+  }
+  for (unsigned int i = 0; i < first_length; i++)
+    buf[i] = first[i];
+  for (unsigned int j = 0; j < second_length; j++)
+    buf[first_length + j] = second[j];
+  buf[first_length + second_length] = '\0';
+  return buf;
+}
+
+inline void check_response(mpi_response response, const char* prefix) {
+  char* message;
+  switch (response) {
+  case mpi_response::INVALID_AGENT_ID:
+    message = concat(prefix, "Invalid agent ID.");
+    if (message != NULL) { PyErr_SetString(mpi_error, message); free(message); } break;
+  case mpi_response::SERVER_PARSE_MESSAGE_ERROR:
+    message = concat(prefix, "Server was unable to parse MPI message from client.");
+    if (message != NULL) { PyErr_SetString(mpi_error, message); free(message); } break;
+  case mpi_response::CLIENT_PARSE_MESSAGE_ERROR:
+    message = concat(prefix, "Client was unable to parse MPI message from server.");
+    if (message != NULL) { PyErr_SetString(mpi_error, message); free(message); } break;
+  case mpi_response::TRUE:
+  case mpi_response::FALSE:
+    break;
+  }
+}
+
 /**
  * The callback invoked when the client receives an add_agent response from the
- * server. This function copies the agent state into an AgentSimulationState object,
- * stores it in `c.data.response.agent_state`, and wakes up the parent thread
- * (which should be waiting in the `simulatorAddAgent` function) so that it can
- * return the response.
+ * server. This function copies the agent state into an AgentSimulationState
+ * object, stores it in `c.data.response_data.agent_state`, and wakes up the
+ * parent thread (which should be waiting in the `simulatorAddAgent` function)
+ * so that it can return the response.
  *
  * \param   c         The client that received the response.
  * \param   agent_id  The ID of the new agent. This is equal to `UINT64_MAX` if
  *                    the server returned an error.
+ * \param   response  The MPI response from the server, containing information
+ *                    about any errors.
  * \param   new_agent The state of the new agent.
  */
-void on_add_agent(client<client_data>& c,
-        uint64_t agent_id, const agent_state& new_agent)
+void on_add_agent(client<client_data>& c, uint64_t agent_id,
+        mpi_response response, const agent_state& new_agent)
 {
+  check_response(response, "add_agent: ");
   AgentSimulationState new_agent_state;
-  if (!init(new_agent_state, new_agent, c.config, agent_id))
+  if (response != mpi_response::TRUE || !init(new_agent_state, new_agent, c.config, agent_id))
     new_agent_state = EMPTY_AGENT_SIM_STATE;
 
   std::unique_lock<std::mutex> lck(c.data.lock);
   c.data.waiting_for_server = false;
-  c.data.response.agent_state = new_agent_state;
+  c.data.response_data.agent_state = new_agent_state;
+  c.data.server_response = response;
   c.data.cv.notify_one();
 }
 
 
 /**
  * The callback invoked when the client receives a move response from the
- * server. This function copies the result into `c.data.response.action_result`
- * and wakes up the parent thread (which should be waiting in the
+ * server. This function copies the result into `c.data.server_response` and
+ * wakes up the parent thread (which should be waiting in the
  * `simulatorMoveAgent` function) so that it can return the response.
  *
  * \param   c               The client that received the response.
  * \param   agent_id        The ID of the agent that requested to move.
- * \param   request_success Indicates whether the move request was successfully
- *                          enqueued by the simulator server.
+ * \param   response        The MPI response from the server, containing
+ *                          information about any errors.
  */
-void on_move(client<client_data>& c, uint64_t agent_id, bool request_success) {
+void on_move(client<client_data>& c, uint64_t agent_id, mpi_response response) {
+  check_response(response, "move: ");
   std::unique_lock<std::mutex> lck(c.data.lock);
   c.data.waiting_for_server = false;
-  c.data.response.action_result = request_success;
+  c.data.server_response = response;
   c.data.cv.notify_one();
 }
 
 
 /**
  * The callback invoked when the client receives a turn response from the
- * server. This function copies the result into `c.data.response.action_result`
- * and wakes up the parent thread (which should be waiting in the
+ * server. This function copies the result into `c.data.server_response` and
+ * wakes up the parent thread (which should be waiting in the
  * `simulatorTurnAgent` function) so that it can return the response.
  *
  * \param   c               The client that received the response.
  * \param   agent_id        The ID of the agent that requested to turn.
- * \param   request_success Indicates whether the turn request was successfully
- *                          enqueued by the simulator server.
+ * \param   response        The MPI response from the server, containing
+ *                          information about any errors.
  */
-void on_turn(client<client_data>& c, uint64_t agent_id, bool request_success) {
+void on_turn(client<client_data>& c, uint64_t agent_id, mpi_response response) {
+  check_response(response, "turn: ");
   std::unique_lock<std::mutex> lck(c.data.lock);
   c.data.waiting_for_server = false;
-  c.data.response.action_result = request_success;
+  c.data.server_response = response;
   c.data.cv.notify_one();
 }
 
 
 /**
  * The callback invoked when the client receives a get_map response from the
- * server. This function moves the result into `c.data.response.map` and wakes
- * up the parent thread (which should be waiting in the `simulatorMap`
+ * server. This function moves the result into `c.data.response_data.map` and
+ * wakes up the parent thread (which should be waiting in the `simulatorMap`
  * function) so that it can return the response back.
  *
- * \param   c       The client that received the response.
- * \param   map     A map from patch positions to `patch_state` structures
- *                  containing the state information in each patch.
+ * \param   c        The client that received the response.
+ * \param   response The MPI response from the server, containing information
+ *                   about any errors.
+ * \param   map      A map from patch positions to `patch_state` structures
+ *                   containing the state information in each patch.
  */
 void on_get_map(client<client_data>& c,
+        mpi_response response,
         hash_map<position, patch_state>* map)
 {
+  check_response(response, "get_map: ");
   std::unique_lock<std::mutex> lck(c.data.lock);
   c.data.waiting_for_server = false;
-  c.data.response.map = map;
+  c.data.response_data.map = map;
+  c.data.server_response = response;
   c.data.cv.notify_one();
 }
 
@@ -585,12 +630,16 @@ void on_get_map(client<client_data>& c,
  *
  * \param   c        The client that received the response.
  * \param   agent_id The ID of the agent whose active status was set.
+ * \param   response The MPI response from the server, containing information
+ *                   about any errors.
  */
-void on_set_active(client<client_data>& c, uint64_t agent_id)
+void on_set_active(client<client_data>& c, uint64_t agent_id, mpi_response response)
 {
-    std::unique_lock<std::mutex> lck(c.data.lock);
-    c.data.waiting_for_server = false;
-    c.data.cv.notify_one();
+  check_response(response, "set_active: ");
+  std::unique_lock<std::mutex> lck(c.data.lock);
+  c.data.waiting_for_server = false;
+  c.data.server_response = response;
+  c.data.cv.notify_one();
 }
 
 
@@ -602,14 +651,16 @@ void on_set_active(client<client_data>& c, uint64_t agent_id)
  *
  * \param   c        The client that received the response.
  * \param   agent_id The ID of the agent whose active status was requested.
- * \param   active   Whether the agent is active or inactive.
+ * \param   response The MPI response from the server, containing information
+ *                   about whether the agent is active and any errors.
  */
-void on_is_active(client<client_data>& c, uint64_t agent_id, bool active)
+void on_is_active(client<client_data>& c, uint64_t agent_id, mpi_response response)
 {
-    std::unique_lock<std::mutex> lck(c.data.lock);
-    c.data.waiting_for_server = false;
-    c.data.response.action_result = active;
-    c.data.cv.notify_one();
+  check_response(response, "is_active: ");
+  std::unique_lock<std::mutex> lck(c.data.lock);
+  c.data.waiting_for_server = false;
+  c.data.server_response = response;
+  c.data.cv.notify_one();
 }
 
 
@@ -625,9 +676,12 @@ void on_is_active(client<client_data>& c, uint64_t agent_id, bool active)
  *                       the new time step in the simulation.
  */
 void on_step(client<client_data>& c,
+        mpi_response response,
         const array<uint64_t>& agent_ids,
         const agent_state* agent_states)
 {
+  check_response(response, "on_step: ");
+
   bool saved;
   if (!read(saved, c.connection)) return;
 
@@ -863,7 +917,7 @@ AgentSimulationState simulatorAddAgent(
     /* wait for response from server */
     wait_for_server(*client_ptr);
 
-    return client_ptr->data.response.agent_state;
+    return client_ptr->data.response_data.agent_state;
   }
 }
 
@@ -898,7 +952,7 @@ bool simulatorMoveAgent(
     /* wait for response from server */
     wait_for_server(*client_ptr);
 
-    return client_ptr->data.response.action_result;
+    return client_ptr->data.server_response == mpi_response::TRUE;
   }
 }
 
@@ -932,7 +986,7 @@ bool simulatorTurnAgent(
     /* wait for response from server */
     wait_for_server(*client_ptr);
 
-    return client_ptr->data.response.action_result;
+    return client_ptr->data.server_response == mpi_response::TRUE;
   }
 }
 
@@ -983,18 +1037,24 @@ bool simulatorIsActive(
     client<client_data>* client_handle = (client<client_data>*) clientHandle;
     if (!client_handle->client_running) {
       /* TODO: communicate "Connection to the server was lost." error to swift */
-      return false;
+      return false; /* TODO: return something that indicates error */
     }
 
     client_handle->data.waiting_for_server = true;
     if (!send_is_active(*client_handle, agentId)) {
       /* TODO: communicate "Unable to send is_active request." error to swift */
-      return false;
+      return false; /* TODO: return something that indicates error */
     }
 
     /* wait for response from server */
     wait_for_server(*client_handle);
-    return client_handle->data.response.action_result;
+    if (client_handle->data.server_response == mpi_response::TRUE) {
+      return true;
+    } else if (client_handle->data.server_response == mpi_response::FALSE) {
+      return false;
+    } else {
+      return false; /* TODO: return something that indicates error */
+    }
   }
 }
 
@@ -1042,6 +1102,8 @@ const SimulationMap simulatorMap(
     /* wait for response from server */
     wait_for_server(*client_ptr);
     SimulationMap map;
+    if (client_ptr->data.server_response != mpi_response::TRUE)
+      return EMPTY_SIM_MAP;
     if (!init(map, *client_ptr->data.response.map, client_ptr->config))
       map = EMPTY_SIM_MAP;
     for (auto entry : *client_ptr->data.response.map)

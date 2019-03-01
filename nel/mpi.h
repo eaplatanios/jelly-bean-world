@@ -144,7 +144,32 @@ inline bool send_message(socket_type& socket, const void* data, unsigned int len
 	return send(socket.handle, (const char*) data, length, 0) != 0;
 }
 
-/* TODO: the below functions should send an error back to client upon failure */
+enum class mpi_response : uint8_t {
+	FALSE = 0,
+	TRUE,
+	INVALID_AGENT_ID,
+	SERVER_PARSE_MESSAGE_ERROR,
+	CLIENT_PARSE_MESSAGE_ERROR
+};
+
+/**
+ * Reads an mpi_response from `in` and stores the result in `response`.
+ */
+template<typename Stream>
+inline bool read(mpi_response& response, Stream& in) {
+	uint8_t v;
+	if (!read(v, in)) return false;
+	response = (mpi_response) v;
+	return true;
+}
+
+/**
+ * Writes the given mpi_response `response` to the stream `out`.
+ */
+template<typename Stream>
+inline bool write(const mpi_response& response, Stream& out) {
+	return write((uint8_t) response, out);
+}
 
 template<typename Stream, typename SimulatorData>
 inline bool receive_add_agent(
@@ -173,18 +198,25 @@ inline bool receive_move(
 	uint64_t agent_id = UINT64_MAX;
 	direction dir;
 	unsigned int num_steps;
-	if (!read(agent_id, in) || !read(dir, in) || !read(num_steps, in))
-		return false;
-	bool result;
-	if (data.agent_ids.contains(agent_id))
-		result = sim.move(agent_id, dir, num_steps);
-	else result = false;
-	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(result));
+	mpi_response response;
+	bool success = true;
+	if (!read(agent_id, in) || !read(dir, in) || !read(num_steps, in)) {
+		response = mpi_response::SERVER_PARSE_MESSAGE_ERROR;
+		success = false;
+	} else {
+		if (!data.agent_ids.contains(agent_id))
+			response = mpi_response::INVALID_AGENT_ID;
+		else if (sim.move(agent_id, dir, num_steps))
+			response = mpi_response::TRUE;
+		else response = mpi_response::FALSE;
+	}
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(response));
 	fixed_width_stream<memory_stream> out(mem_stream);
 
-	return write(message_type::MOVE_RESPONSE, out)
-		&& write(agent_id, out) && write(result, out)
-		&& send_message(connection, mem_stream.buffer, mem_stream.position);
+	success &= write(message_type::MOVE_RESPONSE, out)
+			&& write(agent_id, out) && write(response, out)
+			&& send_message(connection, mem_stream.buffer, mem_stream.position);
+	return success;
 }
 
 template<typename Stream, typename SimulatorData>
@@ -195,18 +227,25 @@ inline bool receive_turn(
 {
 	uint64_t agent_id = UINT64_MAX;
 	direction dir;
-	if (!read(agent_id, in) || !read(dir, in))
-		return false;
-	bool result;
-	if (data.agent_ids.contains(agent_id))
-		result = sim.turn(agent_id, dir);
-	else result = false;
-	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(result));
+	mpi_response response;
+	bool success = true;
+	if (!read(agent_id, in) || !read(dir, in)) {
+		response = mpi_response::SERVER_PARSE_MESSAGE_ERROR;
+		success = false;
+	} else {
+		if (!data.agent_ids.contains(agent_id))
+			response = mpi_response::INVALID_AGENT_ID;
+		else if (sim.turn(agent_id, dir))
+			response = mpi_response::TRUE;
+		else response = mpi_response::FALSE;
+	}
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(response));
 	fixed_width_stream<memory_stream> out(mem_stream);
 
-	return write(message_type::TURN_RESPONSE, out)
-		&& write(agent_id, out) && write(result, out)
-		&& send_message(connection, mem_stream.buffer, mem_stream.position);
+	success &= write(message_type::TURN_RESPONSE, out)
+			&& write(agent_id, out) && write(response, out)
+			&& send_message(connection, mem_stream.buffer, mem_stream.position);
+	return success;
 }
 
 template<typename Stream, typename SimulatorData>
@@ -215,26 +254,32 @@ inline bool receive_get_map(
 		simulator<SimulatorData>& sim)
 {
 	position bottom_left, top_right;
-	if (!read(bottom_left, in) || !read(top_right, in))
-		return false;
-
-	hash_map<position, patch_state> patches(32);
-	if (!sim.get_map(bottom_left, top_right, patches)) {
-		for (auto entry : patches)
-			free(entry.value);
-		patches.clear();
+	mpi_response response;
+	hash_map<position, patch_state> patches(32, alloc_position_keys);
+	bool success = true;
+	if (!read(bottom_left, in) || !read(top_right, in)) {
+		response = mpi_response::SERVER_PARSE_MESSAGE_ERROR;
+		success = false;
+	} else {
+		if (sim.get_map(bottom_left, top_right, patches)) {
+			response = mpi_response::TRUE;
+		} else {
+			for (auto entry : patches)
+				free(entry.value);
+			patches.clear();
+			response = mpi_response::FALSE;
+		}
 	}
 
 	default_scribe scribe;
-	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(hash_map<position, patch_state>));
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(response) + sizeof(hash_map<position, patch_state>));
 	fixed_width_stream<memory_stream> out(mem_stream);
-	if (!write(message_type::GET_MAP_RESPONSE, out)
-	 || !write(patches, out, scribe, sim.get_config())
-	 || !send_message(connection, mem_stream.buffer, mem_stream.position))
-		return false;
+	success &= write(message_type::GET_MAP_RESPONSE, out) && write(response, out)
+			&& (response != mpi_response::TRUE || write(patches, out, scribe, sim.get_config()))
+			&& send_message(connection, mem_stream.buffer, mem_stream.position);
 	for (auto entry : patches)
 		free(entry.value);
-	return true;
+	return success;
 }
 
 template<typename Stream, typename SimulatorData>
@@ -244,17 +289,26 @@ inline bool receive_set_active(
 		simulator<SimulatorData>& sim)
 {
 	uint64_t agent_id = UINT64_MAX;
-	bool active;
-	if (!read(agent_id, in) || !read(active, in))
-		return false;
-	if (data.agent_ids.contains(agent_id))
-		sim.set_agent_active(agent_id, active);
-	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id));
+	bool active, success = true;
+	mpi_response response;
+	if (!read(agent_id, in) || !read(active, in)) {
+		response = mpi_response::SERVER_PARSE_MESSAGE_ERROR;
+		success = false;
+	} else {
+		if (!data.agent_ids.contains(agent_id)) {
+			response = mpi_response::INVALID_AGENT_ID;
+		} else {
+			sim.set_agent_active(agent_id, active);
+			response = mpi_response::TRUE;
+		}
+	}
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(response));
 	fixed_width_stream<memory_stream> out(mem_stream);
 
-	return write(message_type::SET_ACTIVE_RESPONSE, out)
-		&& write(agent_id, out)
-		&& send_message(connection, mem_stream.buffer, mem_stream.position);
+	success &= write(message_type::SET_ACTIVE_RESPONSE, out)
+			&& write(agent_id, out) && write(response, out)
+			&& send_message(connection, mem_stream.buffer, mem_stream.position);
+	return success;
 }
 
 template<typename Stream, typename SimulatorData>
@@ -264,18 +318,27 @@ inline bool receive_is_active(
 		simulator<SimulatorData>& sim)
 {
 	uint64_t agent_id = UINT64_MAX;
-	if (!read(agent_id, in))
-		return false;
-	bool result;
-	if (data.agent_ids.contains(agent_id))
-		result = sim.is_agent_active(agent_id);
-	else result = true;
-	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(result));
+	bool success = true;
+	mpi_response response;
+	if (!read(agent_id, in)) {
+		response = mpi_response::SERVER_PARSE_MESSAGE_ERROR;
+		success = false;
+	} else {
+		if (!data.agent_ids.contains(agent_id)) {
+			response = mpi_response::INVALID_AGENT_ID;
+		} else if (sim.is_agent_active(agent_id)) {
+			response = mpi_response::TRUE;
+		} else {
+			response = mpi_response::FALSE;
+		}
+	}
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(response));
 	fixed_width_stream<memory_stream> out(mem_stream);
 
-	return write(message_type::IS_ACTIVE_RESPONSE, out)
-		&& write(agent_id, out) && write(result, out)
-		&& send_message(connection, mem_stream.buffer, mem_stream.position);
+	success &= write(message_type::IS_ACTIVE_RESPONSE, out)
+			&& write(agent_id, out) && write(response, out)
+			&& send_message(connection, mem_stream.buffer, mem_stream.position);
+	return success;
 }
 
 template<typename SimulatorData>
@@ -541,10 +604,12 @@ inline bool init(client<ClientData>& new_client) {
 /**
  * Sends an `add_agent` message to the server from the client `c`. Once the
  * server responds, the function
- * `on_add_agent(ClientType&, uint64_t, agent_state&)` will be invoked, where
- * the first argument is `c`, the second is the ID of the new agent
- * (which will be UINT64_MAX upon error), and the third is the state of the new
- * agent.
+ * `on_add_agent(ClientType&, uint64_t, mpi_response, agent_state&)` will be
+ * invoked, where the first argument is `c`, the second is the ID of the new
+ * agent (which will be UINT64_MAX upon error), and the third is the response
+ * (TRUE if successful, and a different value if an error occurred), and the
+ * fourth is the state of the new agent. Note the fourth argument is
+ * uninitialized if an error occurred.
  *
  * \returns `true` if the sending is successful; `false` otherwise.
  */
@@ -556,9 +621,10 @@ bool send_add_agent(ClientType& c) {
 
 /**
  * Sends a `move` message to the server from the client `c`. Once the server
- * responds, the function `on_move(ClientType&, uint64_t, bool)` will be
- * invoked, where the first argument is `c`, the second is `agent_id`, and the
- * third is whether the move was successfully enqueued by the server.
+ * responds, the function `on_move(ClientType&, uint64_t, mpi_response)` will
+ * be invoked, where the first argument is `c`, the second is `agent_id`, and
+ * the third is the response: TRUE if successful, and a different value if an
+ * error occurred.
  *
  * \returns `true` if the sending is successful; `false` otherwise.
  */
@@ -575,9 +641,10 @@ bool send_move(ClientType& c, uint64_t agent_id, direction dir, unsigned int num
 
 /**
  * Sends a `turn` message to the server from the client `c`. Once the server
- * responds, the function `on_turn(ClientType&, uint64_t, bool)` will be
- * invoked, where the first argument is `c`, the second is `agent_id`, and the
- * third is whether the turn was successfully enqueued by the server.
+ * responds, the function `on_turn(ClientType&, uint64_t, mpi_response)` will
+ * be invoked, where the first argument is `c`, the second is `agent_id`, and
+ * the third is the response: TRUE if successful, and a different value if an
+ * error occurred.
  *
  * \returns `true` if the sending is successful; `false` otherwise.
  */
@@ -594,10 +661,12 @@ bool send_turn(ClientType& c, uint64_t agent_id, direction dir) {
 /**
  * Sends an `get_map` message to the server from the client `c`. Once the
  * server responds, the function
- * `on_get_map(ClientType&, hash_map<position, patch_state>*)` will be invoked,
- * where the first argument is `c`, and the second is a pointer to a map
- * containing the state information of the retrieved patches. Memory ownership
- * of the hash_map is passed to `on_get_map`.
+ * `on_get_map(ClientType&, mpi_response, hash_map<position, patch_state>*)`
+ * will be invoked, where the first argument is `c`, and the second is the
+ * response (TRUE if successful, and a different value if an error occurred),
+ * and the third is a pointer to a map containing the state information of the
+ * retrieved patches. The third argument is uninitialized if the mpi_response
+ * is not TRUE. Memory ownership of the hash_map is passed to `on_get_map`.
  *
  * \param bottom_left The bottom-left corner of the bounding box containing the
  * 		patches we wish to retrieve.
@@ -616,8 +685,10 @@ bool send_get_map(ClientType& c, position bottom_left, position top_right) {
 
 /**
  * Sends an `set_active` message to the server from the client `c`. Once the
- * server responds, the function `on_set_active(ClientType&, uint64_t)` will be
- * invoked, where the first argument is `c`, and the second is `agent_id`.
+ * server responds, the function
+ * `on_set_active(ClientType&, uint64_t, mpi_response)` will be invoked, where
+ * the first argument is `c`, the second is `agent_id`, and the third is the
+ * response: TRUE if successful, and a different value if an error occurred.
  *
  * \returns `true` if the sending is successful; `false` otherwise.
  */
@@ -632,9 +703,11 @@ bool send_set_active(ClientType& c, uint64_t agent_id, bool active) {
 
 /**
  * Sends an `is_active` message to the server from the client `c`. Once the
- * server responds, the function `on_is_active(ClientType&, uint64_t, bool)`
- * will be invoked, where the first argument is `c`, and the second is
- * `agent_id`, and the third is whether the agent is active.
+ * server responds, the function
+ * `on_is_active(ClientType&, uint64_t, mpi_response)` will be invoked, where
+ * the first argument is `c`, and the second is `agent_id`, and the third is
+ * the response: TRUE if active, FALSE if inactive, or a different value if an
+ * error occurred.
  *
  * \returns `true` if the sending is successful; `false` otherwise.
  */
@@ -649,103 +722,146 @@ bool send_is_active(ClientType& c, uint64_t agent_id) {
 
 template<typename ClientType>
 inline bool receive_add_agent_response(ClientType& c) {
-	uint64_t agent_id;
+	mpi_response response;
+	uint64_t agent_id = UINT64_MAX;
+	bool success = true;
 	agent_state& state = *((agent_state*) alloca(sizeof(agent_state)));
 	fixed_width_stream<socket_type> in(c.connection);
-	if (!read(agent_id, in)) return false;
-	if (agent_id != UINT64_MAX && !read(state, in, c.config))
-		return false;
-	on_add_agent(c, agent_id, state);
+	if (!read(agent_id, in)) {
+		response = mpi_response::CLIENT_PARSE_MESSAGE_ERROR;
+		success = false;
+	} else if (agent_id == UINT64_MAX) {
+		response = mpi_response::FALSE;
+	} else if (!read(state, in, c.config)) {
+		response = mpi_response::CLIENT_PARSE_MESSAGE_ERROR;
+		success = false;
+	} else {
+		response = mpi_response::TRUE;
+	}
+	on_add_agent(c, agent_id, response, state);
 	if (agent_id != UINT64_MAX) free(state);
-	return true;
+	return success;
 }
 
 template<typename ClientType>
 inline bool receive_move_response(ClientType& c) {
-	bool move_success;
+	mpi_response response;
 	uint64_t agent_id = 0;
+	bool success = true;
 	fixed_width_stream<socket_type> in(c.connection);
-	if (!read(agent_id, in) || !read(move_success, in))
-		return false;
-	on_move(c, agent_id, move_success);
-	return true;
+	if (!read(agent_id, in) || !read(response, in)) {
+		response = mpi_response::CLIENT_PARSE_MESSAGE_ERROR;
+		success = false;
+	}
+	on_move(c, agent_id, response);
+	return success;
 }
 
 template<typename ClientType>
 inline bool receive_turn_response(ClientType& c) {
-	bool turn_success;
+	mpi_response response;
 	uint64_t agent_id = 0;
+	bool success = true;
 	fixed_width_stream<socket_type> in(c.connection);
-	if (!read(agent_id, in) || !read(turn_success, in))
-		return false;
-	on_turn(c, agent_id, turn_success);
-	return true;
+	if (!read(agent_id, in) || !read(response, in)) {
+		response = mpi_response::CLIENT_PARSE_MESSAGE_ERROR;
+		success = false;
+	}
+	on_turn(c, agent_id, response);
+	return success;
 }
 
 template<typename ClientType>
 inline bool receive_get_map_response(ClientType& c) {
+	mpi_response response;
 	default_scribe scribe;
+	bool success = true;
+	hash_map<position, patch_state>* patches = NULL;
 	fixed_width_stream<socket_type> in(c.connection);
-	hash_map<position, patch_state>* patches =
-			(hash_map<position, patch_state>*) malloc(sizeof(hash_map<position, patch_state>));
-	if (patches == NULL) {
-		fprintf(stderr, "receive_get_map_response ERROR: Out of memory.\n");
-		return false;
-	} else if (!read(*patches, in, alloc_position_keys, scribe, c.config)) {
-		free(patches); return false;
+	if (!read(response, in)) {
+		response = mpi_response::CLIENT_PARSE_MESSAGE_ERROR;
+		success = false;
+	} else if (response == mpi_response::TRUE) {
+		patches = (hash_map<position, patch_state>*) malloc(sizeof(hash_map<position, patch_state>));
+		if (patches == NULL) {
+			fprintf(stderr, "receive_get_map_response ERROR: Out of memory.\n");
+			response = mpi_response::CLIENT_PARSE_MESSAGE_ERROR;
+			success = false;
+		} else if (!read(*patches, in, alloc_position_keys, scribe, c.config)) {
+			response = mpi_response::CLIENT_PARSE_MESSAGE_ERROR;
+			free(patches); success = false;
+		}
 	}
 	/* ownership of `patches` is passed to the callee */
-	on_get_map(c, patches);
-	return true;
+	on_get_map(c, response, patches);
+	return success;
 }
 
 template<typename ClientType>
 inline bool receive_set_active_response(ClientType& c) {
+	mpi_response response;
 	uint64_t agent_id = 0;
+	bool success = true;
 	fixed_width_stream<socket_type> in(c.connection);
-	if (!read(agent_id, in))
-		return false;
-	on_set_active(c, agent_id);
-	return true;
+	if (!read(agent_id, in) || !read(response, in)) {
+		response = mpi_response::CLIENT_PARSE_MESSAGE_ERROR;
+		success = false;
+	}
+	on_set_active(c, agent_id, response);
+	return success;
 }
 
 template<typename ClientType>
 inline bool receive_is_active_response(ClientType& c) {
+	mpi_response response;
 	uint64_t agent_id = 0;
-	bool active;
+	bool success = true;
 	fixed_width_stream<socket_type> in(c.connection);
-	if (!read(agent_id, in) || !read(active, in))
-		return false;
-	on_is_active(c, agent_id, active);
-	return true;
+	if (!read(agent_id, in) || !read(response, in)) {
+		response = mpi_response::CLIENT_PARSE_MESSAGE_ERROR;
+		success = false;
+	}
+	on_is_active(c, agent_id, response);
+	return success;
 }
 
 template<typename ClientType>
 inline bool receive_step_response(ClientType& c) {
+	bool success = true;
+	mpi_response response = mpi_response::TRUE;
 	array<uint64_t>& agent_ids = *((array<uint64_t>*) alloca(sizeof(array<uint64_t>)));
 
 	fixed_width_stream<socket_type> in(c.connection);
-	if (!read(agent_ids, in)) return false;
-
-	agent_state* agents = (agent_state*) malloc(sizeof(agent_state) * agent_ids.length);
-	if (agents == NULL) {
-		fprintf(stderr, "receive_step_response ERROR: Out of memory.\n");
-		free(agent_ids); return false;
-	}
-
-	for (unsigned int i = 0; i < agent_ids.length; i++) {
-		if (!read(agents[i], in, c.config)) {
-			for (unsigned int j = 0; j < i; j++) free(agents[j]);
-			free(agents); free(agent_ids); return false;
+	agent_state* agents = NULL;
+	if (!read(agent_ids, in)) {
+		response = mpi_response::CLIENT_PARSE_MESSAGE_ERROR;
+		agent_ids.data = NULL; success = false;
+	} else {
+		agents = (agent_state*) malloc(sizeof(agent_state) * agent_ids.length);
+		if (agents == NULL) {
+			fprintf(stderr, "receive_step_response ERROR: Out of memory.\n");
+			response = mpi_response::CLIENT_PARSE_MESSAGE_ERROR;
+			free(agent_ids); success = false;
+		} else {
+			for (unsigned int i = 0; i < agent_ids.length; i++) {
+				if (!read(agents[i], in, c.config)) {
+					for (unsigned int j = 0; j < i; j++) free(agents[j]);
+					response = mpi_response::CLIENT_PARSE_MESSAGE_ERROR;
+					free(agents); free(agent_ids); agents = NULL;
+					success = false; break;
+				}
+			}
 		}
 	}
 
-	on_step(c, (const array<uint64_t>&) agent_ids, (const agent_state*) agents);
-	for (unsigned int i = 0; i < agent_ids.length; i++)
-		free(agents[i]);
-	free(agent_ids);
-	free(agents);
-	return true;
+	on_step(c, response, (const array<uint64_t>&) agent_ids, (const agent_state*) agents);
+	if (agent_ids.data != NULL) {
+		for (unsigned int i = 0; i < agent_ids.length; i++)
+			free(agents[i]);
+		free(agent_ids);
+	}
+	if (agents != NULL) free(agents);
+	return success;
 }
 
 template<typename ClientType>

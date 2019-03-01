@@ -302,7 +302,9 @@ struct client_data {
 	position pos;
 };
 
-void on_add_agent(client<client_data>& c, uint64_t agent_id, const agent_state& state) {
+void on_add_agent(client<client_data>& c, uint64_t agent_id,
+		mpi_response response, const agent_state& state)
+{
 	unsigned int id = c.data.index;
 	std::unique_lock<std::mutex> lck(locks[id]);
 	waiting_for_server[id] = false;
@@ -311,23 +313,27 @@ void on_add_agent(client<client_data>& c, uint64_t agent_id, const agent_state& 
 	conditions[id].notify_one();
 }
 
-void on_move(client<client_data>& c, uint64_t agent_id, bool request_success) {
+void on_move(client<client_data>& c, uint64_t agent_id, mpi_response response)
+{
 	unsigned int id = c.data.index;
 	std::unique_lock<std::mutex> lck(locks[id]);
 	waiting_for_server[id] = false;
-	c.data.action_result = request_success;
+	c.data.action_result = (response == mpi_response::TRUE);
 	conditions[id].notify_one();
 }
 
-void on_turn(client<client_data>& c, uint64_t agent_id, bool request_success) {
+void on_turn(client<client_data>& c, uint64_t agent_id, mpi_response response) {
 	unsigned int id = c.data.index;
 	std::unique_lock<std::mutex> lck(locks[id]);
 	waiting_for_server[id] = false;
-	c.data.action_result = request_success;
+	c.data.action_result = (response == mpi_response::TRUE);
 	conditions[id].notify_one();
 }
 
-void on_get_map(client<client_data>& c, const hash_map<position, patch_state>* map) {
+void on_get_map(
+		client<client_data>& c, mpi_response response,
+		const hash_map<position, patch_state>* map)
+{
 	unsigned int id = c.data.index;
 	std::unique_lock<std::mutex> lck(locks[id]);
 	waiting_for_server[id] = false;
@@ -335,22 +341,23 @@ void on_get_map(client<client_data>& c, const hash_map<position, patch_state>* m
 	conditions[id].notify_one();
 }
 
-void on_set_active(client<client_data>& c, uint64_t agent_id) {
+void on_set_active(client<client_data>& c, uint64_t agent_id, mpi_response response) {
 	unsigned int id = c.data.index;
 	std::unique_lock<std::mutex> lck(locks[id]);
 	waiting_for_server[id] = false;
 	conditions[id].notify_one();
 }
 
-void on_is_active(client<client_data>& c, uint64_t agent_id, bool active) {
+void on_is_active(client<client_data>& c, uint64_t agent_id, mpi_response response) {
 	unsigned int id = c.data.index;
 	std::unique_lock<std::mutex> lck(locks[id]);
 	waiting_for_server[id] = false;
-	c.data.action_result = active;
+	c.data.action_result = (response == mpi_response::TRUE);
 	conditions[id].notify_one();
 }
 
 void on_step(client<client_data>& c,
+		mpi_response response,
 		const array<uint64_t>& agent_ids,
 		const agent_state* agent_states)
 {
