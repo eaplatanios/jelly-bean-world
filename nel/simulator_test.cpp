@@ -16,26 +16,25 @@ inline void set_interaction_args(
 		unsigned int second_item_type, interaction_function interaction,
 		std::initializer_list<float> args)
 {
-	item_types[first_item_type].interaction_fns[second_item_type] = interaction;
-	item_types[first_item_type].interaction_fn_arg_counts[second_item_type] = (unsigned int) args.size();
-	item_types[first_item_type].interaction_fn_args[second_item_type] = (float*) malloc(max((size_t) 1, sizeof(float) * args.size()));
+	item_types[first_item_type].interaction_fns[second_item_type].fn = interaction;
+	item_types[first_item_type].interaction_fns[second_item_type].arg_count = (unsigned int) args.size();
+	item_types[first_item_type].interaction_fns[second_item_type].args = (float*) malloc(max((size_t) 1, sizeof(float) * args.size()));
 
 	unsigned int counter = 0;
-	for (auto i = args.begin(); i != args.end(); i++) {
-		item_types[first_item_type].interaction_fn_args[second_item_type][counter] = *i;
-		counter++;
-	}
+	for (auto i = args.begin(); i != args.end(); i++)
+		item_types[first_item_type].interaction_fns[second_item_type].args[counter++] = *i;
 }
 
 enum class movement_pattern {
 	RADIAL,
-	BACK_AND_FORTH
+	BACK_AND_FORTH,
+	TURNING
 };
 
 constexpr unsigned int agent_count = 1;
-constexpr unsigned int max_time = 100;
+constexpr unsigned int max_time = 10000000;
 constexpr movement_conflict_policy collision_policy = movement_conflict_policy::FIRST_COME_FIRST_SERVED;
-constexpr movement_pattern move_pattern = movement_pattern::RADIAL;
+constexpr movement_pattern move_pattern = movement_pattern::TURNING;
 unsigned int sim_time = 0;
 bool agent_direction[agent_count];
 bool waiting_for_server[agent_count];
@@ -88,24 +87,60 @@ inline direction next_direction(position agent_position,
 	}
 }
 
+inline void get_next_move(
+		position current_position, unsigned int i,
+		bool& reverse, direction& dir, bool& is_move)
+{
+	unsigned int counter = sim_time + 1;
+	switch (move_pattern) {
+	case movement_pattern::RADIAL:
+		is_move = true;
+		dir = next_direction(current_position, (2 * M_PI * i) / agent_count); break;
+	case movement_pattern::BACK_AND_FORTH:
+		is_move = true;
+		dir = next_direction(current_position, -10 * (int64_t) agent_count, 10 * agent_count, reverse); break;
+	case movement_pattern::TURNING:
+		if (counter % 20 == 0) {
+			is_move = false;
+			dir = direction::LEFT;
+		} else if (counter % 20 == 5) {
+			is_move = false;
+			dir = direction::LEFT;
+		} else if (counter % 20 == 10) {
+			is_move = false;
+			dir = direction::RIGHT;
+		} else if (counter % 20 == 15) {
+			is_move = false;
+			dir = direction::RIGHT;
+		} else {
+			is_move = true;
+			dir = direction::UP;
+		}
+	}
+}
+
 inline bool try_move(
 		simulator<empty_data>& sim,
 		unsigned int i, bool& reverse)
 {
 	position current_position = agent_positions[i];
 
-	direction dir;
-	switch (move_pattern) {
-	case movement_pattern::RADIAL:
-		dir = next_direction(current_position, (2 * M_PI * i) / agent_count); break;
-	case movement_pattern::BACK_AND_FORTH:
-		dir = next_direction(current_position, -10 * (int64_t) agent_count, 10 * agent_count, reverse); break;
-	}
+	direction dir; bool is_move;
+	get_next_move(current_position, i, reverse, dir, is_move);
 
-	if (!sim.move((uint64_t) i, dir, 1)) {
+	if (is_move && !sim.move((uint64_t) i, dir, 1)) {
 		print_lock.lock();
 		print("ERROR: Unable to move agent ", out);
 		print(i, out); print(" from ", out);
+		print(current_position, out);
+		print(" in direction ", out);
+		print(dir, out); print(".\n", out);
+		print_lock.unlock();
+		return false;
+	} else if (!is_move && !sim.turn((uint64_t) i, dir)) {
+		print_lock.lock();
+		print("ERROR: Unable to turn agent ", out);
+		print(i, out); print(" at ", out);
 		print(current_position, out);
 		print(" in direction ", out);
 		print(dir, out); print(".\n", out);
@@ -300,6 +335,21 @@ void on_get_map(client<client_data>& c, const hash_map<position, patch_state>* m
 	conditions[id].notify_one();
 }
 
+void on_set_active(client<client_data>& c, uint64_t agent_id) {
+	unsigned int id = c.data.index;
+	std::unique_lock<std::mutex> lck(locks[id]);
+	waiting_for_server[id] = false;
+	conditions[id].notify_one();
+}
+
+void on_is_active(client<client_data>& c, uint64_t agent_id, bool active) {
+	unsigned int id = c.data.index;
+	std::unique_lock<std::mutex> lck(locks[id]);
+	waiting_for_server[id] = false;
+	c.data.action_result = active;
+	conditions[id].notify_one();
+}
+
 void on_step(client<client_data>& c,
 		const array<uint64_t>& agent_ids,
 		const agent_state* agent_states)
@@ -333,19 +383,19 @@ inline void wait_for_server(std::condition_variable& cv,
 inline bool mpi_try_move(
 		client<client_data>& c, unsigned int i, bool& reverse)
 {
-	direction dir;
-	switch (move_pattern) {
-	case movement_pattern::RADIAL:
-		dir = next_direction(agent_positions[i], (2 * M_PI * i) / agent_count); break;
-	case movement_pattern::BACK_AND_FORTH:
-		dir = next_direction(agent_positions[i], -10 * (int64_t) agent_count, 10 * agent_count, reverse); break;
-	}
+	direction dir; bool is_move;
+	get_next_move(agent_positions[i], i, reverse, dir, is_move);
 
 	/* send move request */
 	waiting_for_server[i] = true;
-	if (!send_move(c, c.data.agent_id, dir, 1)) {
+	if (is_move && !send_move(c, c.data.agent_id, dir, 1)) {
 		print_lock.lock();
 		fprintf(out, "ERROR: Unable to send move request.\n");
+		print_lock.unlock();
+		return false;
+	} else if (!is_move && !send_turn(c, c.data.agent_id, dir)) {
+		print_lock.lock();
+		fprintf(out, "ERROR: Unable to send turn request.\n");
 		print_lock.unlock();
 		return false;
 	}
@@ -354,11 +404,19 @@ inline bool mpi_try_move(
 
 	if (!c.data.action_result) {
 		print_lock.lock();
-		print("ERROR: Unable to move agent ", out);
-		print(i, out); print(" from ", out);
-		print(c.data.pos, out);
-		print(" in direction ", out);
-		print(dir, out); print(".\n", out);
+		if (is_move) {
+			print("ERROR: Unable to move agent ", out);
+			print(i, out); print(" from ", out);
+			print(c.data.pos, out);
+			print(" in direction ", out);
+			print(dir, out); print(".\n", out);
+		} else {
+			print("ERROR: Unable to turn agent ", out);
+			print(i, out); print(" at ", out);
+			print(c.data.pos, out);
+			print(" in direction ", out);
+			print(dir, out); print(".\n", out);
+		}
 		print_lock.unlock();
 		return false;
 	}
@@ -496,7 +554,7 @@ int main(int argc, const char** argv)
 	config.deleted_item_lifetime = 2000;
 
 	/* configure item types */
-	unsigned int item_type_count = 3;
+	unsigned int item_type_count = 4;
 	config.item_types.ensure_capacity(item_type_count);
 	config.item_types[0].name = "banana";
 	config.item_types[0].scent = (float*) calloc(config.scent_dimension, sizeof(float));
@@ -524,39 +582,59 @@ int main(int argc, const char** argv)
 	config.item_types[2].scent[2] = 1.0f;
 	config.item_types[2].color[2] = 1.0f;
 	config.item_types[2].blocks_movement = false;
+	config.item_types[3].name = "wall";
+	config.item_types[3].scent = (float*) calloc(config.scent_dimension, sizeof(float));
+	config.item_types[3].color = (float*) calloc(config.color_dimension, sizeof(float));
+	config.item_types[3].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
+	config.item_types[3].required_item_costs = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
+	config.item_types[3].color[0] = 0.5f;
+	config.item_types[3].color[1] = 0.5f;
+	config.item_types[3].color[2] = 0.5f;
+	config.item_types[3].required_item_counts[3] = 1;
+	config.item_types[3].blocks_movement = true;
 	config.item_types.length = item_type_count;
 
-	config.item_types[0].intensity_fn = constant_intensity_fn;
-	config.item_types[0].intensity_fn_arg_count = 1;
-	config.item_types[0].intensity_fn_args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[0].intensity_fn_args[0] = -5.0f;
-	config.item_types[0].interaction_fns = (interaction_function*) malloc(sizeof(interaction_function) * config.item_types.length);
-	config.item_types[0].interaction_fn_args = (float**) malloc(sizeof(float*) * config.item_types.length);
-	config.item_types[0].interaction_fn_arg_counts = (unsigned int*) malloc(sizeof(unsigned int) * config.item_types.length);
-	config.item_types[1].intensity_fn = constant_intensity_fn;
-	config.item_types[1].intensity_fn_arg_count = 1;
-	config.item_types[1].intensity_fn_args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[1].intensity_fn_args[0] = -5.4f;
-	config.item_types[1].interaction_fns = (interaction_function*) malloc(sizeof(interaction_function) * config.item_types.length);
-	config.item_types[1].interaction_fn_args = (float**) malloc(sizeof(float*) * config.item_types.length);
-	config.item_types[1].interaction_fn_arg_counts = (unsigned int*) malloc(sizeof(unsigned int) * config.item_types.length);
-	config.item_types[2].intensity_fn = constant_intensity_fn;
-	config.item_types[2].intensity_fn_arg_count = 1;
-	config.item_types[2].intensity_fn_args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[2].intensity_fn_args[0] = -5.0f;
-	config.item_types[2].interaction_fns = (interaction_function*) malloc(sizeof(interaction_function) * config.item_types.length);
-	config.item_types[2].interaction_fn_args = (float**) malloc(sizeof(float*) * config.item_types.length);
-	config.item_types[2].interaction_fn_arg_counts = (unsigned int*) malloc(sizeof(unsigned int) * config.item_types.length);
+	config.item_types[0].intensity_fn.fn = constant_intensity_fn;
+	config.item_types[0].intensity_fn.arg_count = 1;
+	config.item_types[0].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
+	config.item_types[0].intensity_fn.args[0] = -5.3f;
+	config.item_types[0].interaction_fns = (energy_function<interaction_function>*)
+			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
+	config.item_types[1].intensity_fn.fn = constant_intensity_fn;
+	config.item_types[1].intensity_fn.arg_count = 1;
+	config.item_types[1].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
+	config.item_types[1].intensity_fn.args[0] = -5.0f;
+	config.item_types[1].interaction_fns = (energy_function<interaction_function>*)
+			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
+	config.item_types[2].intensity_fn.fn = constant_intensity_fn;
+	config.item_types[2].intensity_fn.arg_count = 1;
+	config.item_types[2].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
+	config.item_types[2].intensity_fn.args[0] = -5.3f;
+	config.item_types[2].interaction_fns = (energy_function<interaction_function>*)
+			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
+	config.item_types[3].intensity_fn.fn = constant_intensity_fn;
+	config.item_types[3].intensity_fn.arg_count = 1;
+	config.item_types[3].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
+	config.item_types[3].intensity_fn.args[0] = 0.0f;
+	config.item_types[3].interaction_fns = (energy_function<interaction_function>*)
+			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 
 	set_interaction_args(config.item_types.data, 0, 0, piecewise_box_interaction_fn, {10.0f, 200.0f, 0.0f, -6.0f});
 	set_interaction_args(config.item_types.data, 0, 1, piecewise_box_interaction_fn, {200.0f, 0.0f, -6.0f, -6.0f});
 	set_interaction_args(config.item_types.data, 0, 2, piecewise_box_interaction_fn, {10.0f, 200.0f, 2.0f, -100.0f});
-	set_interaction_args(config.item_types.data, 1, 0, zero_interaction_fn, {});
+	set_interaction_args(config.item_types.data, 0, 3, zero_interaction_fn, {});
+	set_interaction_args(config.item_types.data, 1, 0, piecewise_box_interaction_fn, {200.0f, 0.0f, -6.0f, -6.0f});
 	set_interaction_args(config.item_types.data, 1, 1, zero_interaction_fn, {});
 	set_interaction_args(config.item_types.data, 1, 2, piecewise_box_interaction_fn, {200.0f, 0.0f, -100.0f, -100.0f});
+	set_interaction_args(config.item_types.data, 1, 3, zero_interaction_fn, {});
 	set_interaction_args(config.item_types.data, 2, 0, piecewise_box_interaction_fn, {10.0f, 200.0f, 2.0f, -100.0f});
 	set_interaction_args(config.item_types.data, 2, 1, piecewise_box_interaction_fn, {200.0f, 0.0f, -100.0f, -100.0f});
 	set_interaction_args(config.item_types.data, 2, 2, piecewise_box_interaction_fn, {10.0f, 200.0f, 0.0f, -6.0f});
+	set_interaction_args(config.item_types.data, 2, 3, zero_interaction_fn, {});
+	set_interaction_args(config.item_types.data, 3, 0, zero_interaction_fn, {});
+	set_interaction_args(config.item_types.data, 3, 1, zero_interaction_fn, {});
+	set_interaction_args(config.item_types.data, 3, 2, zero_interaction_fn, {});
+	set_interaction_args(config.item_types.data, 3, 3, cross_interaction_fn, {10.0f, 15.0f, 20.0f, -200.0f, -20.0f, 1.0f});
 
 #if defined(USE_MPI)
 	test_mpi(config);

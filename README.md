@@ -60,7 +60,7 @@ class SimpleAgent(nel.Agent):
 
 # specify the item types
 items = []
-items.append(nel.Item("banana", [1.0, 1.0, 0.0], [1.0, 1.0, 0.0], [0], [0], True,
+items.append(nel.Item("banana", [1.0, 1.0, 0.0], [1.0, 1.0, 0.0], [0], [0], False,
         intensity_fn=nel.IntensityFunction.CONSTANT, intensity_fn_args=[-2.0],
         interaction_fns=[[nel.InteractionFunction.PIECEWISE_BOX, 40.0, 200.0, 0.0, -40.0]]))
 
@@ -186,15 +186,13 @@ inline void set_interaction_args(
     unsigned int second_item_type, interaction_function interaction,
     std::initializer_list<float> args)
 {
-  item_types[first_item_type].interaction_fns[second_item_type] = interaction;
-  item_types[first_item_type].interaction_fn_arg_counts[second_item_type] = (unsigned int) args.size();
-  item_types[first_item_type].interaction_fn_args[second_item_type] = (float*) malloc(max((size_t) 1, sizeof(float) * args.size()));
+  item_types[first_item_type].interaction_fns[second_item_type].fn = interaction;
+  item_types[first_item_type].interaction_fns[second_item_type].arg_count = (unsigned int) args.size();
+  item_types[first_item_type].interaction_fns[second_item_type].args = (float*) malloc(max((size_t) 1, sizeof(float) * args.size()));
 
   unsigned int counter = 0;
-  for (auto i = args.begin(); i != args.end(); i++) {
-    item_types[first_item_type].interaction_fn_args[second_item_type][counter] = *i;
-    counter++;
-  }
+  for (auto i = args.begin(); i != args.end(); i++)
+    item_types[first_item_type].interaction_fns[second_item_type].args[counter++] = *i;
 }
 
 void on_step(const simulator<empty_data>* sim, const array<agent_state*>& agents, uint64_t time) { }
@@ -232,13 +230,12 @@ int main(int argc, const char** argv) {
   config.item_types.length = 1;
 
   /* specify the intensity and interaction function parameters */
-  config.item_types[0].intensity_fn = constant_intensity_fn;
-  config.item_types[0].intensity_fn_arg_count = 1;
-  config.item_types[0].intensity_fn_args = (float*) malloc(sizeof(float) * 1);
-  config.item_types[0].intensity_fn_args[0] = -2.0f;
-  config.item_types[0].interaction_fns = (interaction_function*) malloc(sizeof(interaction_function) * config.item_types.length);
-  config.item_types[0].interaction_fn_args = (float**) malloc(sizeof(float*) * config.item_types.length);
-  config.item_types[0].interaction_fn_arg_counts = (unsigned int*) malloc(sizeof(unsigned int) * config.item_types.length);
+  config.item_types[0].intensity_fn.fn = constant_intensity_fn;
+  config.item_types[0].intensity_fn.arg_count = 1;
+  config.item_types[0].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
+  config.item_types[0].intensity_fn.args[0] = -2.0f;
+  config.item_types[0].interaction_fns = (energy_function<interaction_function>*)
+    malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
   set_interaction_args(config.item_types.data, 0, 0, piecewise_box_interaction_fn, {40.0f, 200.0f, 0.0f, -40.0f});
 
   /* create a local simulator */
