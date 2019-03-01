@@ -515,13 +515,13 @@ inline void check_response(mpi_response response, const char* prefix) {
   switch (response) {
   case mpi_response::INVALID_AGENT_ID:
     message = concat(prefix, "Invalid agent ID.");
-    if (message != NULL) { PyErr_SetString(mpi_error, message); free(message); } break;
+    if (message != NULL) { /* TODO: communicate error `message` to swift */ free(message); } break;
   case mpi_response::SERVER_PARSE_MESSAGE_ERROR:
     message = concat(prefix, "Server was unable to parse MPI message from client.");
-    if (message != NULL) { PyErr_SetString(mpi_error, message); free(message); } break;
+    if (message != NULL) { /* TODO: communicate error `message` to swift */ free(message); } break;
   case mpi_response::CLIENT_PARSE_MESSAGE_ERROR:
     message = concat(prefix, "Client was unable to parse MPI message from server.");
-    if (message != NULL) { PyErr_SetString(mpi_error, message); free(message); } break;
+    if (message != NULL) { /* TODO: communicate error `message` to swift */ free(message); } break;
   case mpi_response::TRUE:
   case mpi_response::FALSE:
     break;
@@ -1104,12 +1104,12 @@ const SimulationMap simulatorMap(
     SimulationMap map;
     if (client_ptr->data.server_response != mpi_response::TRUE)
       return EMPTY_SIM_MAP;
-    if (!init(map, *client_ptr->data.response.map, client_ptr->config))
+    if (!init(map, *client_ptr->data.response_data.map, client_ptr->config))
       map = EMPTY_SIM_MAP;
-    for (auto entry : *client_ptr->data.response.map)
+    for (auto entry : *client_ptr->data.response_data.map)
       free(entry.value);
-    free(*client_ptr->data.response.map);
-    free(client_ptr->data.response.map);
+    free(*client_ptr->data.response_data.map);
+    free(client_ptr->data.response_data.map);
     return map;
   }
 }
