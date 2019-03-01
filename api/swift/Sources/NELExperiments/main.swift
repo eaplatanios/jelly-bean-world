@@ -126,17 +126,17 @@ let painter = MapVisualizer(
   for: simulator, 
   bottomLeft: Position(x: -70, y: -70), 
   topRight: Position(x: 70, y: 70))
-var startTime = CFAbsoluteTimeGetCurrent()
+var startTime = Date().timeIntervalSince1970
 var elapsed = Float(0.0)
 var simulationStartTime = simulator.time
 for _ in 0..<100000000 {
   simulator.step()
-  let interval = CFAbsoluteTimeGetCurrent() - startTime
+  let interval = Date().timeIntervalSince1970 - startTime
   if interval > 1.0 {
     elapsed += Float(interval)
     let speed = Float(simulator.time - simulationStartTime) / elapsed
     print("\(speed) simulation steps per second.")
-    startTime = CFAbsoluteTimeGetCurrent()
+    startTime = Date().timeIntervalSince1970
   }
   painter.draw()
 }
