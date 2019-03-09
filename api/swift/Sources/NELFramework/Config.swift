@@ -72,27 +72,27 @@ public struct Item : Equatable, Hashable {
 
 public struct SimulatorConfig : Equatable, Hashable {
   // Simulation parameters
-  let randomSeed: UInt32
+  public let randomSeed: UInt32
 
   // Agent capabilities
-  let maxStepsPerMove: UInt32
-  let scentDimSize: UInt32
-  let colorDimSize: UInt32
-  let visionRange: UInt32
-  let allowedMoves: Set<Direction>
-  let allowedTurns: Set<TurnDirection>
+  public let maxStepsPerMove: UInt32
+  public let scentDimSize: UInt32
+  public let colorDimSize: UInt32
+  public let visionRange: UInt32
+  public let allowedMoves: Set<Direction>
+  public let allowedTurns: Set<TurnDirection>
 
   // World properties
-  let patchSize: UInt32
-  let gibbsIterations: UInt32
-  let items: [Item]
-  let agentColor: ShapedArray<Float>
-  let moveConflictPolicy: MoveConflictPolicy
+  public let patchSize: UInt32
+  public let gibbsIterations: UInt32
+  public let items: [Item]
+  public let agentColor: ShapedArray<Float>
+  public let moveConflictPolicy: MoveConflictPolicy
   
   // Scent diffusion parameters
-  let scentDecay: Float
-  let scentDiffusion: Float
-  let removedItemLifetime: UInt32
+  public let scentDecay: Float
+  public let scentDiffusion: Float
+  public let removedItemLifetime: UInt32
 
   public init(
     randomSeed: UInt32,

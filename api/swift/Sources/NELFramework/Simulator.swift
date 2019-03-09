@@ -2,21 +2,47 @@ import CNELFramework
 import Foundation
 import TensorFlow
 
-public typealias Position = CNELFramework.Position
+@usableFromInline
+internal typealias CPosition = CNELFramework.Position
 
+@usableFromInline
 internal typealias CDirection = CNELFramework.Direction
+
+@usableFromInline
 internal typealias CTurnDirection = CNELFramework.TurnDirection
+
+@usableFromInline
 internal typealias CMovementConflictPolicy = CNELFramework.MovementConflictPolicy
+
+public struct Position: Equatable {
+  public let x: Int64
+  public let y: Int64
+
+  public init(x: Int64, y: Int64) {
+    self.x = x
+    self.y = y
+  }
+
+  @inlinable
+  internal static func fromC(_ value: CPosition) -> Position {
+    return Position(x: value.x, y: value.y)
+  }
+
+  @inlinable
+  internal func toC() -> CPosition {
+    return CPosition(x: x, y: y)
+  }
+}
 
 public enum Direction: UInt32 {
   case up = 0, down, left, right
 
-  @inline(__always)
+  @inlinable
   internal static func fromC(_ value: CDirection) -> Direction {
     return Direction(rawValue: value.rawValue)!
   }
 
-  @inline(__always)
+  @inlinable
   internal func toC() -> CDirection {
     return CDirection(rawValue: self.rawValue)
   }
@@ -25,12 +51,12 @@ public enum Direction: UInt32 {
 public enum TurnDirection: UInt32 {
   case front = 0, back, left, right
 
-  @inline(__always)
+  @inlinable
   internal static func fromC(_ value: CTurnDirection) -> TurnDirection {
     return TurnDirection(rawValue: value.rawValue)!
   }
 
-  @inline(__always)
+  @inlinable
   internal func toC() -> CTurnDirection {
     return CTurnDirection(rawValue: self.rawValue)
   }
@@ -39,12 +65,12 @@ public enum TurnDirection: UInt32 {
 public enum MoveConflictPolicy: UInt32 {
   case noCollisions = 0, firstComeFirstServe, random
 
-  @inline(__always)
+  @inlinable
   internal static func fromC(_ value: CMovementConflictPolicy) -> MoveConflictPolicy {
     return MoveConflictPolicy(rawValue: value.rawValue)!
   }
 
-  @inline(__always)
+  @inlinable
   internal func toC() -> CMovementConflictPolicy {
     return CMovementConflictPolicy(rawValue: self.rawValue)
   }
@@ -53,6 +79,7 @@ public enum MoveConflictPolicy: UInt32 {
 public final class Simulator {
   public let config: SimulatorConfig
 
+  @usableFromInline
   internal var handle: UnsafeMutableRawPointer?
 
   public private(set) var agents: [UInt64: Agent] = [:]
@@ -156,7 +183,7 @@ public final class Simulator {
   /// 
   /// - Parameters:
   ///   - agent: The agent to be added to this simulator.
-  @inline(__always)
+  @inlinable
   internal func addAgent<A: Agent>(_ agent: A) {
     let state = CNELFramework.simulatorAddAgent(self.handle, nil)
     agent.updateSimulationState(state)
@@ -164,20 +191,21 @@ public final class Simulator {
     CNELFramework.simulatorDeleteAgentSimulationState(state)
   }
 
-  @inline(__always)
+  @inlinable
   internal func moveAgent(agent: Agent, towards direction: Direction, by numSteps: UInt32) -> Bool {
     return CNELFramework.simulatorMoveAgent(self.handle, nil, agent.id!, direction.toC(), numSteps)
   }
 
-  @inline(__always)
+  @inlinable
   internal func turnAgent(agent: Agent, towards direction: TurnDirection) -> Bool {
     return CNELFramework.simulatorTurnAgent(self.handle, nil, agent.id!, direction.toC())
   }
 
   // TODO: Map deallocator.
-  @inline(__always)
+  @inlinable
   internal func map(bottomLeft: Position, topRight: Position) -> SimulationMap {
-    let cSimulationMap = CNELFramework.simulatorMap(self.handle, nil, bottomLeft, topRight)
+    let cSimulationMap = CNELFramework.simulatorMap(
+      self.handle, nil, bottomLeft.toC(), topRight.toC())
     return SimulationMap.fromC(cSimulationMap, for: self)
   }
 }

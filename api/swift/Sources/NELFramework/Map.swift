@@ -1,15 +1,22 @@
 import CNELFramework
 import TensorFlow
 
+@usableFromInline
 internal typealias CSimulationMap = CNELFramework.SimulationMap
+
+@usableFromInline
 internal typealias CSimulationMapPatch = CNELFramework.SimulationMapPatch
+
+@usableFromInline
 internal typealias CSimulationMapItemInfo = CNELFramework.ItemInfo
+
+@usableFromInline
 internal typealias CSimulationMapAgentInfo = CNELFramework.AgentInfo
 
 public typealias SimulationMap = [SimulationMapPatch]
 
 extension Array where Element == SimulationMapPatch {
-  @inline(__always)
+  @inlinable
   internal static func fromC(
     _ value: CSimulationMap,
     for simulator: Simulator
@@ -27,6 +34,7 @@ public struct SimulationMapPatch {
   let items: [CSimulationMapItemInfo]
   let agents: [CSimulationMapAgentInfo]
 
+  @usableFromInline
   internal init(
     position: Position,
     fixed: Bool,
@@ -43,7 +51,7 @@ public struct SimulationMapPatch {
     self.agents = agents
   }
 
-  @inline(__always)
+  @inlinable
   internal static func fromC(
     _ value: CSimulationMapPatch,
     for simulator: Simulator
@@ -56,7 +64,7 @@ public struct SimulationMapPatch {
     let visionBuffer = UnsafeBufferPointer(start: value.vision, count: n * n * c)
     let vision = ShapedArray(shape: [n, n, c], scalars: Array(visionBuffer))
     return SimulationMapPatch(
-      position: value.position,
+      position: Position.fromC(value.position),
       fixed: value.fixed,
       scent: scent,
       vision: vision,

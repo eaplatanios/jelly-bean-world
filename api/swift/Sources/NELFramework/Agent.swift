@@ -3,8 +3,8 @@ import Foundation
 import TensorFlow
 
 public class Agent {
-  let simulator: Simulator
-  let delegate: AgentDelegate
+  public let simulator: Simulator
+  public let delegate: AgentDelegate
 
   internal var rawScent: (shape: [Int], values: [Float])? = nil
   internal var rawVision: (shape: [Int], values: [Float])? = nil
@@ -38,7 +38,7 @@ public class Agent {
     simulator.addAgent(self)
   }
 
-  @inline(__always)
+  @inlinable
   public func act() {
     delegate.act(self)
   }
@@ -49,7 +49,7 @@ public class Agent {
   /// advances by a time step and issues a notification 
   /// about that event. The simulator only advances the 
   /// time step once all agents have requested to move.
-  @inline(__always) @discardableResult
+  @inlinable @discardableResult
   public func move(towards direction: Direction, by numSteps: UInt32 = 1) -> Bool {
     return self.simulator.moveAgent(agent: self, towards: direction, by: numSteps)
   }
@@ -60,14 +60,15 @@ public class Agent {
   /// advances by a time step and issues a notification 
   /// about that event. The simulator only advances the 
   /// time step once all agents have requested to move.
-  @inline(__always) @discardableResult
+  @inlinable @discardableResult
   public func turn(towards direction: TurnDirection) -> Bool {
     return self.simulator.turnAgent(agent: self, towards: direction)
   }
 
+  @usableFromInline
   internal func updateSimulationState(_ state: AgentSimulationState) {
     self.id = state.id
-    self.position = state.position
+    self.position = Position.fromC(state.position)
     self.direction = Direction.fromC(state.direction)
     self.rawScent = scentToArray(for: simulator.config, state.scent!)
     self.rawVision = visionToArray(for: simulator.config, state.vision!)

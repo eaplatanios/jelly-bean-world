@@ -71,7 +71,8 @@ def make_config():
 		allowed_turn_directions=[nel.RelativeDirection.LEFT, nel.RelativeDirection.RIGHT],
 		patch_size=32, gibbs_num_iter=10, items=items, agent_color=[0.0, 0.0, 1.0],
 		collision_policy=nel.MovementConflictPolicy.FIRST_COME_FIRST_SERVED,
-		decay_param=0.4, diffusion_param=0.14, deleted_item_lifetime=2000)
+		decay_param=0.4, diffusion_param=0.14, deleted_item_lifetime=2000, 
+		seed=1234567890)
 
 if __name__ == "__main__":
 	# create a local simulator
@@ -97,7 +98,7 @@ if __name__ == "__main__":
 	start_time = default_timer()
 	elapsed = 0.0
 	sim_start_time = sim.time()
-	for t in range(10000):
+	for t in range(100000000):
 		for agent in agents:
 			agent.do_next_action()
 		if default_timer() - start_time > 1.0:

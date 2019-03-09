@@ -11,8 +11,8 @@ fileprivate let AGENT_RADIUS = 0.5
 fileprivate let ITEM_RADIUS = 0.4
 fileprivate let MAXIMUM_SCENT = 0.9
 
-@inline(__always)
-fileprivate func agentPosition(
+@inlinable
+internal func agentPosition(
   _ direction: CDirection
 ) -> (x: Float, y: Float, angle: Float) {
   switch Direction.fromC(direction) {

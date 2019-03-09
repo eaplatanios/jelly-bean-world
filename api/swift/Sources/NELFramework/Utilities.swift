@@ -1,4 +1,4 @@
-@inline(__always)
+@inlinable
 internal func scentToArray(
   for config: SimulatorConfig,
   _ buffer: UnsafeMutablePointer<Float>
@@ -8,7 +8,7 @@ internal func scentToArray(
   return (shape: scentShape, values: Array(scentBuffer))
 }
 
-@inline(__always)
+@inlinable
 internal func visionToArray(
   for config: SimulatorConfig,
   _ buffer: UnsafeMutablePointer<Float>
@@ -25,7 +25,7 @@ internal func visionToArray(
   return (shape: visionShape, values: Array(visionBuffer))
 }
 
-@inline(__always)
+@inlinable
 internal func itemCountsToArray(
   for config: SimulatorConfig,
   _ countsPointer: UnsafeMutablePointer<UInt32>
