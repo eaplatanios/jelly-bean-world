@@ -2,8 +2,8 @@ import Foundation
 import TensorFlow
 
 public typealias NELEnvironmentRewardFunction = (
-  _ previousItems: [Item : UInt32]?,
-  _ currentItems: [Item : UInt32]?) -> Float
+  _ previousItems: [Item: UInt32]?,
+  _ currentItems: [Item: UInt32]?) -> Float
 
 public struct NELEnvironmentState {
   public let scent: ShapedArray<Float>
@@ -89,7 +89,7 @@ public struct NELEnvironment {
   }
 }
 
-fileprivate final class NELEnvironmentAgentDelegate : AgentDelegate {
+fileprivate final class NELEnvironmentAgentDelegate: AgentDelegate {
   fileprivate var nextAction: NELEnvironmentAction? = nil
 
   fileprivate func act(_ agent: Agent) {

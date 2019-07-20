@@ -82,19 +82,26 @@ public final class Simulator {
   @usableFromInline
   internal var handle: UnsafeMutableRawPointer?
 
-  public private(set) var agents: [UInt64: Agent] = [:]
+  @usableFromInline
+  internal var agents: [UInt64: Agent] = [:]
 
   /// Represents the number of simulation steps that have 
   /// been executed so far.
   public private(set) var time: UInt64 = 0
 
-  private let dispatchSemaphore = DispatchSemaphore(value: 1)
-  private let dispatchQueue = DispatchQueue(
+  @usableFromInline
+  internal let dispatchSemaphore = DispatchSemaphore(value: 1)
+
+  @usableFromInline
+  internal let dispatchQueue = DispatchQueue(
     label: "SimulatorDispatchQueue", 
     qos: .default, 
     attributes: .concurrent)
-  private var usingDispatchQueue = false
 
+  @usableFromInline
+  internal var usingDispatchQueue = false
+
+  @inlinable
   public init(
     using config: SimulatorConfig,
     saveFrequency: UInt32 = 1000, 
@@ -112,6 +119,7 @@ public final class Simulator {
     cConfig.deallocate()
   }
 
+  // @inlinable
   // public init(
   //   using config: SimulatorConfig,
   //   from file: URL,
@@ -139,7 +147,8 @@ public final class Simulator {
     CNELFramework.simulatorDelete(self.handle)
   }
 
-  private let nativeOnStepCallback: @convention(c) (
+  @usableFromInline
+  internal let nativeOnStepCallback: @convention(c) (
       UnsafeRawPointer?, 
       UnsafePointer<AgentSimulationState>?,
       UInt32, 
@@ -157,6 +166,7 @@ public final class Simulator {
     }
   }
 
+  @inlinable
   public func step() {
     if agents.count == 1 {
       usingDispatchQueue = false
@@ -170,10 +180,12 @@ public final class Simulator {
     }
   }
 
+  @inlinable
   internal func saveAgents() {
     // TODO
   }
 
+  @inlinable
   internal func loadAgents() {
     // TODO
   }
@@ -185,27 +197,30 @@ public final class Simulator {
   ///   - agent: The agent to be added to this simulator.
   @inlinable
   internal func addAgent<A: Agent>(_ agent: A) {
-    let state = CNELFramework.simulatorAddAgent(self.handle, nil)
+    let state = CNELFramework.simulatorAddAgent(handle, nil)
     agent.updateSimulationState(state)
-    self.agents[state.id] = agent
+    agents[state.id] = agent
     CNELFramework.simulatorDeleteAgentSimulationState(state)
   }
 
   @inlinable
-  internal func moveAgent(agent: Agent, towards direction: Direction, by numSteps: UInt32) -> Bool {
-    return CNELFramework.simulatorMoveAgent(self.handle, nil, agent.id!, direction.toC(), numSteps)
+  internal func moveAgent(
+    agent: Agent,
+    towards direction: Direction,
+    by numSteps: UInt32
+  ) -> Bool {
+    CNELFramework.simulatorMoveAgent(handle, nil, agent.id!, direction.toC(), numSteps)
   }
 
   @inlinable
   internal func turnAgent(agent: Agent, towards direction: TurnDirection) -> Bool {
-    return CNELFramework.simulatorTurnAgent(self.handle, nil, agent.id!, direction.toC())
+    CNELFramework.simulatorTurnAgent(handle, nil, agent.id!, direction.toC())
   }
 
   // TODO: Map deallocator.
   @inlinable
   internal func map(bottomLeft: Position, topRight: Position) -> SimulationMap {
-    let cSimulationMap = CNELFramework.simulatorMap(
-      self.handle, nil, bottomLeft.toC(), topRight.toC())
+    let cSimulationMap = CNELFramework.simulatorMap(handle, nil, bottomLeft.toC(), topRight.toC())
     return SimulationMap.fromC(cSimulationMap, for: self)
   }
 }

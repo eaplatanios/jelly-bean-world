@@ -8,7 +8,7 @@ let mpl = Python.import("matplotlib")
 mpl.use("TkAgg")
 
 // Create a dummy agent delegate.
-final class DummyAgentDelegate : AgentDelegate {
+final class DummyAgentDelegate: AgentDelegate {
   private var counter: UInt64 = 0
 
   func act(_ agent: Agent) {

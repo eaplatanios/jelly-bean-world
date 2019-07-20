@@ -1,10 +1,10 @@
 import CNELFramework
 import TensorFlow
 
-internal typealias CItem = CNELFramework.ItemProperties
-internal typealias CSimulatorConfig = CNELFramework.SimulatorConfig
+@usableFromInline internal typealias CItem = CNELFramework.ItemProperties
+@usableFromInline internal typealias CSimulatorConfig = CNELFramework.SimulatorConfig
 
-public struct Item : Equatable, Hashable {
+public struct Item: Equatable, Hashable {
   public let name: String
   public let scent: ShapedArray<Float>
   public let color: ShapedArray<Float>
@@ -13,6 +13,7 @@ public struct Item : Equatable, Hashable {
   public let blocksMovement: Bool
   public let energyFunctions: EnergyFunctions
 
+  @inlinable
   public init(
     name: String,
     scent: ShapedArray<Float>,
@@ -31,9 +32,8 @@ public struct Item : Equatable, Hashable {
     self.energyFunctions = energyFunctions
   }
 
-  internal func toC(
-    in config: SimulatorConfig
-  ) -> (item: CItem, deallocate: () -> Void) {
+  @inlinable
+  internal func toC(in config: SimulatorConfig) -> (item: CItem, deallocate: () -> Void) {
     let scent = self.scent.scalars
     let color = self.color.scalars
     let counts = config.items.indices.map { requiredItemCounts[$0, default: 0] }
@@ -50,7 +50,6 @@ public struct Item : Equatable, Hashable {
     cCosts.initialize(from: costs, count: costs.count)
 
     let cEnergyFunctions = energyFunctions.toC()
-
     return (
       item: CItem(
         name: name,
@@ -70,7 +69,7 @@ public struct Item : Equatable, Hashable {
   }
 }
 
-public struct SimulatorConfig : Equatable, Hashable {
+public struct SimulatorConfig: Equatable, Hashable {
   // Simulation parameters
   public let randomSeed: UInt32
 
@@ -94,6 +93,7 @@ public struct SimulatorConfig : Equatable, Hashable {
   public let scentDiffusion: Float
   public let removedItemLifetime: UInt32
 
+  @inlinable
   public init(
     randomSeed: UInt32,
     maxStepsPerMove: UInt32,
@@ -128,10 +128,8 @@ public struct SimulatorConfig : Equatable, Hashable {
     self.removedItemLifetime = removedItemLifetime
   }
 
-  internal func toC() -> (
-    simulatorConfig: CSimulatorConfig, 
-    deallocate: () -> Void
-  ) {
+  @inlinable
+  internal func toC() -> (simulatorConfig: CSimulatorConfig, deallocate: () -> Void) {
     let (items, itemDeallocators) = self.items
       .map { $0.toC(in: self) }
       .reduce(into: ([CItem](), [() -> Void]())) {
@@ -143,7 +141,6 @@ public struct SimulatorConfig : Equatable, Hashable {
     let cColor = UnsafeMutablePointer<Float>.allocate(capacity: color.count)
     cItems.initialize(from: items, count: items.count)
     cColor.initialize(from: color, count: color.count)
-
     return (
       simulatorConfig: CSimulatorConfig(
         randomSeed: randomSeed,
