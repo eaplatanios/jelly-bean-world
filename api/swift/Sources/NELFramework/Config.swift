@@ -69,7 +69,7 @@ public struct Item: Equatable, Hashable {
   }
 }
 
-public struct SimulatorConfig: Equatable, Hashable, Codable {
+public struct SimulatorConfig: Equatable, Hashable {
   // Simulation parameters
   public let randomSeed: UInt32
 
