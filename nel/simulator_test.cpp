@@ -318,7 +318,7 @@ void on_move(client<client_data>& c, uint64_t agent_id, mpi_response response)
 	unsigned int id = c.data.index;
 	std::unique_lock<std::mutex> lck(locks[id]);
 	waiting_for_server[id] = false;
-	c.data.action_result = (response == mpi_response::TRUE);
+	c.data.action_result = (response == mpi_response::SUCCESS);
 	conditions[id].notify_one();
 }
 
@@ -326,7 +326,7 @@ void on_turn(client<client_data>& c, uint64_t agent_id, mpi_response response) {
 	unsigned int id = c.data.index;
 	std::unique_lock<std::mutex> lck(locks[id]);
 	waiting_for_server[id] = false;
-	c.data.action_result = (response == mpi_response::TRUE);
+	c.data.action_result = (response == mpi_response::SUCCESS);
 	conditions[id].notify_one();
 }
 
@@ -352,7 +352,7 @@ void on_is_active(client<client_data>& c, uint64_t agent_id, mpi_response respon
 	unsigned int id = c.data.index;
 	std::unique_lock<std::mutex> lck(locks[id]);
 	waiting_for_server[id] = false;
-	c.data.action_result = (response == mpi_response::TRUE);
+	c.data.action_result = (response == mpi_response::SUCCESS);
 	conditions[id].notify_one();
 }
 

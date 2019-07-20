@@ -522,8 +522,8 @@ inline void check_response(mpi_response response, const char* prefix) {
   case mpi_response::CLIENT_PARSE_MESSAGE_ERROR:
     message = concat(prefix, "Client was unable to parse MPI message from server.");
     if (message != NULL) { /* TODO: communicate error `message` to swift */ free(message); } break;
-  case mpi_response::TRUE:
-  case mpi_response::FALSE:
+  case mpi_response::SUCCESS:
+  case mpi_response::FAILURE:
     break;
   }
 }
@@ -547,7 +547,7 @@ void on_add_agent(client<client_data>& c, uint64_t agent_id,
 {
   check_response(response, "add_agent: ");
   AgentSimulationState new_agent_state;
-  if (response != mpi_response::TRUE || !init(new_agent_state, new_agent, c.config, agent_id))
+  if (response != mpi_response::SUCCESS || !init(new_agent_state, new_agent, c.config, agent_id))
     new_agent_state = EMPTY_AGENT_SIM_STATE;
 
   std::unique_lock<std::mutex> lck(c.data.lock);
@@ -952,7 +952,7 @@ bool simulatorMoveAgent(
     /* wait for response from server */
     wait_for_server(*client_ptr);
 
-    return client_ptr->data.server_response == mpi_response::TRUE;
+    return client_ptr->data.server_response == mpi_response::SUCCESS;
   }
 }
 
@@ -986,7 +986,7 @@ bool simulatorTurnAgent(
     /* wait for response from server */
     wait_for_server(*client_ptr);
 
-    return client_ptr->data.server_response == mpi_response::TRUE;
+    return client_ptr->data.server_response == mpi_response::SUCCESS;
   }
 }
 
@@ -1048,9 +1048,9 @@ bool simulatorIsActive(
 
     /* wait for response from server */
     wait_for_server(*client_handle);
-    if (client_handle->data.server_response == mpi_response::TRUE) {
+    if (client_handle->data.server_response == mpi_response::SUCCESS) {
       return true;
-    } else if (client_handle->data.server_response == mpi_response::FALSE) {
+    } else if (client_handle->data.server_response == mpi_response::FAILURE) {
       return false;
     } else {
       return false; /* TODO: return something that indicates error */
@@ -1102,7 +1102,7 @@ const SimulationMap simulatorMap(
     /* wait for response from server */
     wait_for_server(*client_ptr);
     SimulationMap map;
-    if (client_ptr->data.server_response != mpi_response::TRUE)
+    if (client_ptr->data.server_response != mpi_response::SUCCESS)
       return EMPTY_SIM_MAP;
     if (!init(map, *client_ptr->data.response_data.map, client_ptr->config))
       map = EMPTY_SIM_MAP;

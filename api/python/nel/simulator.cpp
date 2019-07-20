@@ -437,8 +437,8 @@ inline void check_response(mpi_response response, const char* prefix) {
     case mpi_response::CLIENT_PARSE_MESSAGE_ERROR:
         message = concat(prefix, "Client was unable to parse MPI message from server.");
         if (message != NULL) { PyErr_SetString(mpi_error, message); free(message); } break;
-    case mpi_response::TRUE:
-    case mpi_response::FALSE:
+    case mpi_response::SUCCESS:
+    case mpi_response::FAILURE:
         break;
     }
 }
@@ -464,7 +464,7 @@ void on_add_agent(client<py_client_data>& c, uint64_t agent_id,
     PyGILState_STATE gstate;
     gstate = PyGILState_Ensure(); /* acquire global interpreter lock */
     PyObject* agent;
-    if (response != mpi_response::TRUE || agent_id == UINT64_MAX)
+    if (response != mpi_response::SUCCESS || agent_id == UINT64_MAX)
         agent = NULL;
     else agent = build_py_agent(new_agent, c.config, agent_id);
     PyGILState_Release(gstate);
@@ -1280,7 +1280,7 @@ static PyObject* simulator_move(PyObject *self, PyObject *args) {
         /* wait for response from server */
         wait_for_server(*client_handle);
 
-        PyObject* result = (client_handle->data.server_response == mpi_response::TRUE ? Py_True : Py_False);
+        PyObject* result = (client_handle->data.server_response == mpi_response::SUCCESS ? Py_True : Py_False);
         Py_INCREF(result);
         return result;
     }
@@ -1344,7 +1344,7 @@ static PyObject* simulator_turn(PyObject *self, PyObject *args) {
         /* wait for response from server */
         wait_for_server(*client_handle);
 
-        PyObject* result = (client_handle->data.server_response == mpi_response::TRUE ? Py_True : Py_False);
+        PyObject* result = (client_handle->data.server_response == mpi_response::SUCCESS ? Py_True : Py_False);
         Py_INCREF(result);
         return result;
     }
@@ -1480,7 +1480,7 @@ static PyObject* simulator_map(PyObject *self, PyObject *args) {
 
         /* wait for response from server */
         wait_for_server(*client_handle);
-        if (client_handle->data.server_response != mpi_response::TRUE) {
+        if (client_handle->data.server_response != mpi_response::SUCCESS) {
             Py_INCREF(Py_None);
             return Py_None;
         }
@@ -1600,9 +1600,9 @@ static PyObject* simulator_is_active(PyObject *self, PyObject *args) {
         /* wait for response from server */
         wait_for_server(*client_handle);
         PyObject* py_result;
-        if (client_handle->data.server_response == mpi_response::TRUE) {
+        if (client_handle->data.server_response == mpi_response::SUCCESS) {
             py_result = Py_True;
-        } else if (client_handle->data.server_response == mpi_response::FALSE) {
+        } else if (client_handle->data.server_response == mpi_response::FAILURE) {
             py_result = Py_False;
         } else {
             py_result = Py_None;
