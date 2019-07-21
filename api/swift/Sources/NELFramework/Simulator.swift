@@ -25,12 +25,12 @@ public struct Position: Equatable {
 
   @inlinable
   internal static func fromC(_ value: CPosition) -> Position {
-    return Position(x: value.x, y: value.y)
+    Position(x: value.x, y: value.y)
   }
 
   @inlinable
   internal func toC() -> CPosition {
-    return CPosition(x: x, y: y)
+    CPosition(x: x, y: y)
   }
 }
 
@@ -39,12 +39,12 @@ public enum Direction: UInt32 {
 
   @inlinable
   internal static func fromC(_ value: CDirection) -> Direction {
-    return Direction(rawValue: value.rawValue)!
+    Direction(rawValue: value.rawValue)!
   }
 
   @inlinable
   internal func toC() -> CDirection {
-    return CDirection(rawValue: self.rawValue)
+    CDirection(rawValue: self.rawValue)
   }
 }
 
@@ -53,12 +53,12 @@ public enum TurnDirection: UInt32 {
 
   @inlinable
   internal static func fromC(_ value: CTurnDirection) -> TurnDirection {
-    return TurnDirection(rawValue: value.rawValue)!
+    TurnDirection(rawValue: value.rawValue)!
   }
 
   @inlinable
   internal func toC() -> CTurnDirection {
-    return CTurnDirection(rawValue: self.rawValue)
+    CTurnDirection(rawValue: self.rawValue)
   }
 }
 
@@ -67,12 +67,12 @@ public enum MoveConflictPolicy: UInt32 {
 
   @inlinable
   internal static func fromC(_ value: CMovementConflictPolicy) -> MoveConflictPolicy {
-    return MoveConflictPolicy(rawValue: value.rawValue)!
+    MoveConflictPolicy(rawValue: value.rawValue)!
   }
 
   @inlinable
   internal func toC() -> CMovementConflictPolicy {
-    return CMovementConflictPolicy(rawValue: self.rawValue)
+    CMovementConflictPolicy(rawValue: self.rawValue)
   }
 }
 
