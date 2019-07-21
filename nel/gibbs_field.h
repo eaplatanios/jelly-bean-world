@@ -193,92 +193,94 @@ public:
 			} if (top_right != NULL) {
 				top_right_neighborhood[top_right_neighbor_count++] = top_right;
 			}
-
-			/* propose moving each item */
 			const position patch_position_offset = patch_positions[i] * n;
-			for (unsigned int i = 0; i < current->items.length; i++) {
-				/* propose a new position for this item */
-				const unsigned int item_type = current->items[i].item_type;
-				const position old_position = current->items[i].location;
-				position new_position = patch_position_offset + position(rng() % n, rng() % n);
 
-				const patch_type** old_neighborhood;
-				unsigned int old_neighborhood_size;
-				if (old_position.x - patch_position_offset.x < n / 2) {
-					if (old_position.y - patch_position_offset.y < n / 2) {
-						old_neighborhood = bottom_left_neighborhood;
-						old_neighborhood_size = bottom_left_neighbor_count;
-					} else {
-						old_neighborhood = top_left_neighborhood;
-						old_neighborhood_size = top_left_neighbor_count;
-					}
-				} else {
-					if (old_position.y - patch_position_offset.y < n / 2) {
-						old_neighborhood = bottom_right_neighborhood;
-						old_neighborhood_size = bottom_right_neighbor_count;
-					} else {
-						old_neighborhood = top_right_neighborhood;
-						old_neighborhood_size = top_right_neighbor_count;
-					}
-				}
-
-				const patch_type** new_neighborhood;
-				unsigned int new_neighborhood_size;
-				if (new_position.x - patch_position_offset.x < n / 2) {
-					if (new_position.y - patch_position_offset.y < n / 2) {
-						new_neighborhood = bottom_left_neighborhood;
-						new_neighborhood_size = bottom_left_neighbor_count;
-					} else {
-						new_neighborhood = top_left_neighborhood;
-						new_neighborhood_size = top_left_neighbor_count;
-					}
-				} else {
-					if (new_position.y - patch_position_offset.y < n / 2) {
-						new_neighborhood = bottom_right_neighborhood;
-						new_neighborhood_size = bottom_right_neighbor_count;
-					} else {
-						new_neighborhood = top_right_neighborhood;
-						new_neighborhood_size = top_right_neighbor_count;
-					}
-				}
-
-				/* compute the log acceptance probability */
-				float log_acceptance_probability = 0.0f;
-				bool new_position_occupied = false;
-				for (unsigned int j = 0; j < new_neighborhood_size; j++) {
-					const auto& items = new_neighborhood[j]->items;
-					for (unsigned int m = 0; m < items.length; m++) {
-						if (items[m].location == new_position) {
-							/* an item already exists at this proposed location */
-							new_position_occupied = true; break;
-						}
-						log_acceptance_probability += cache.interaction(new_position, items[m].location, item_type, items[m].item_type);
-						log_acceptance_probability += cache.interaction(items[m].location, new_position, items[m].item_type, item_type);
-					}
-					if (new_position_occupied) break;
-					log_acceptance_probability -= cache.interaction(new_position, new_position, item_type, item_type);
-				}
-				if (new_position_occupied) continue;
-
-				for (unsigned int j = 0; j < old_neighborhood_size; j++) {
-					const auto& items = old_neighborhood[j]->items;
-					for (unsigned int m = 0; m < items.length; m++) {
-						log_acceptance_probability -= cache.interaction(old_position, items[m].location, item_type, items[m].item_type);
-						log_acceptance_probability -= cache.interaction(items[m].location, old_position, items[m].item_type, item_type);
-					}
-					log_acceptance_probability += cache.interaction(old_position, old_position, item_type, item_type);
-				}
-
-				log_acceptance_probability += cache.intensity(new_position, item_type) - cache.intensity(old_position, item_type);
-
-				/* accept or reject the proposal depending on the computed probability */
-				float random = (float) rng() / rng.max();
-				if (log(random) < log_acceptance_probability) {
-					/* accept the proposal */
-					current->items.remove(i);
-					current->items.add({item_type, new_position, 0, 0});
-				}
-			}
+			// The following step just slows things down a lot without offering much gain since adding
+			// and removing items alone should handle moving items.
+			// /* propose moving each item */
+			// for (unsigned int i = 0; i < current->items.length; i++) {
+			// 	/* propose a new position for this item */
+			// 	const unsigned int item_type = current->items[i].item_type;
+			// 	const position old_position = current->items[i].location;
+			// 	position new_position = patch_position_offset + position(rng() % n, rng() % n);
+			//
+			// 	const patch_type** old_neighborhood;
+			// 	unsigned int old_neighborhood_size;
+			// 	if (old_position.x - patch_position_offset.x < n / 2) {
+			// 		if (old_position.y - patch_position_offset.y < n / 2) {
+			// 			old_neighborhood = bottom_left_neighborhood;
+			// 			old_neighborhood_size = bottom_left_neighbor_count;
+			// 		} else {
+			// 			old_neighborhood = top_left_neighborhood;
+			// 			old_neighborhood_size = top_left_neighbor_count;
+			// 		}
+			// 	} else {
+			// 		if (old_position.y - patch_position_offset.y < n / 2) {
+			// 			old_neighborhood = bottom_right_neighborhood;
+			// 			old_neighborhood_size = bottom_right_neighbor_count;
+			// 		} else {
+			// 			old_neighborhood = top_right_neighborhood;
+			// 			old_neighborhood_size = top_right_neighbor_count;
+			// 		}
+			// 	}
+			//
+			// 	const patch_type** new_neighborhood;
+			// 	unsigned int new_neighborhood_size;
+			// 	if (new_position.x - patch_position_offset.x < n / 2) {
+			// 		if (new_position.y - patch_position_offset.y < n / 2) {
+			// 			new_neighborhood = bottom_left_neighborhood;
+			// 			new_neighborhood_size = bottom_left_neighbor_count;
+			// 		} else {
+			// 			new_neighborhood = top_left_neighborhood;
+			// 			new_neighborhood_size = top_left_neighbor_count;
+			// 		}
+			// 	} else {
+			// 		if (new_position.y - patch_position_offset.y < n / 2) {
+			// 			new_neighborhood = bottom_right_neighborhood;
+			// 			new_neighborhood_size = bottom_right_neighbor_count;
+			// 		} else {
+			// 			new_neighborhood = top_right_neighborhood;
+			// 			new_neighborhood_size = top_right_neighbor_count;
+			// 		}
+			// 	}
+			//
+			// 	/* compute the log acceptance probability */
+			// 	float log_acceptance_probability = 0.0f;
+			// 	bool new_position_occupied = false;
+			// 	for (unsigned int j = 0; j < new_neighborhood_size; j++) {
+			// 		const auto& items = new_neighborhood[j]->items;
+			// 		for (unsigned int m = 0; m < items.length; m++) {
+			// 			if (items[m].location == new_position) {
+			// 				/* an item already exists at this proposed location */
+			// 				new_position_occupied = true; break;
+			// 			}
+			// 			log_acceptance_probability += cache.interaction(new_position, items[m].location, item_type, items[m].item_type);
+			// 			log_acceptance_probability += cache.interaction(items[m].location, new_position, items[m].item_type, item_type);
+			// 		}
+			// 		if (new_position_occupied) break;
+			// 		log_acceptance_probability -= cache.interaction(new_position, new_position, item_type, item_type);
+			// 	}
+			// 	if (new_position_occupied) continue;
+			//
+			// 	for (unsigned int j = 0; j < old_neighborhood_size; j++) {
+			// 		const auto& items = old_neighborhood[j]->items;
+			// 		for (unsigned int m = 0; m < items.length; m++) {
+			// 			log_acceptance_probability -= cache.interaction(old_position, items[m].location, item_type, items[m].item_type);
+			// 			log_acceptance_probability -= cache.interaction(items[m].location, old_position, items[m].item_type, item_type);
+			// 		}
+			// 		log_acceptance_probability += cache.interaction(old_position, old_position, item_type, item_type);
+			// 	}
+			//
+			// 	log_acceptance_probability += cache.intensity(new_position, item_type) - cache.intensity(old_position, item_type);
+			//
+			// 	/* accept or reject the proposal depending on the computed probability */
+			// 	float random = (float) rng() / rng.max();
+			// 	if (log(random) < log_acceptance_probability) {
+			// 		/* accept the proposal */
+			// 		current->items.remove(i);
+			// 		current->items.add({item_type, new_position, 0, 0});
+			// 	}
+			// }
 
 			/* propose creating a new item */
 			const unsigned int item_type = rng() % cache.item_type_count;
@@ -387,55 +389,6 @@ public:
 					current->items.remove(item_index);
 				}
 			}
-		}
-	}
-
-private:
-	/* NOTE: we assume `neighborhood[0]` refers to the patch at the given `patch_position` */
-	template<typename RNGType>
-	inline void sample_cell(RNGType& rng,
-			patch_type* neighborhood[4],
-			unsigned int neighbor_count,
-			const position& patch_position,
-			const position& world_position)
-	{
-		/* compute the old item type and index */
-		patch_type& current_patch = *neighborhood[0];
-		unsigned int old_item_index = 0, old_item_type = cache.item_type_count;
-		for (unsigned int m = 0; m < current_patch.items.length; m++) {
-			if (current_patch.items[m].location == world_position) {
-				old_item_type = current_patch.items[m].item_type;
-				old_item_index = m; break;
-			}
-		}
-
-		float* log_probabilities = (float*) alloca(sizeof(float) * (cache.item_type_count + 1));
-		for (unsigned int i = 0; i < cache.item_type_count; i++)
-			log_probabilities[i] = cache.intensity(world_position, i);
-		for (unsigned int j = 0; j < neighbor_count; j++) {
-			const auto& items = neighborhood[j]->items;
-			for (unsigned int m = 0; m < items.length; m++) {
-				for (unsigned int i = 0; i < cache.item_type_count; i++)
-					/* compute the energy contribution of this cell when the item type is `i` */
-					log_probabilities[i] += cache.interaction(world_position, items[m].location, i, items[m].item_type);
-			}
-		}
-
-		log_probabilities[cache.item_type_count] = 0.0;
-		normalize_exp(log_probabilities, cache.item_type_count + 1);
-		float random = (float) rng() / rng.max();
-		unsigned int sampled_item_type = select_categorical(
-				log_probabilities, random, cache.item_type_count + 1);
-
-		if (old_item_type == sampled_item_type) {
-			/* the Gibbs step didn't change anything */
-			return;
-		} if (old_item_type < cache.item_type_count) {
-			/* remove the old item position */
-			current_patch.items.remove(old_item_index);
-		} if (sampled_item_type < cache.item_type_count) {
-			/* add the new item position */
-			current_patch.items.add({sampled_item_type, world_position, 0, 0});
 		}
 	}
 };
