@@ -231,7 +231,8 @@ public:
 	unsigned int get_fixed_neighborhood(
 			position world_position,
 			patch_type* neighborhood[4],
-			position patch_positions[4])
+			position patch_positions[4],
+			bool incremental = true)
 	{
 		unsigned int index = get_neighborhood_positions(world_position, patch_positions);
 
@@ -239,7 +240,7 @@ public:
 		for (unsigned int i = 0; i < 4; i++)
 			neighborhood[i] = &get_or_make_patch<false>(patch_positions[i]);
 
-		fix_patches(neighborhood, patch_positions, 4);
+		fix_patches(neighborhood, patch_positions, 4, incremental);
 		return index;
 	}
 
@@ -479,7 +480,8 @@ private:
 	void fix_patches(
 			patch_type** patches,
 			const position* patch_positions,
-			unsigned int patch_count)
+			unsigned int patch_count,
+			bool incremental = true)
 	{
 		array<position> positions_to_sample(36);
 		for (unsigned int i = 0; i < patch_count; i++) {
@@ -507,7 +509,9 @@ private:
 		/* construct the Gibbs field and sample the patches at positions_to_sample */
 		gibbs_field<map<PerPatchData, ItemType>> field(
 				*this, cache, positions_to_sample.data, (unsigned int) positions_to_sample.length, n);
-		for (unsigned int i = 0; i < gibbs_iterations; i++)
+		// TODO: Make the factor `10` a configurable parameter.
+		auto iterations = incremental ? gibbs_iterations : 10 * gibbs_iterations;
+		for (unsigned int i = 0; i < iterations; i++)
 			field.sample(rng);
 
 		for (unsigned int i = 0; i < patch_count; i++)

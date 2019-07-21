@@ -872,7 +872,8 @@ inline bool init(
     new (&agent.lock) std::mutex();
 
     patch<patch_data>* neighborhood[4]; position patch_positions[4];
-    unsigned int index = world.get_fixed_neighborhood(agent.current_position, neighborhood, patch_positions);
+    unsigned int index = world.get_fixed_neighborhood(
+        agent.current_position, neighborhood, patch_positions, /*incremental*/false);
     neighborhood[index]->data.patch_lock.lock();
     if (config.collision_policy != movement_conflict_policy::NO_COLLISIONS) {
         for (const agent_state* neighbor : neighborhood[index]->data.agents) {
@@ -899,9 +900,9 @@ inline bool init(
     for (unsigned int i = 0; i < 4; i++) {
         for (agent_state* neighbor : neighborhood[i]->data.agents) {
             if (neighbor == &agent) continue;
-
             patch<patch_data>* other_neighborhood[4];
-            world.get_fixed_neighborhood(neighbor->current_position, other_neighborhood, patch_positions);
+            world.get_fixed_neighborhood(
+                neighbor->current_position, other_neighborhood, patch_positions, /*incremental*/false);
             neighbor->update_state(other_neighborhood, scent_model, config, current_time);
         }
     }
@@ -1548,7 +1549,8 @@ private:
         array<position> occupied_positions(16);
         for (auto entry : requested_moves) {
             patch_type* neighborhood[4]; position patch_positions[4];
-            unsigned int index = world.get_fixed_neighborhood(entry.key, neighborhood, patch_positions);
+            unsigned int index = world.get_fixed_neighborhood(
+                entry.key, neighborhood, patch_positions, /*incremental*/true);
             patch_type& current_patch = *neighborhood[index];
             for (item& item : current_patch.items) {
                 if (item.location == entry.key && item.deletion_time == 0 && config.item_types[item.item_type].blocks_movement) {
@@ -1599,7 +1601,8 @@ private:
 
                 /* delete any items that are automatically picked up at this cell */
                 patch_type* neighborhood[4]; position patch_positions[4];
-                unsigned int index = world.get_fixed_neighborhood(agent->current_position, neighborhood, patch_positions);
+                unsigned int index = world.get_fixed_neighborhood(
+                    agent->current_position, neighborhood, patch_positions, /*incremental*/true);
                 patch_type& current_patch = *neighborhood[index];
                 for (item& item : current_patch.items) {
                     if (item.location == agent->current_position && item.deletion_time == 0) {
@@ -1664,7 +1667,8 @@ private:
     inline void update_agent_scent_and_vision() {
         for (agent_state* agent : agents) {
             patch_type* neighborhood[4]; position patch_positions[4];
-            world.get_fixed_neighborhood(agent->current_position, neighborhood, patch_positions);
+            world.get_fixed_neighborhood(
+                agent->current_position, neighborhood, patch_positions, /*incremental*/true);
             agent->update_state(neighborhood, scent_model, config, time);
         }
     }
