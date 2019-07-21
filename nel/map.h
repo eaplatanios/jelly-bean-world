@@ -81,6 +81,28 @@ inline bool init(patch<Data>& new_patch) {
 	return true;
 }
 
+template<typename Data>
+inline bool init(patch<Data>& new_patch,
+		const array<item>& src_items,
+		const position item_position_offset)
+{
+	new_patch.fixed = false;
+	if (!init(new_patch.data)) {
+		return false;
+	} else if (!array_init(new_patch.items, src_items.capacity)) {
+		fprintf(stderr, "init ERROR: Insufficient memory for patch.items.\n");
+		free(new_patch.data); return false;
+	}
+	for (unsigned int i = 0; i < src_items.length; i++) {
+		new_patch.items[i].item_type = src_items[i].item_type;
+		new_patch.items[i].location = src_items[i].location + item_position_offset;
+		new_patch.items[i].creation_time = 0;
+		new_patch.items[i].deletion_time = 0;
+	}
+	new_patch.items.length = src_items.length;
+	return true;
+}
+
 template<typename Data, typename Stream, typename... DataReader>
 bool read(patch<Data>& p, Stream& in, DataReader&&... reader) {
 	if (!read(p.fixed, in) || !read(p.items, in)) {
@@ -172,8 +194,26 @@ public:
 		if (ResizeMap) patches.check_size(alloc_position_keys);
 		patch_type& p = patches.get(patch_position, contains, bucket);
 		if (!contains) {
+			/* uniformly sample an existing patch to initialize the new patch */
+			if (patches.table.size > 0) {
+				unsigned int sampled_index = patches.table.capacity;
+				for (unsigned int i = rng() % patches.table.capacity; i < patches.table.capacity; i++) {
+					if (!is_empty(patches.table.keys[i])) {
+						sampled_index = i; break;
+					}
+				} if (sampled_index == patches.table.capacity) {
+					sampled_index = 0;
+					while (is_empty(patches.table.keys[sampled_index])) { sampled_index++; }
+				}
+
+				/* copy the items from the existing patch into the new patch */
+				init(p, patches.values[sampled_index].items, (patch_position - patches.table.keys[sampled_index]) * n);
+			} else {
+				/* there are no patches so initialize an empty patch */
+				init(p);
+			}
+
 			/* add a new patch */
-			init(p);
 			patches.table.keys[bucket] = patch_position;
 			patches.table.size++;
 		}

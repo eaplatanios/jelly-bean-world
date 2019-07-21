@@ -150,15 +150,252 @@ public:
 	template<typename RNGType>
 	void sample(RNGType& rng) {
 		for (unsigned int i = 0; i < patch_count; i++) {
-			position patch_position_offset = patch_positions[i] * n;
-			auto process_neighborhood = [&](unsigned int x, unsigned int y,
-					patch_type* neighborhood[4], unsigned int neighbor_count)
-			{
-				position world_position = patch_position_offset + position(x, y);
-				sample_cell(rng, neighborhood, neighbor_count, patch_positions[i], world_position);
-			};
+			patch_type* current = map.get_patch_if_exists(patch_positions[i]);
+			const patch_type* top = map.get_patch_if_exists(patch_positions[i].up());
+			const patch_type* bottom = map.get_patch_if_exists(patch_positions[i].down());
+			const patch_type* left = map.get_patch_if_exists(patch_positions[i].left());
+			const patch_type* right = map.get_patch_if_exists(patch_positions[i].right());
+			const patch_type* top_left = map.get_patch_if_exists(patch_positions[i].up().left());
+			const patch_type* top_right = map.get_patch_if_exists(patch_positions[i].up().right());
+			const patch_type* bottom_left = map.get_patch_if_exists(patch_positions[i].down().left());
+			const patch_type* bottom_right = map.get_patch_if_exists(patch_positions[i].down().right());
 
-			map.iterate_neighborhoods(patch_positions[i], process_neighborhood);
+			const patch_type* bottom_left_neighborhood[4];
+			const patch_type* top_left_neighborhood[4];
+			const patch_type* bottom_right_neighborhood[4];
+			const patch_type* top_right_neighborhood[4];
+			unsigned int bottom_left_neighbor_count = 1;
+			unsigned int top_left_neighbor_count = 1;
+			unsigned int bottom_right_neighbor_count = 1;
+			unsigned int top_right_neighbor_count = 1;
+			bottom_left_neighborhood[0] = current;
+			top_left_neighborhood[0] = current;
+			bottom_right_neighborhood[0] = current;
+			top_right_neighborhood[0] = current;
+			if (left != NULL) {
+				bottom_left_neighborhood[bottom_left_neighbor_count++] = left;
+				top_left_neighborhood[top_left_neighbor_count++] = left;
+			} if (right != NULL) {
+				bottom_right_neighborhood[bottom_right_neighbor_count++] = right;
+				top_right_neighborhood[top_right_neighbor_count++] = right;
+			} if (top != NULL) {
+				top_left_neighborhood[top_left_neighbor_count++] = top;
+				top_right_neighborhood[top_right_neighbor_count++] = top;
+			} if (bottom != NULL) {
+				bottom_left_neighborhood[bottom_left_neighbor_count++] = bottom;
+				bottom_right_neighborhood[bottom_right_neighbor_count++] = bottom;
+			} if (bottom_left != NULL) {
+				bottom_left_neighborhood[bottom_left_neighbor_count++] = bottom_left;
+			} if (top_left != NULL) {
+				top_left_neighborhood[top_left_neighbor_count++] = top_left;
+			} if (bottom_right != NULL) {
+				bottom_right_neighborhood[bottom_right_neighbor_count++] = bottom_right;
+			} if (top_right != NULL) {
+				top_right_neighborhood[top_right_neighbor_count++] = top_right;
+			}
+
+			/* propose moving each item */
+			const position patch_position_offset = patch_positions[i] * n;
+			for (unsigned int i = 0; i < current->items.length; i++) {
+fprintf(stderr, "gibbs_field.sample: proposing item movement %u\n", i);
+				/* propose a new position for this item */
+				const unsigned int item_type = current->items[i].item_type;
+				const position old_position = current->items[i].location;
+				position new_position = patch_position_offset + position(rng() % n, rng() % n);
+
+				const patch_type** old_neighborhood;
+				unsigned int old_neighborhood_size;
+				if (old_position.x - patch_position_offset.x < n / 2) {
+					if (old_position.y - patch_position_offset.y < n / 2) {
+						old_neighborhood = bottom_left_neighborhood;
+						old_neighborhood_size = bottom_left_neighbor_count;
+					} else {
+						old_neighborhood = top_left_neighborhood;
+						old_neighborhood_size = top_left_neighbor_count;
+					}
+				} else {
+					if (old_position.y - patch_position_offset.y < n / 2) {
+						old_neighborhood = bottom_right_neighborhood;
+						old_neighborhood_size = bottom_right_neighbor_count;
+					} else {
+						old_neighborhood = top_right_neighborhood;
+						old_neighborhood_size = top_right_neighbor_count;
+					}
+				}
+
+				const patch_type** new_neighborhood;
+				unsigned int new_neighborhood_size;
+				if (new_position.x - patch_position_offset.x < n / 2) {
+					if (new_position.y - patch_position_offset.y < n / 2) {
+						new_neighborhood = bottom_left_neighborhood;
+						new_neighborhood_size = bottom_left_neighbor_count;
+					} else {
+						new_neighborhood = top_left_neighborhood;
+						new_neighborhood_size = top_left_neighbor_count;
+					}
+				} else {
+					if (new_position.y - patch_position_offset.y < n / 2) {
+						new_neighborhood = bottom_right_neighborhood;
+						new_neighborhood_size = bottom_right_neighbor_count;
+					} else {
+						new_neighborhood = top_right_neighborhood;
+						new_neighborhood_size = top_right_neighbor_count;
+					}
+				}
+
+				/* compute the log acceptance probability */
+				float log_acceptance_probability = 0.0f;
+				bool new_position_occupied = false;
+				for (unsigned int j = 0; j < new_neighborhood_size; j++) {
+					const auto& items = new_neighborhood[j]->items;
+					for (unsigned int m = 0; m < items.length; m++) {
+						if (items[m].location == new_position) {
+							/* an item already exists at this proposed location */
+							new_position_occupied = true; break;
+						}
+						log_acceptance_probability += cache.interaction(new_position, items[m].location, item_type, items[m].item_type);
+						log_acceptance_probability += cache.interaction(items[m].location, new_position, items[m].item_type, item_type);
+					}
+					if (new_position_occupied) break;
+					log_acceptance_probability -= cache.interaction(new_position, new_position, item_type, item_type);
+				}
+				if (new_position_occupied) {
+fprintf(stderr, "gibbs_field.sample: done proposing item movement %u\n", i);
+					continue;
+				}
+
+				for (unsigned int j = 0; j < old_neighborhood_size; j++) {
+					const auto& items = old_neighborhood[j]->items;
+					for (unsigned int m = 0; m < items.length; m++) {
+						log_acceptance_probability -= cache.interaction(old_position, items[m].location, item_type, items[m].item_type);
+						log_acceptance_probability -= cache.interaction(items[m].location, old_position, items[m].item_type, item_type);
+					}
+					log_acceptance_probability += cache.interaction(old_position, old_position, item_type, item_type);
+				}
+
+				log_acceptance_probability += cache.intensity(new_position, item_type) - cache.intensity(old_position, item_type);
+
+				/* accept or reject the proposal depending on the computed probability */
+				float random = (float) rng() / rng.max();
+				if (log(random) < log_acceptance_probability) {
+					/* accept the proposal */
+					current->items.remove(i);
+					current->items.add({item_type, new_position, 0, 0});
+				}
+fprintf(stderr, "gibbs_field.sample: done proposing item movement %u\n", i);
+			}
+
+			/* propose creating a new item */
+fprintf(stderr, "gibbs_field.sample: proposing item creation\n");
+			const unsigned int item_type = rng() % cache.item_type_count;
+			position new_position = patch_position_offset + position(rng() % n, rng() % n);
+
+			const patch_type** new_neighborhood;
+			unsigned int new_neighborhood_size;
+			if (new_position.x - patch_position_offset.x < n / 2) {
+				if (new_position.y - patch_position_offset.y < n / 2) {
+					new_neighborhood = bottom_left_neighborhood;
+					new_neighborhood_size = bottom_left_neighbor_count;
+				} else {
+					new_neighborhood = top_left_neighborhood;
+					new_neighborhood_size = top_left_neighbor_count;
+				}
+			} else {
+				if (new_position.y - patch_position_offset.y < n / 2) {
+					new_neighborhood = bottom_right_neighborhood;
+					new_neighborhood_size = bottom_right_neighbor_count;
+				} else {
+					new_neighborhood = top_right_neighborhood;
+					new_neighborhood_size = top_right_neighbor_count;
+				}
+			}
+
+			float log_acceptance_probability = 0.0f;
+			bool new_position_occupied = false;
+			for (unsigned int j = 0; j < new_neighborhood_size; j++) {
+				const auto& items = new_neighborhood[j]->items;
+				for (unsigned int m = 0; m < items.length; m++) {
+					if (items[m].location == new_position) {
+						/* an item already exists at this proposed location */
+						new_position_occupied = true; break;
+					}
+					log_acceptance_probability += cache.interaction(new_position, items[m].location, item_type, items[m].item_type);
+					log_acceptance_probability += cache.interaction(items[m].location, new_position, items[m].item_type, item_type);
+				}
+				if (new_position_occupied) break;
+				log_acceptance_probability -= cache.interaction(new_position, new_position, item_type, item_type);
+			}
+			static const float LOG_ITEM_TYPE_COUNT = log(cache.item_type_count); /* TODO: precompute this elsewhere (maybe `map`) and pass it */
+			if (!new_position_occupied) {
+				log_acceptance_probability += cache.intensity(new_position, item_type);
+
+				/* add log probability of inverse proposal */
+				log_acceptance_probability += -log(current->items.length + 1); /* TODO: using `log_cache` may speed this up */
+
+				/* subtract log probability of forward proposal */
+				log_acceptance_probability -= -LOG_ITEM_TYPE_COUNT - log(n*n - current->items.length); /* TODO: we can precompute log(cache.item_type_count)` */
+
+				/* accept or reject the proposal depending on the computed probability */
+				float random = (float) rng() / rng.max();
+				if (log(random) < log_acceptance_probability) {
+					/* accept the proposal */
+					current->items.add({item_type, new_position, 0, 0});
+				}
+			}
+fprintf(stderr, "gibbs_field.sample: done proposing item creation\n");
+
+			/* propose deleting an item */
+			if (current->items.length > 0) {
+fprintf(stderr, "gibbs_field.sample: proposing item deletion\n");
+				unsigned int item_index = rng() % current->items.length;
+				const unsigned int old_item_type = current->items[item_index].item_type;
+				const position old_position = current->items[item_index].location;
+
+				const patch_type** old_neighborhood;
+				unsigned int old_neighborhood_size;
+				if (old_position.x - patch_position_offset.x < n / 2) {
+					if (old_position.y - patch_position_offset.y < n / 2) {
+						old_neighborhood = bottom_left_neighborhood;
+						old_neighborhood_size = bottom_left_neighbor_count;
+					} else {
+						old_neighborhood = top_left_neighborhood;
+						old_neighborhood_size = top_left_neighbor_count;
+					}
+				} else {
+					if (old_position.y - patch_position_offset.y < n / 2) {
+						old_neighborhood = bottom_right_neighborhood;
+						old_neighborhood_size = bottom_right_neighbor_count;
+					} else {
+						old_neighborhood = top_right_neighborhood;
+						old_neighborhood_size = top_right_neighbor_count;
+					}
+				}
+
+				log_acceptance_probability = 0.0f;
+				for (unsigned int j = 0; j < old_neighborhood_size; j++) {
+					const auto& items = old_neighborhood[j]->items;
+					for (unsigned int m = 0; m < items.length; m++) {
+						log_acceptance_probability -= cache.interaction(old_position, items[m].location, old_item_type, items[m].item_type);
+						log_acceptance_probability -= cache.interaction(items[m].location, old_position, items[m].item_type, old_item_type);
+					}
+					log_acceptance_probability += cache.interaction(old_position, old_position, old_item_type, old_item_type);
+				}
+				log_acceptance_probability -= cache.intensity(old_position, old_item_type);
+
+				/* add log probability of inverse proposal */
+				log_acceptance_probability += -LOG_ITEM_TYPE_COUNT - log(n*n - current->items.length + 1);
+
+				/* subtract log probability of forward proposal */
+				log_acceptance_probability -= -log(current->items.length); /* TODO: using `log_cache` may speed this up */
+
+				/* accept or reject the proposal depending on the computed probability */
+				float random = (float) rng() / rng.max();
+				if (log(random) < log_acceptance_probability) {
+					/* accept the proposal */
+					current->items.remove(item_index);
+				}
+fprintf(stderr, "gibbs_field.sample: done proposing item deletion\n");
+			}
 		}
 	}
 
