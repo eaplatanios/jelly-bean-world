@@ -197,7 +197,6 @@ public:
 			/* propose moving each item */
 			const position patch_position_offset = patch_positions[i] * n;
 			for (unsigned int i = 0; i < current->items.length; i++) {
-fprintf(stderr, "gibbs_field.sample: proposing item movement %u\n", i);
 				/* propose a new position for this item */
 				const unsigned int item_type = current->items[i].item_type;
 				const position old_position = current->items[i].location;
@@ -259,10 +258,7 @@ fprintf(stderr, "gibbs_field.sample: proposing item movement %u\n", i);
 					if (new_position_occupied) break;
 					log_acceptance_probability -= cache.interaction(new_position, new_position, item_type, item_type);
 				}
-				if (new_position_occupied) {
-fprintf(stderr, "gibbs_field.sample: done proposing item movement %u\n", i);
-					continue;
-				}
+				if (new_position_occupied) continue;
 
 				for (unsigned int j = 0; j < old_neighborhood_size; j++) {
 					const auto& items = old_neighborhood[j]->items;
@@ -282,11 +278,9 @@ fprintf(stderr, "gibbs_field.sample: done proposing item movement %u\n", i);
 					current->items.remove(i);
 					current->items.add({item_type, new_position, 0, 0});
 				}
-fprintf(stderr, "gibbs_field.sample: done proposing item movement %u\n", i);
 			}
 
 			/* propose creating a new item */
-fprintf(stderr, "gibbs_field.sample: proposing item creation\n");
 			const unsigned int item_type = rng() % cache.item_type_count;
 			position new_position = patch_position_offset + position(rng() % n, rng() % n);
 
@@ -342,11 +336,9 @@ fprintf(stderr, "gibbs_field.sample: proposing item creation\n");
 					current->items.add({item_type, new_position, 0, 0});
 				}
 			}
-fprintf(stderr, "gibbs_field.sample: done proposing item creation\n");
 
 			/* propose deleting an item */
 			if (current->items.length > 0) {
-fprintf(stderr, "gibbs_field.sample: proposing item deletion\n");
 				unsigned int item_index = rng() % current->items.length;
 				const unsigned int old_item_type = current->items[item_index].item_type;
 				const position old_position = current->items[item_index].location;
@@ -394,7 +386,6 @@ fprintf(stderr, "gibbs_field.sample: proposing item deletion\n");
 					/* accept the proposal */
 					current->items.remove(item_index);
 				}
-fprintf(stderr, "gibbs_field.sample: done proposing item deletion\n");
 			}
 		}
 	}
