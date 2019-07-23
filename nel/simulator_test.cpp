@@ -546,18 +546,18 @@ int main(int argc, const char** argv)
 	config.max_steps_per_movement = 1;
 	config.scent_dimension = 3;
 	config.color_dimension = 3;
-	config.vision_range = 10;
+	config.vision_range = 5;
 	for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
 		config.allowed_movement_directions[i] = true;
 	for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
 		config.allowed_rotations[i] = true;
 	config.patch_size = 32;
-	config.gibbs_iterations = 10;
+	config.mcmc_iterations = 4000;
 	config.agent_color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.agent_color[2] = 1.0f;
 	config.collision_policy = collision_policy;
-	config.decay_param = 0.5f;
-	config.diffusion_param = 0.12f;
+	config.decay_param = 0.4f;
+	config.diffusion_param = 0.14f;
 	config.deleted_item_lifetime = 2000;
 
 	/* configure item types */
