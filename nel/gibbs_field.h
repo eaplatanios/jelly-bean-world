@@ -9,7 +9,7 @@
 #define GIBBS_SAMPLING 0
 #define MH_SAMPLING 1
 
-#define SAMPLING_METHOD GIBBS_SAMPLING
+#define SAMPLING_METHOD MH_SAMPLING
 
 namespace nel {
 
