@@ -413,7 +413,7 @@ public:
 					log_acceptance_probability += cache.intensity(new_position, item_type);
 
 					/* add log probability of inverse proposal */
-					logarithm.ensure_size(current->items.length);
+					logarithm.ensure_size(current->items.length + 2);
 					log_acceptance_probability += (float) -logarithm.get(current->items.length + 1);
 
 					/* subtract log probability of forward proposal */
@@ -467,7 +467,7 @@ public:
 				log_acceptance_probability += -LOG_ITEM_TYPE_COUNT - LOG_N_SQUARED;
 
 				/* subtract log probability of forward proposal */
-					logarithm.ensure_size(current->items.length);
+					logarithm.ensure_size(current->items.length + 1);
 				log_acceptance_probability -= (float) -logarithm.get(current->items.length);
 
 				/* accept or reject the proposal depending on the computed probability */
