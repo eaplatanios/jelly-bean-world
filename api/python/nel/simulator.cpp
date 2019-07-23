@@ -35,7 +35,7 @@ static PyObject* mpi_error;
 struct py_simulator_data
 {
     char* save_directory;
-    unsigned int save_directory_length;
+    size_t save_directory_length;
     unsigned int save_frequency;
     async_server* server;
     PyObject* callback;
@@ -44,7 +44,7 @@ struct py_simulator_data
     array<uint64_t> agent_ids;
 
     py_simulator_data(const char* save_filepath,
-            unsigned int save_filepath_length,
+            size_t save_filepath_length,
             unsigned int save_frequency,
             async_server* server,
             PyObject* callback) :
@@ -60,7 +60,7 @@ struct py_simulator_data
                 exit(EXIT_FAILURE);
             }
             save_directory_length = save_filepath_length;
-            for (unsigned int i = 0; i < save_filepath_length; i++)
+            for (size_t i = 0; i < save_filepath_length; i++)
                 save_directory[i] = save_filepath[i];
         }
         Py_INCREF(callback);
@@ -97,12 +97,12 @@ inline bool init(py_simulator_data& data, const py_simulator_data& src)
     data.agent_ids.append(src.agent_ids.data, src.agent_ids.length);
 
     if (src.save_directory != NULL) {
-        data.save_directory = (char*) malloc(sizeof(char) * max(1u, src.save_directory_length));
+        data.save_directory = (char*) malloc(sizeof(char) * max((size_t) 1, src.save_directory_length));
         if (data.save_directory == NULL) {
             fprintf(stderr, "init ERROR: Insufficient memory for py_simulator_data.save_directory.\n");
             free(data.agent_ids); return false;
         }
-        for (unsigned int i = 0; i < src.save_directory_length; i++)
+        for (size_t i = 0; i < src.save_directory_length; i++)
             data.save_directory[i] = src.save_directory[i];
         data.save_directory_length = src.save_directory_length;
     } else {
@@ -203,7 +203,7 @@ bool save(const simulator<py_simulator_data>* sim, uint64_t time)
         return false;
     }
 
-    for (unsigned int i = 0; i < data.save_directory_length; i++)
+    for (size_t i = 0; i < data.save_directory_length; i++)
         filepath[i] = data.save_directory[i];
     snprintf(filepath + data.save_directory_length, length + 1, "%" PRIu64, time);
 

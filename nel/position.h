@@ -80,6 +80,11 @@ struct position {
 		dst.x = src.x; dst.y = src.y;
 	}
 
+	static inline void swap(position& first, position& second) {
+		core::swap(first.x, second.x);
+		core::swap(first.y, second.y);
+	}
+
 	static inline unsigned int hash(const position& key) {
 		return default_hash(key.x) ^ default_hash(key.y);
 	}

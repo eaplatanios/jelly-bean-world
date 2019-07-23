@@ -35,7 +35,7 @@ struct item_properties {
 int main(int argc, const char** argv) {
 
 	static constexpr int n = 32;
-	float intensity_per_item[] = { -2.0f };
+	float intensity_per_item[] = { -5.0f };
 	float interaction_arg[] = { 40.0f, 200.0f, 0.0f, -40.0f };
 
 	energy_function<interaction_function> interaction_fn;
@@ -48,17 +48,27 @@ int main(int argc, const char** argv) {
 	item_type.intensity_fn.args = intensity_per_item;
 	item_type.intensity_fn.arg_count = 1;
 	item_type.interaction_fns = &interaction_fn;
-	auto m = map<empty_data, item_properties>(n, 10, &item_type, 1);
 
-	patch<empty_data>* neighborhood[4];
-	position neighbor_positions[4];
-	m.get_fixed_neighborhood({0, 0}, neighborhood, neighbor_positions);
+	double density_sum = 0.0;
+	double density_sum_squared = 0.0;
+	for (unsigned int t = 0; true; t++) {
+		auto m = map<empty_data, item_properties>(n, 100, &item_type, 1);
 
-	array<item> items(128);
-	m.get_items({-2*n, -2*n}, {2*n - 1, 2*n - 1}, items);
+		patch<empty_data>* neighborhood[4];
+		position neighbor_positions[4];
+		m.get_fixed_neighborhood({0, 0}, neighborhood, neighbor_positions);
 
-	FILE* out = stdout;
-	item_position_printer printer;
-	print(items, out, printer); print('\n', out); fflush(out);
+		array<item> items(128);
+		m.get_items({-2*n, -2*n}, {2*n - 1, 2*n - 1}, items);
+
+		FILE* out = stdout;
+		//item_position_printer printer;
+		//print(items, out, printer); print('\n', out); fflush(out);
+		double estimated_density = (double) items.length / (4*4*n*n);
+		density_sum += estimated_density;
+		density_sum_squared += estimated_density * estimated_density;
+		double estimated_mean = density_sum/(t+1);
+		printf("[sample %u] average item density = %.10lf, stddev = %.10lf\n", t, estimated_mean, sqrt(density_sum_squared/(t+1) - estimated_mean*estimated_mean));
+	}
 	return EXIT_SUCCESS;
 }

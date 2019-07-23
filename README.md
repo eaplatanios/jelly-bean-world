@@ -68,7 +68,7 @@ items.append(nel.Item("banana", [1.0, 1.0, 0.0], [1.0, 1.0, 0.0], [0], [0], Fals
 config = nel.SimulatorConfig(max_steps_per_movement=1, vision_range=1,
   allowed_movement_directions=[nel.RelativeDirection.FORWARD],
   allowed_turn_directions=[nel.RelativeDirection.LEFT, nel.RelativeDirection.RIGHT],
-  patch_size=32, gibbs_num_iter=10, items=items, agent_color=[0.0, 0.0, 1.0],
+  patch_size=32, gibbs_num_iter=2, items=items, agent_color=[0.0, 0.0, 1.0],
   collision_policy=nel.MovementConflictPolicy.FIRST_COME_FIRST_SERVED,
   decay_param=0.4, diffusion_param=0.14, deleted_item_lifetime=2000)
 
@@ -209,7 +209,7 @@ int main(int argc, const char** argv) {
   for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
     config.allowed_rotations[i] = true;
   config.patch_size = 32;
-  config.gibbs_iterations = 10;
+  config.gibbs_iterations = 2;
   config.agent_color = (float*) calloc(config.color_dimension, sizeof(float));
   config.agent_color[2] = 1.0f;
   config.collision_policy = movement_conflict_policy::FIRST_COME_FIRST_SERVED;
