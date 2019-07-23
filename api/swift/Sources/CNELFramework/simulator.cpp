@@ -772,7 +772,7 @@ void* simulatorCreate(
   sim_config.color_dimension = config->colorDimSize;
   sim_config.vision_range = config->visionRange;
   sim_config.patch_size = config->patchSize;
-  sim_config.gibbs_iterations = config->gibbsIterations;
+  sim_config.mcmc_iterations = config->mcmcIterations;
   sim_config.collision_policy = to_movement_conflict_policy(config->movementConflictPolicy);
   sim_config.decay_param = config->scentDecay;
   sim_config.diffusion_param = config->scentDiffusion;

@@ -96,7 +96,7 @@ typedef struct SimulatorConfig {
 
   /* World Properties */
   unsigned int patchSize;
-  unsigned int gibbsIterations;
+  unsigned int mcmcIterations;
   const ItemProperties* itemTypes;
   unsigned int numItemTypes;
   const float* agentColor;

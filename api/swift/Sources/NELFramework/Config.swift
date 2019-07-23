@@ -83,7 +83,7 @@ public struct SimulatorConfig: Equatable, Hashable {
 
   // World properties
   public let patchSize: UInt32
-  public let gibbsIterations: UInt32
+  public let mcmcIterations: UInt32
   public let items: [Item]
   public let agentColor: ShapedArray<Float>
   public let moveConflictPolicy: MoveConflictPolicy
@@ -103,7 +103,7 @@ public struct SimulatorConfig: Equatable, Hashable {
     allowedMoves: Set<Direction>,
     allowedTurns: Set<TurnDirection>,
     patchSize: UInt32,
-    gibbsIterations: UInt32,
+    mcmcIterations: UInt32,
     items: [Item],
     agentColor: ShapedArray<Float>,
     moveConflictPolicy: MoveConflictPolicy,
@@ -119,7 +119,7 @@ public struct SimulatorConfig: Equatable, Hashable {
     self.allowedMoves = allowedMoves
     self.allowedTurns = allowedTurns
     self.patchSize = patchSize
-    self.gibbsIterations = gibbsIterations
+    self.mcmcIterations = mcmcIterations
     self.items = items
     self.agentColor = agentColor
     self.moveConflictPolicy = moveConflictPolicy
@@ -159,7 +159,7 @@ public struct SimulatorConfig: Equatable, Hashable {
           allowedTurns.contains(.left),
           allowedTurns.contains(.right)),
         patchSize: patchSize, 
-        gibbsIterations: gibbsIterations, 
+        mcmcIterations: mcmcIterations,
         itemTypes: cItems,
         numItemTypes: UInt32(items.count),
         agentColor: cColor,

@@ -27,7 +27,7 @@ class SimulatorConfig(object):
   """Represents a configuration for a simulator."""
 
   def __init__(self, max_steps_per_movement, allowed_movement_directions,
-      allowed_turn_directions, vision_range, patch_size, gibbs_num_iter, items,
+      allowed_turn_directions, vision_range, patch_size, mcmc_num_iter, items,
       agent_color, collision_policy, decay_param, diffusion_param,
       deleted_item_lifetime, seed=0):
     """Creates a new simulator configuration.
@@ -42,7 +42,7 @@ class SimulatorConfig(object):
       vision_range:                Vision range of each agent.
       patch_size:                  Size of each patch used by the map
                                    generator.
-      gibbs_num_iter:              Number of Gibbs sampling iterations
+      mcmc_num_iter:               Number of Gibbs sampling iterations
                                    performed for sampling each patch of the
                                    map.
       items:                       List of items to include in this world.
@@ -57,7 +57,7 @@ class SimulatorConfig(object):
     self.color_num_dims = len(items[0].color)
     self.vision_range = vision_range
     self.patch_size = patch_size
-    self.gibbs_num_iter = gibbs_num_iter
+    self.mcmc_num_iter = mcmc_num_iter
     self.items = items
     self.agent_color = agent_color
     assert len(agent_color) == self.color_num_dims, 'Agent color must have the same dimension as item colors'
@@ -186,7 +186,7 @@ class Simulator(object):
       self._handle = simulator_c.new(sim_config.seed,
         sim_config.max_steps_per_movement, [d.value for d in sim_config.allowed_movement_directions],
         [d.value for d in sim_config.allowed_turn_directions], sim_config.scent_num_dims,
-        sim_config.color_num_dims, sim_config.vision_range, sim_config.patch_size, sim_config.gibbs_num_iter,
+        sim_config.color_num_dims, sim_config.vision_range, sim_config.patch_size, sim_config.mcmc_num_iter,
         [(i.name, i.scent, i.color, i.required_item_counts, i.required_item_costs, i.blocks_movement, i.intensity_fn, i.intensity_fn_args, i.interaction_fns) for i in sim_config.items],
         sim_config.agent_color, sim_config.collision_policy.value, sim_config.decay_param,
         sim_config.diffusion_param, sim_config.deleted_item_lifetime, self._step_callback,

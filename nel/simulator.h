@@ -389,7 +389,7 @@ struct simulator_config {
 
     /* world properties */
     unsigned int patch_size;
-    unsigned int gibbs_iterations;
+    unsigned int mcmc_iterations;
     array<item_properties> item_types;
     float* agent_color;
     movement_conflict_policy collision_policy;
@@ -417,7 +417,7 @@ struct simulator_config {
         core::swap(first.color_dimension, second.color_dimension);
         core::swap(first.vision_range, second.vision_range);
         core::swap(first.patch_size, second.patch_size);
-        core::swap(first.gibbs_iterations, second.gibbs_iterations);
+        core::swap(first.mcmc_iterations, second.mcmc_iterations);
         core::swap(first.item_types, second.item_types);
         core::swap(first.agent_color, second.agent_color);
         core::swap(first.collision_policy, second.collision_policy);
@@ -461,7 +461,7 @@ private:
         color_dimension = src.color_dimension;
         vision_range = src.vision_range;
         patch_size = src.patch_size;
-        gibbs_iterations = src.gibbs_iterations;
+        mcmc_iterations = src.mcmc_iterations;
         collision_policy = src.collision_policy;
         decay_param = src.decay_param;
         diffusion_param = src.diffusion_param;
@@ -514,7 +514,7 @@ bool read(simulator_config& config, Stream& in) {
      || !read(config.allowed_movement_directions, in)
      || !read(config.allowed_rotations, in)
      || !read(config.patch_size, in)
-     || !read(config.gibbs_iterations, in)
+     || !read(config.mcmc_iterations, in)
      || !read(config.item_types.length, in))
         return false;
 
@@ -557,7 +557,7 @@ bool write(const simulator_config& config, Stream& out) {
         && write(config.allowed_movement_directions, out)
         && write(config.allowed_rotations, out)
         && write(config.patch_size, out)
-        && write(config.gibbs_iterations, out)
+        && write(config.mcmc_iterations, out)
         && write(config.item_types.length, out)
         && write(config.item_types.data, out, config.item_types.length, config.scent_dimension, config.color_dimension, (unsigned int) config.item_types.length)
         && write(config.agent_color, out, config.color_dimension)
@@ -872,10 +872,10 @@ inline bool init(
     new (&agent.lock) std::mutex();
 
     patch<patch_data>* neighborhood[4]; position patch_positions[4];
-    world.gibbs_iterations *= 10; /* TODO: should this be configurable? */
+    world.mcmc_iterations *= 10; /* TODO: should this be configurable? */
     unsigned int index = world.get_fixed_neighborhood(
         agent.current_position, neighborhood, patch_positions);
-    world.gibbs_iterations /= 10;
+    world.mcmc_iterations /= 10;
     neighborhood[index]->data.patch_lock.lock();
     if (config.collision_policy != movement_conflict_policy::NO_COLLISIONS) {
         for (const agent_state* neighbor : neighborhood[index]->data.agents) {
@@ -1139,7 +1139,7 @@ public:
             uint_fast32_t seed) :
         config(conf),
         world(config.patch_size,
-            config.gibbs_iterations,
+            config.mcmc_iterations,
             config.item_types.data,
             (unsigned int) config.item_types.length, seed),
         agents(16), requested_moves(32, alloc_position_keys),
@@ -1741,7 +1741,7 @@ bool init(simulator<SimulatorData>& sim,
         free(sim.data); free(sim.config); free(sim.agents);
         free(sim.requested_moves); return false;
     } else if (!init(sim.world, sim.config.patch_size,
-            sim.config.gibbs_iterations,
+            sim.config.mcmc_iterations,
             sim.config.item_types.data,
             (unsigned int) sim.config.item_types.length, seed)) {
         free(sim.config); free(sim.data);

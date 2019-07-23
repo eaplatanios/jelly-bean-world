@@ -743,7 +743,7 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(
       args, "IIOOIIIIIOOIffIOIz", &seed, &config.max_steps_per_movement,
       &py_allowed_movement_directions, &py_allowed_turn_directions, &config.scent_dimension,
-      &config.color_dimension, &config.vision_range, &config.patch_size, &config.gibbs_iterations,
+      &config.color_dimension, &config.vision_range, &config.patch_size, &config.mcmc_iterations,
       &py_items, &py_agent_color, &collision_policy, &config.decay_param, &config.diffusion_param,
       &config.deleted_item_lifetime, &py_callback, &save_frequency, &save_filepath)) {
         fprintf(stderr, "Invalid argument types in the call to 'simulator_c.new'.\n");

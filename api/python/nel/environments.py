@@ -53,7 +53,7 @@ def make_config():
   return SimulatorConfig(max_steps_per_movement=1, vision_range=5,
     allowed_movement_directions=[RelativeDirection.FORWARD],
     allowed_turn_directions=[RelativeDirection.LEFT, RelativeDirection.RIGHT],
-    patch_size=32, gibbs_num_iter=10, items=items, agent_color=[0.0, 0.0, 1.0],
+    patch_size=32, mcmc_num_iter=4000, items=items, agent_color=[0.0, 0.0, 1.0],
     collision_policy=MovementConflictPolicy.FIRST_COME_FIRST_SERVED,
     decay_param=0.4, diffusion_param=0.14, deleted_item_lifetime=2000)
 

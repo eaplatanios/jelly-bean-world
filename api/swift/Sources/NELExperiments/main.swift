@@ -102,7 +102,7 @@ let config = SimulatorConfig(
   allowedMoves: [.up],
   allowedTurns: [.left, .right],
   patchSize: 32,
-  gibbsIterations: 10,
+  mcmcIterations: 4000,
   items: [banana, onion, jellyBean, wall],
   agentColor: [0.0, 0.0, 1.0],
   moveConflictPolicy: .firstComeFirstServe,

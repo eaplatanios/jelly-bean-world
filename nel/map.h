@@ -134,7 +134,7 @@ struct map {
 	hash_map<position, patch<PerPatchData>> patches;
 
 	unsigned int n;
-	unsigned int gibbs_iterations;
+	unsigned int mcmc_iterations;
 
 	std::minstd_rand rng;
 	gibbs_field_cache<ItemType> cache;
@@ -143,8 +143,8 @@ struct map {
 	typedef ItemType item_type;
 
 public:
-	map(unsigned int n, unsigned int gibbs_iterations, const ItemType* item_types, unsigned int item_type_count, uint_fast32_t seed) :
-		patches(1024, alloc_position_keys), n(n), gibbs_iterations(gibbs_iterations), cache(item_types, item_type_count, n)
+	map(unsigned int n, unsigned int mcmc_iterations, const ItemType* item_types, unsigned int item_type_count, uint_fast32_t seed) :
+		patches(1024, alloc_position_keys), n(n), mcmc_iterations(mcmc_iterations), cache(item_types, item_type_count, n)
 	{
 		rng.seed(seed);
 #if !defined(NDEBUG)
@@ -154,8 +154,8 @@ public:
 #endif
 	}
 
-	map(unsigned int n, unsigned int gibbs_iterations, const ItemType* item_types, unsigned int item_type_count) :
-		map(n, gibbs_iterations, item_types, item_type_count,
+	map(unsigned int n, unsigned int mcmc_iterations, const ItemType* item_types, unsigned int item_type_count) :
+		map(n, mcmc_iterations, item_types, item_type_count,
 #if !defined(NDEBUG)
 			0) { }
 #else
@@ -445,7 +445,7 @@ private:
 		/* construct the Gibbs field and sample the patches at positions_to_sample */
 		gibbs_field<map<PerPatchData, ItemType>> field(
 				*this, cache, positions_to_sample.data, (unsigned int) positions_to_sample.length, n);
-		for (unsigned int i = 0; i < gibbs_iterations; i++)
+		for (unsigned int i = 0; i < mcmc_iterations; i++)
 			field.sample(rng);
 
 		for (unsigned int i = 0; i < patch_count; i++)
@@ -460,13 +460,13 @@ private:
 
 template<typename PerPatchData, typename ItemType>
 inline bool init(map<PerPatchData, ItemType>& world, unsigned int n,
-		unsigned int gibbs_iterations, const ItemType* item_types,
+		unsigned int mcmc_iterations, const ItemType* item_types,
 		unsigned int item_type_count, uint_fast32_t seed)
 {
 	if (!hash_map_init(world.patches, 1024, alloc_position_keys))
 		return false;
 	world.n = n;
-	world.gibbs_iterations = gibbs_iterations;
+	world.mcmc_iterations = mcmc_iterations;
 	if (!init(world.cache, item_types, item_type_count, n)) {
 		free(world.patches);
 		return false;
@@ -478,7 +478,7 @@ inline bool init(map<PerPatchData, ItemType>& world, unsigned int n,
 
 template<typename PerPatchData, typename ItemType>
 inline bool init(map<PerPatchData, ItemType>& world, unsigned int n,
-		unsigned int gibbs_iterations, const ItemType* item_types,
+		unsigned int mcmc_iterations, const ItemType* item_types,
 		unsigned int item_type_count)
 {
 #if !defined(NDEBUG)
@@ -486,7 +486,7 @@ inline bool init(map<PerPatchData, ItemType>& world, unsigned int n,
 #else
 	uint_fast32_t seed = (uint_fast32_t) milliseconds();
 #endif
-	return init(world, n, gibbs_iterations, item_types, item_type_count, seed);
+	return init(world, n, mcmc_iterations, item_types, item_type_count, seed);
 }
 
 template<typename PerPatchData, typename ItemType, typename Stream, typename PatchReader>
@@ -506,7 +506,7 @@ bool read(map<PerPatchData, ItemType>& world, Stream& in,
 
 	default_scribe scribe;
 	if (!read(world.n, in)
-	 || !read(world.gibbs_iterations, in)
+	 || !read(world.mcmc_iterations, in)
 	 || !read(world.patches, in, alloc_position_keys, scribe, patch_reader))
 		return false;
 	if (!init(world.cache, item_types, item_type_count, world.n)) {
@@ -531,7 +531,7 @@ bool write(const map<PerPatchData, ItemType>& world, Stream& out,
 
 	default_scribe scribe;
 	return write(world.n, out)
-		&& write(world.gibbs_iterations, out)
+		&& write(world.mcmc_iterations, out)
 		&& write(world.patches, out, scribe, patch_writer);
 }
 
