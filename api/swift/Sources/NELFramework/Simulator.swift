@@ -221,6 +221,6 @@ public final class Simulator {
   @inlinable
   internal func map(bottomLeft: Position, topRight: Position) -> SimulationMap {
     let cSimulationMap = CNELFramework.simulatorMap(handle, nil, bottomLeft.toC(), topRight.toC())
-    return SimulationMap.fromC(cSimulationMap, for: self)
+    return SimulationMap(fromC: cSimulationMap, for: self)
   }
 }
