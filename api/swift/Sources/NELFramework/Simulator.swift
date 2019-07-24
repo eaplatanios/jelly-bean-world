@@ -87,8 +87,8 @@ public final class Simulator {
   @inlinable
   public func step() {
     if agents.count == 1 {
-      var (id, agent) = agents.first!
-      switch agent.act(using: agentStates[id]!) {
+      let id = agents.first!.key
+      switch agents[id]!.act(using: agentStates[id]!) {
       case .none: ()
       case let .move(direction, stepCount):
         simulatorMoveAgent(handle, nil, id, direction.toC(), UInt32(stepCount))
@@ -103,10 +103,10 @@ public final class Simulator {
           qos: .default,
           attributes: .concurrent)
       }
-      for var (id, agent) in agents {
+      for id in agents.keys {
         let state = agentStates[id]!
         dispatchQueue!.async {
-          switch agent.act(using: state) {
+          switch self.agents[id]!.act(using: state) {
           case .none: ()
           case let .move(direction, stepCount):
             simulatorMoveAgent(self.handle, nil, id, direction.toC(), UInt32(stepCount))
@@ -184,7 +184,7 @@ public enum Direction: UInt32 {
 
   @inlinable
   internal func toC() -> CNELFramework.Direction {
-    CNELFramework.Direction(rawValue: self.rawValue)
+    CNELFramework.Direction(rawValue: rawValue)
   }
 }
 
@@ -198,7 +198,7 @@ public enum TurnDirection: UInt32 {
 
   @inlinable
   internal func toC() -> CNELFramework.TurnDirection {
-    CNELFramework.TurnDirection(rawValue: self.rawValue)
+    CNELFramework.TurnDirection(rawValue: rawValue)
   }
 }
 
@@ -212,6 +212,6 @@ public enum MoveConflictPolicy: UInt32 {
 
   @inlinable
   internal func toC() -> CNELFramework.MovementConflictPolicy {
-    CNELFramework.MovementConflictPolicy(rawValue: self.rawValue)
+    CNELFramework.MovementConflictPolicy(rawValue: rawValue)
   }
 }
