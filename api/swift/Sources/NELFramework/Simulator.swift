@@ -65,13 +65,13 @@ public enum MoveConflictPolicy: UInt32 {
 }
 
 public final class Simulator {
-  public let config: Simulator.Configuration
+  public let configuration: Simulator.Configuration
 
-  @usableFromInline
-  internal var handle: UnsafeMutableRawPointer?
+  /// Pointer to the underlying C API simulator instance.
+  @usableFromInline internal var handle: UnsafeMutableRawPointer?
 
-  @usableFromInline
-  internal var agents: [UInt64: Agent] = [:]
+  /// Agents interacting with this simulator (keyed by their unique identifiers).
+  @usableFromInline internal var agents: [UInt64: Agent] = [:]
 
   /// Represents the number of simulation steps that have been executed so far.
   public private(set) var time: UInt64 = 0
@@ -90,30 +90,30 @@ public final class Simulator {
 
   @inlinable
   public init(
-    using config: Simulator.Configuration,
+    using configuration: Simulator.Configuration,
     saveFrequency: UInt32 = 1000, 
     savePath: String? = nil
   ) {
-    self.config = config
-    var cConfig = config.toC()
+    self.configuration = configuration
+    var cConfiguration = configuration.toC()
     let pointer = Unmanaged.passUnretained(self).toOpaque()
     self.handle = CNELFramework.simulatorCreate(
-      &cConfig.simulatorConfig,
+      &cConfiguration.simulatorConfig,
       nativeOnStepCallback,
       pointer,
       saveFrequency, 
       savePath)
-    cConfig.deallocate()
+    cConfiguration.deallocate()
   }
 
   // @inlinable
   // public init(
-  //   using config: Simulator.Configuration,
+  //   using configuration: Simulator.Configuration,
   //   from file: URL,
   //   saveFrequency: UInt32,
   //   savePath: String
   // ) {
-  //   self.config = config
+  //   self.configuration = configuration
   //   let opaque = Unmanaged.passUnretained(self).toOpaque()
   //   let pointer = UnsafeMutableRawPointer(opaque)
   //   let info = CNELFramework.simulatorLoad(
@@ -140,7 +140,7 @@ public final class Simulator {
       UnsafePointer<AgentSimulationState>?,
       UInt32, 
       Bool
-  ) -> Void = { (simulatorPointer, states, numStates, saved) in 
+  ) -> Void = { (simulatorPointer, states, numStates, saved) in
     let unmanagedSimulator = Unmanaged<Simulator>.fromOpaque(simulatorPointer!)
     let simulator = unmanagedSimulator.takeUnretainedValue()
     simulator.time += 1

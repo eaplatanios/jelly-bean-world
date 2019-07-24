@@ -31,7 +31,7 @@ public class Agent {
   public var items: [Item: UInt32]? {
     rawItems.map {
       var counts = [Item: UInt32]()
-      for (index, item) in simulator.config.items.enumerated() {
+      for (index, item) in simulator.configuration.items.enumerated() {
         counts[item] = $0[index]
       }
       return counts
@@ -76,25 +76,25 @@ public class Agent {
     direction = Direction(fromC: state.direction)
 
     // Update scent.
-    let scentShape = [Int(simulator.config.scentDimSize)]
+    let scentShape = [Int(simulator.configuration.scentDimSize)]
     let scentBuffer = UnsafeBufferPointer(start: state.scent!, count: scentShape[0])
     rawScent = (shape: scentShape, values: Array(scentBuffer))
 
     // Update vision.
     let visionShape = [
-      2 * Int(simulator.config.visionRange) + 1, 
-      2 * Int(simulator.config.visionRange) + 1, 
-      Int(simulator.config.colorDimSize)]
+      2 * Int(simulator.configuration.visionRange) + 1, 
+      2 * Int(simulator.configuration.visionRange) + 1, 
+      Int(simulator.configuration.colorDimSize)]
     let visionSize = Int(
-      (2 * simulator.config.visionRange + 1) * 
-      (2 * simulator.config.visionRange + 1) * 
-      simulator.config.colorDimSize)
+      (2 * simulator.configuration.visionRange + 1) * 
+      (2 * simulator.configuration.visionRange + 1) * 
+      simulator.configuration.colorDimSize)
     let visionBuffer = UnsafeBufferPointer(start: state.vision!, count: visionSize)
     rawVision = (shape: visionShape, values: Array(visionBuffer))
 
     // Update items.
     rawItems = [UInt32](UnsafeBufferPointer(
       start: state.collectedItems!, 
-      count: simulator.config.items.count))
+      count: simulator.configuration.items.count))
   }
 }

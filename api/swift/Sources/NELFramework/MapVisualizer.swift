@@ -80,7 +80,7 @@ public final class MapVisualizer {
     let bottomLeft = Position(x: Int64(floor(self.xLim.0)), y: Int64(floor(self.yLim.0)))
     let topRight = Position(x: Int64(ceil(self.xLim.1)), y: Int64(ceil(self.yLim.1)))
     let map = self.simulator.map(bottomLeft: bottomLeft, topRight: topRight)
-    let n = Int(self.simulator.config.patchSize)
+    let n = Int(self.simulator.configuration.patchSize)
     self.ax.clear()
     self.ax.set_xlim(self.xLim.0, self.xLim.1)
     self.ax.set_ylim(self.yLim.0, self.yLim.1)
@@ -129,7 +129,7 @@ public final class MapVisualizer {
           numVertices: 3,
           radius: AGENT_RADIUS,
           orientation: position.angle,
-          facecolor: self.simulator.config.agentColor.scalars,
+          facecolor: self.simulator.configuration.agentColor.scalars,
           edgecolor: [0.0, 0.0, 0.0],
           linestyle: "solid",
           linewidth: 0.4))
@@ -140,12 +140,12 @@ public final class MapVisualizer {
         let id = item.itemType
         let x = Float(item.position.x)
         let y = Float(item.position.y)
-        if self.simulator.config.items[id].blocksMovement {
+        if self.simulator.configuration.items[id].blocksMovement {
           agentItemPatches.append(patches.Rectangle(
             [x - 0.5, y - 0.5],
             width: 1.0,
             height: 1.0,
-            facecolor: self.simulator.config.items[id].color.scalars,
+            facecolor: self.simulator.configuration.items[id].color.scalars,
             edgecolor: [0.0, 0.0, 0.0],
             linestyle: "solid",
             linewidth: 0.4))
@@ -153,7 +153,7 @@ public final class MapVisualizer {
           agentItemPatches.append(patches.Circle(
             [x, y],
             radius: ITEM_RADIUS,
-            facecolor: self.simulator.config.items[id].color.scalars,
+            facecolor: self.simulator.configuration.items[id].color.scalars,
             edgecolor: [0.0, 0.0, 0.0],
             linestyle: "solid",
             linewidth: 0.4))
@@ -181,7 +181,7 @@ public final class MapVisualizer {
     if self.simulator.agents.keys.contains(0) {
       if let axAgent = self.axAgent {
         let agent = self.simulator.agents[0]!
-        let r = Int(self.simulator.config.visionRange)
+        let r = Int(self.simulator.configuration.visionRange)
         let a = Python.slice(Python.None, Python.None, Python.None)
         
         axAgent.clear()
@@ -219,7 +219,7 @@ public final class MapVisualizer {
           numVertices: 3,
           radius: AGENT_RADIUS,
           orientation: position.angle,
-          facecolor: self.simulator.config.agentColor.scalars,
+          facecolor: self.simulator.configuration.agentColor.scalars,
           edgecolor: [0.0, 0.0, 0.0],
           linestyle: "solid",
           linewidth: 0.4)

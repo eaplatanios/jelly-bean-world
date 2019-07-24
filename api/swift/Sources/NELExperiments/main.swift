@@ -92,7 +92,7 @@ let wall = Item(
 
 // Create the simulator.
 
-let config = Simulator.Configuration(
+let configuration = Simulator.Configuration(
   randomSeed: 1234567890,
   maxStepsPerMove: 1,
   scentDimSize: 3,
@@ -108,7 +108,7 @@ let config = Simulator.Configuration(
   scentDecay: 0.4,
   scentDiffusion: 0.14,
   removedItemLifetime: 2000)
-let simulator = Simulator(using: config)
+let simulator = Simulator(using: configuration)
 
 // Create the agents.
 print("Creating agents.")

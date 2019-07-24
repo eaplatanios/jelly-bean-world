@@ -144,14 +144,14 @@ public struct Item: Equatable, Hashable {
   }
 
   @inlinable
-  internal func toC(in config: Simulator.Configuration) -> (
+  internal func toC(in configuration: Simulator.Configuration) -> (
     item: CNELFramework.ItemProperties,
     deallocate: () -> Void
   ) {
     let scent = self.scent.scalars
     let color = self.color.scalars
-    let counts = config.items.indices.map { requiredItemCounts[$0, default: 0] }
-    let costs = config.items.indices.map { requiredItemCosts[$0, default: 0] }
+    let counts = configuration.items.indices.map { requiredItemCounts[$0, default: 0] }
+    let costs = configuration.items.indices.map { requiredItemCosts[$0, default: 0] }
 
     // Allocate C arrays and copy data.
     let cScent = UnsafeMutablePointer<Float>.allocate(capacity: scent.count)
