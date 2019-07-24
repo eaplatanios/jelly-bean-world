@@ -46,11 +46,11 @@ let banana = Item(
   requiredItemCosts: [:],
   blocksMovement: false,
   energyFunctions: EnergyFunctions(
-    intensityFn: constantIntensity(-5.3),
+    intensityFn: .constant(-5.3),
     interactionFns: [
-      piecewiseBoxInteraction(itemId: 0,  10.0, 200.0,  0.0,  -6.0),
-      piecewiseBoxInteraction(itemId: 1, 200.0,   0.0, -6.0,  -6.0),
-      piecewiseBoxInteraction(itemId: 2,  10.0, 200.0, 2.0, -100.0)]))
+      .piecewiseBox(itemId: 0,  10.0, 200.0,  0.0,  -6.0),
+      .piecewiseBox(itemId: 1, 200.0,   0.0, -6.0,  -6.0),
+      .piecewiseBox(itemId: 2,  10.0, 200.0, 2.0, -100.0)]))
 
 let onion = Item(
   name: "onion",
@@ -60,10 +60,10 @@ let onion = Item(
   requiredItemCosts: [:],
   blocksMovement: false,
   energyFunctions: EnergyFunctions(
-    intensityFn: constantIntensity(-5.0),
+    intensityFn: .constant(-5.0),
     interactionFns: [
-      piecewiseBoxInteraction(itemId: 0, 200.0, 0.0,   -6.0,   -6.0),
-      piecewiseBoxInteraction(itemId: 2, 200.0, 0.0, -100.0, -100.0)]))
+      .piecewiseBox(itemId: 0, 200.0, 0.0,   -6.0,   -6.0),
+      .piecewiseBox(itemId: 2, 200.0, 0.0, -100.0, -100.0)]))
 
 let jellyBean = Item(
   name: "jellyBean",
@@ -73,11 +73,11 @@ let jellyBean = Item(
   requiredItemCosts: [:],
   blocksMovement: false,
   energyFunctions: EnergyFunctions(
-    intensityFn: constantIntensity(-5.3),
+    intensityFn: .constant(-5.3),
     interactionFns: [
-      piecewiseBoxInteraction(itemId: 0,  10.0, 200.0,    2.0, -100.0),
-      piecewiseBoxInteraction(itemId: 1, 200.0,   0.0, -100.0, -100.0),
-      piecewiseBoxInteraction(itemId: 2,  10.0, 200.0,  0.0,   -6.0)]))
+      .piecewiseBox(itemId: 0,  10.0, 200.0,    2.0, -100.0),
+      .piecewiseBox(itemId: 1, 200.0,   0.0, -100.0, -100.0),
+      .piecewiseBox(itemId: 2,  10.0, 200.0,  0.0,   -6.0)]))
 
 let wall = Item(
   name: "wall",
@@ -87,13 +87,12 @@ let wall = Item(
   requiredItemCosts: [:],
   blocksMovement: true,
   energyFunctions: EnergyFunctions(
-    intensityFn: constantIntensity(0.0),
-    interactionFns: [
-      crossInteraction(itemId: 3, 10.0, 15.0, 20.0, -200.0, -20.0, 1.0)]))
+    intensityFn: .constant(0.0),
+    interactionFns: [.cross(itemId: 3, 10.0, 15.0, 20.0, -200.0, -20.0, 1.0)]))
 
 // Create the simulator.
 
-let config = SimulatorConfig(
+let config = Simulator.Configuration(
   randomSeed: 1234567890,
   maxStepsPerMove: 1,
   scentDimSize: 3,

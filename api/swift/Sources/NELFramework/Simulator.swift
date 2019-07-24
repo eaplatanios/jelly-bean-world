@@ -65,7 +65,7 @@ public enum MoveConflictPolicy: UInt32 {
 }
 
 public final class Simulator {
-  public let config: SimulatorConfig
+  public let config: Simulator.Configuration
 
   @usableFromInline
   internal var handle: UnsafeMutableRawPointer?
@@ -90,7 +90,7 @@ public final class Simulator {
 
   @inlinable
   public init(
-    using config: SimulatorConfig,
+    using config: Simulator.Configuration,
     saveFrequency: UInt32 = 1000, 
     savePath: String? = nil
   ) {
@@ -108,7 +108,7 @@ public final class Simulator {
 
   // @inlinable
   // public init(
-  //   using config: SimulatorConfig,
+  //   using config: Simulator.Configuration,
   //   from file: URL,
   //   saveFrequency: UInt32,
   //   savePath: String
