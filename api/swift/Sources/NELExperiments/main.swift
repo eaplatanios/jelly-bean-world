@@ -8,28 +8,31 @@ let mpl = Python.import("matplotlib")
 mpl.use("TkAgg")
 
 // Create a dummy agent delegate.
-final class DummyAgentDelegate: AgentDelegate {
-  private var counter: UInt64 = 0
+class DummyAgent: Agent {
+  @usableFromInline internal var counter: UInt64 = 0
 
-  func act(_ agent: Agent) {
+  @inlinable
+  public override func act() {
     self.counter += 1
     switch self.counter % 20 {
-      case 0:  agent.turn(towards: .left)
-      case 5:  agent.turn(towards: .left)
-      case 10: agent.turn(towards: .right)
-      case 15: agent.turn(towards: .right)
-      default: agent.move(towards: .up, by: 1)
+      case 0:  turn(towards: .left)
+      case 5:  turn(towards: .left)
+      case 10: turn(towards: .right)
+      case 15: turn(towards: .right)
+      default: move(towards: .up, by: 1)
     }
   }
 
-  func save(_ agent: Agent, to file: URL) throws {
+  @inlinable
+  public override func save(to file: URL) throws {
     try String(counter).write(
       to: file, 
       atomically: true, 
       encoding: .utf8)
   }
 
-  func load(_ agent: Agent, from file: URL) throws {
+  @inlinable
+  public override func load(from file: URL) throws {
     self.counter = try UInt64(String(
       contentsOf: file, 
       encoding: .utf8))!
@@ -115,9 +118,7 @@ print("Creating agents.")
 let numAgents = 1
 var agents = [Agent]()
 while agents.count < numAgents {
-  agents.append(Agent(
-    in: simulator, 
-    with: DummyAgentDelegate()))
+  agents.append(DummyAgent(in: simulator))
 }
 
 print("Starting simulation.")
