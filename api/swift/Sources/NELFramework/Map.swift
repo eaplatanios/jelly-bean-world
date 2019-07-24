@@ -1,9 +1,12 @@
 import CNELFramework
 import TensorFlow
 
+/// A simulation map.
 public struct SimulationMap {
   public let patches: [Patch]
 
+  /// Creates a new simulation map which consists of the provided patches.
+  /// - Parameter patches: Patches comprising the new simulation map.
   @inlinable
   public init(patches: [Patch]) {
     self.patches = patches
@@ -90,16 +93,23 @@ extension SimulationMap {
     }
   }
 
+  /// Information about an item located in the simulation map.
   public struct ItemInformation {
+    /// Item type.
     public let itemType: Int
+
+    /// Item position in the map.
     public let position: Position
 
+    /// Creates a new item information object.
     @inlinable
     public init(itemType: Int, position: Position) {
       self.itemType = itemType
       self.position = position
     }
 
+    /// Creates a new item information object on the Swift API side, corresponding to an exising
+    /// item information object on the C API side.
     @inlinable
     internal init(fromC value: CNELFramework.ItemInfo) {
       self.itemType = Int(value.type)
@@ -107,16 +117,23 @@ extension SimulationMap {
     }
   }
 
+  /// Information about an agent located in the simulation map.
   public struct AgentInformation {
+    /// Agent position.
     public let position: Position
+
+    /// Direction in which the agent is facing.
     public let direction: Direction
 
+    /// Creates a new agent information object.
     @inlinable
     public init(position: Position, direction: Direction) {
       self.position = position
       self.direction = direction
     }
 
+    /// Creates a new agent information object on the Swift API side, corresponding to an exising
+    /// agent information object on the C API side.
     @inlinable
     internal init(fromC value: CNELFramework.AgentInfo) {
       self.position = Position(fromC: value.position)

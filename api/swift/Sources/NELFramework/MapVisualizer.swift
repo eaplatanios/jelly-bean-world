@@ -180,7 +180,7 @@ public final class MapVisualizer {
     // Draw the agent's perspective.
     if self.simulator.agents.keys.contains(0) {
       if let axAgent = self.axAgent {
-        let agent = self.simulator.agents[0]!
+        let agentState = self.simulator.agentStates[0]!
         let r = Int(self.simulator.configuration.visionRange)
         let a = Python.slice(Python.None, Python.None, Python.None)
         
@@ -228,7 +228,7 @@ public final class MapVisualizer {
 
         // Convert 'vision' to a numpy array and transform it into 
         // a subtractive color space (so that zero corresponds to white).
-        var visionImg = agent.vision!.makeNumpyArray()
+        var visionImg = agentState.vision.makeNumpyArray()
         visionImg = 1.0 - 0.5 * np.dot(visionImg, [[0, 1, 1], [1, 0, 1], [1, 1, 0]])
         let left = -Float(r) - 0.5
         let right = Float(r) + 0.5

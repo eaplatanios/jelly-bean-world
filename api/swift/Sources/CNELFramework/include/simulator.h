@@ -58,15 +58,11 @@ typedef struct EnergyFunctions {
 /** A structure containing the properties of an item type. */
 typedef struct ItemProperties {
   const char* name;
-
   const float* scent;
   const float* color;
-
   const unsigned int* requiredItemCounts;
   const unsigned int* requiredItemCosts;
-
   bool blocksMovement;
-
   EnergyFunctions energyFunctions;
 } ItemProperties;
 

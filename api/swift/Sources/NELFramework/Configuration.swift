@@ -81,30 +81,30 @@ extension Simulator {
       return (
         simulatorConfig: CNELFramework.SimulatorConfig(
           randomSeed: randomSeed,
-          maxStepsPerMove: maxStepsPerMove, 
-          scentDimSize: scentDimSize, 
-          colorDimSize: colorDimSize, 
-          visionRange: visionRange, 
+          maxStepsPerMove: maxStepsPerMove,
+          scentDimSize: scentDimSize,
+          colorDimSize: colorDimSize,
+          visionRange: visionRange,
           allowedMoveDirections: (
             allowedMoves.contains(.up),
             allowedMoves.contains(.down),
             allowedMoves.contains(.left),
-            allowedMoves.contains(.right)), 
+            allowedMoves.contains(.right)),
           allowedRotations: (
             allowedTurns.contains(.front),
             allowedTurns.contains(.back),
             allowedTurns.contains(.left),
             allowedTurns.contains(.right)),
-          patchSize: patchSize, 
+          patchSize: patchSize,
           mcmcIterations: mcmcIterations,
           itemTypes: cItems,
           numItemTypes: UInt32(items.count),
           agentColor: cColor,
-          movementConflictPolicy: moveConflictPolicy.toC(), 
-          scentDecay: scentDecay, 
-          scentDiffusion: scentDiffusion, 
+          movementConflictPolicy: moveConflictPolicy.toC(),
+          scentDecay: scentDecay,
+          scentDiffusion: scentDiffusion,
           removedItemLifetime: removedItemLifetime),
-        deallocate: { () in 
+        deallocate: { () in
           cItems.deallocate()
           cColor.deallocate()
           for deallocate in itemDeallocators {

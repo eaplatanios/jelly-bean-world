@@ -8,34 +8,29 @@ let mpl = Python.import("matplotlib")
 mpl.use("TkAgg")
 
 // Create a dummy agent delegate.
-class DummyAgent: Agent {
+struct DummyAgent: Agent {
   @usableFromInline internal var counter: UInt64 = 0
 
   @inlinable
-  public override func act() {
+  public mutating func act(using state: AgentState) -> Action {
     self.counter += 1
     switch self.counter % 20 {
-      case 0:  turn(towards: .left)
-      case 5:  turn(towards: .left)
-      case 10: turn(towards: .right)
-      case 15: turn(towards: .right)
-      default: move(towards: .up, by: 1)
+      case 0:  return .turn(direction: .left)
+      case 5:  return .turn(direction: .left)
+      case 10: return .turn(direction: .right)
+      case 15: return .turn(direction: .right)
+      default: return .move(direction: .up)
     }
   }
 
   @inlinable
-  public override func save(to file: URL) throws {
-    try String(counter).write(
-      to: file, 
-      atomically: true, 
-      encoding: .utf8)
+  public func save(to file: URL) throws {
+    try String(counter).write(to: file, atomically: true, encoding: .utf8)
   }
 
   @inlinable
-  public override func load(from file: URL) throws {
-    self.counter = try UInt64(String(
-      contentsOf: file, 
-      encoding: .utf8))!
+  public mutating func load(from file: URL) throws {
+    self.counter = try UInt64(String(contentsOf: file, encoding: .utf8))!
   }
 }
 
@@ -118,7 +113,9 @@ print("Creating agents.")
 let numAgents = 1
 var agents = [Agent]()
 while agents.count < numAgents {
-  agents.append(DummyAgent(in: simulator))
+  let agent = DummyAgent()
+  simulator.add(agent: agent)
+  agents.append(agent)
 }
 
 print("Starting simulation.")
