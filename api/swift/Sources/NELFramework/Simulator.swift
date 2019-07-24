@@ -24,8 +24,8 @@ public struct Position: Equatable {
   }
 
   @inlinable
-  internal static func fromC(_ value: CPosition) -> Position {
-    Position(x: value.x, y: value.y)
+  internal init(fromC value: CPosition) {
+    self.init(x: value.x, y: value.y)
   }
 
   @inlinable
@@ -38,8 +38,8 @@ public enum Direction: UInt32 {
   case up = 0, down, left, right
 
   @inlinable
-  internal static func fromC(_ value: CDirection) -> Direction {
-    Direction(rawValue: value.rawValue)!
+  internal init(fromC value: CDirection) {
+    self.init(rawValue: value.rawValue)!
   }
 
   @inlinable
@@ -217,10 +217,10 @@ public final class Simulator {
     CNELFramework.simulatorTurnAgent(handle, nil, agent.id!, direction.toC())
   }
 
-  // TODO: Map deallocator.
   @inlinable
   internal func map(bottomLeft: Position, topRight: Position) -> SimulationMap {
     let cSimulationMap = CNELFramework.simulatorMap(handle, nil, bottomLeft.toC(), topRight.toC())
+    defer { CNELFramework.simulatorDeleteSimulationMap(cSimulationMap) }
     return SimulationMap(fromC: cSimulationMap, for: self)
   }
 }

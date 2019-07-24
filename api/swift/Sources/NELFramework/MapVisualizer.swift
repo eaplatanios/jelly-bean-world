@@ -12,10 +12,8 @@ fileprivate let ITEM_RADIUS = 0.4
 fileprivate let MAXIMUM_SCENT = 0.9
 
 @inlinable
-internal func agentPosition(
-  _ direction: CDirection
-) -> (x: Float, y: Float, angle: Float) {
-  switch Direction.fromC(direction) {
+internal func agentPosition(_ direction: Direction) -> (x: Float, y: Float, angle: Float) {
+  switch direction {
     case .up: return (x: 0.0, y: -0.1, angle: 0.0)
     case .down: return (x: 0.0, y: 0.1, angle: Float.pi)
     case .left: return (x: 0.1, y: 0.0, angle: Float.pi / 2)
@@ -88,7 +86,7 @@ public final class MapVisualizer {
     self.ax.set_ylim(self.yLim.0, self.yLim.1)
 
     // Draw all the map patches.
-    for patch in map {
+    for patch in map.patches {
       let color = PythonObject(
         tupleContentsOf: patch.fixed ? [0.0, 0.0, 0.0, 0.3] : [0.0, 0.0, 0.0, 0.1])
       let a = Python.slice(Python.None, Python.None, Python.None)
@@ -139,7 +137,7 @@ public final class MapVisualizer {
 
       // Add the item patches.
       for item in patch.items {
-        let id = Int(item.type)
+        let id = item.itemType
         let x = Float(item.position.x)
         let y = Float(item.position.y)
         if self.simulator.config.items[id].blocksMovement {
@@ -215,7 +213,7 @@ public final class MapVisualizer {
         axAgent.add_collection(horizontalLinesCol)
 
         // Add the agent patch to the plot.
-        let position = agentPosition(Direction.up.toC())
+        let position = agentPosition(.up)
         let agentPatch = patches.RegularPolygon(
           [position.x, position.y],
           numVertices: 3,

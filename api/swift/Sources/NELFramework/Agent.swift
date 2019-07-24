@@ -72,8 +72,8 @@ public class Agent {
   @usableFromInline
   internal func updateSimulationState(_ state: AgentSimulationState) {
     id = state.id
-    position = Position.fromC(state.position)
-    direction = Direction.fromC(state.direction)
+    position = Position(fromC: state.position)
+    direction = Direction(fromC: state.direction)
     rawScent = scentToArray(for: simulator.config, state.scent!)
     rawVision = visionToArray(for: simulator.config, state.vision!)
     rawItems = itemCountsToArray(for: simulator.config, state.collectedItems!)
