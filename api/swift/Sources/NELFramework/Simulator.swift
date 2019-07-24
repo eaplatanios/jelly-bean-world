@@ -2,18 +2,6 @@ import CNELFramework
 import Foundation
 import TensorFlow
 
-@usableFromInline
-internal typealias CPosition = CNELFramework.Position
-
-@usableFromInline
-internal typealias CDirection = CNELFramework.Direction
-
-@usableFromInline
-internal typealias CTurnDirection = CNELFramework.TurnDirection
-
-@usableFromInline
-internal typealias CMovementConflictPolicy = CNELFramework.MovementConflictPolicy
-
 public struct Position: Equatable {
   public let x: Int64
   public let y: Int64
@@ -24,13 +12,13 @@ public struct Position: Equatable {
   }
 
   @inlinable
-  internal init(fromC value: CPosition) {
+  internal init(fromC value: CNELFramework.Position) {
     self.init(x: value.x, y: value.y)
   }
 
   @inlinable
-  internal func toC() -> CPosition {
-    CPosition(x: x, y: y)
+  internal func toC() -> CNELFramework.Position {
+    CNELFramework.Position(x: x, y: y)
   }
 }
 
@@ -38,13 +26,13 @@ public enum Direction: UInt32 {
   case up = 0, down, left, right
 
   @inlinable
-  internal init(fromC value: CDirection) {
+  internal init(fromC value: CNELFramework.Direction) {
     self.init(rawValue: value.rawValue)!
   }
 
   @inlinable
-  internal func toC() -> CDirection {
-    CDirection(rawValue: self.rawValue)
+  internal func toC() -> CNELFramework.Direction {
+    CNELFramework.Direction(rawValue: self.rawValue)
   }
 }
 
@@ -52,13 +40,13 @@ public enum TurnDirection: UInt32 {
   case front = 0, back, left, right
 
   @inlinable
-  internal static func fromC(_ value: CTurnDirection) -> TurnDirection {
-    TurnDirection(rawValue: value.rawValue)!
+  internal init(fromC value: CNELFramework.TurnDirection) {
+    self.init(rawValue: value.rawValue)!
   }
 
   @inlinable
-  internal func toC() -> CTurnDirection {
-    CTurnDirection(rawValue: self.rawValue)
+  internal func toC() -> CNELFramework.TurnDirection {
+    CNELFramework.TurnDirection(rawValue: self.rawValue)
   }
 }
 
@@ -66,13 +54,13 @@ public enum MoveConflictPolicy: UInt32 {
   case noCollisions = 0, firstComeFirstServe, random
 
   @inlinable
-  internal static func fromC(_ value: CMovementConflictPolicy) -> MoveConflictPolicy {
-    MoveConflictPolicy(rawValue: value.rawValue)!
+  internal init(fromC value: CNELFramework.MovementConflictPolicy) {
+    self.init(rawValue: value.rawValue)!
   }
 
   @inlinable
-  internal func toC() -> CMovementConflictPolicy {
-    CMovementConflictPolicy(rawValue: self.rawValue)
+  internal func toC() -> CNELFramework.MovementConflictPolicy {
+    CNELFramework.MovementConflictPolicy(rawValue: self.rawValue)
   }
 }
 
@@ -85,8 +73,7 @@ public final class Simulator {
   @usableFromInline
   internal var agents: [UInt64: Agent] = [:]
 
-  /// Represents the number of simulation steps that have 
-  /// been executed so far.
+  /// Represents the number of simulation steps that have been executed so far.
   public private(set) var time: UInt64 = 0
 
   @usableFromInline
@@ -152,18 +139,15 @@ public final class Simulator {
       UnsafeRawPointer?, 
       UnsafePointer<AgentSimulationState>?,
       UInt32, 
-      Bool) -> Void = { (simulatorPointer, states, numStates, saved) in 
+      Bool
+  ) -> Void = { (simulatorPointer, states, numStates, saved) in 
     let unmanagedSimulator = Unmanaged<Simulator>.fromOpaque(simulatorPointer!)
     let simulator = unmanagedSimulator.takeUnretainedValue()
     simulator.time += 1
     let buffer = UnsafeBufferPointer(start: states!, count: Int(numStates))
-    for state in buffer {
-      simulator.agents[state.id]!.updateSimulationState(state)
-    }
+    for state in buffer { simulator.agents[state.id]!.updateSimulationState(state) }
     if saved { simulator.saveAgents() }
-    if simulator.usingDispatchQueue {
-      simulator.dispatchSemaphore.signal()
-    }
+    if simulator.usingDispatchQueue { simulator.dispatchSemaphore.signal() }
   }
 
   @inlinable
