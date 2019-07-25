@@ -224,11 +224,11 @@ public struct AgentState {
 
   /// Scent that the agent smells. This is a vector with size `S`, where `S` is the scent vector
   /// size (i.e., the scent dimensionality).
-  public let scent: Tensor<Float>
+  public let scent: ShapedArray<Float>
 
   /// Visual field of the agent. This is a matrix with shape `[V + 1, V + 1, C]`, where `V` is the
   /// visual range of the agent and `C` is the color vector size (i.e., the color dimensionality).
-  public let vision: Tensor<Float>
+  public let vision: ShapedArray<Float>
 
   /// Items that collected by the agent so far represented as a dictionary mapping items to counts.
   public let items: [Item: Int]

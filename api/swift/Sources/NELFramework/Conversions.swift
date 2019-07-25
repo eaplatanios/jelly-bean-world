@@ -163,7 +163,7 @@ internal extension AgentState {
     // Construct the scent vector.
     let scentShape = [Int(simulator.configuration.scentDimensionality)]
     let scentBuffer = UnsafeBufferPointer(start: value.scent!, count: scentShape[0])
-    self.scent = Tensor(shape: TensorShape(scentShape), scalars: [Float](scentBuffer))
+    self.scent = ShapedArray(shape: scentShape, scalars: [Float](scentBuffer))
 
     // Construct the visual field.
     let visionShape = [
@@ -175,7 +175,7 @@ internal extension AgentState {
       (2 * simulator.configuration.visionRange + 1) *
       simulator.configuration.colorDimensionality)
     let visionBuffer = UnsafeBufferPointer(start: value.vision!, count: visionSize)
-    self.vision = Tensor(shape: TensorShape(visionShape), scalars: [Float](visionBuffer))
+    self.vision = ShapedArray(shape: visionShape, scalars: [Float](visionBuffer))
 
     // Construcct the collected items dictionary.
     let simulatorItems = simulator.configuration.items
