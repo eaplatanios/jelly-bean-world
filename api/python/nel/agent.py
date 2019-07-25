@@ -44,6 +44,9 @@ class Agent(object):
   def turn(self, direction):
     return self._simulator.turn(self, direction)
 
+  def no_op(self):
+    return self._simulator.no_op(self)
+
   def set_active(self, active):
     self._simulator.set_active(self, active)
 

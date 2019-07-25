@@ -515,6 +515,25 @@ void on_turn(client<py_client_data>& c, uint64_t agent_id, mpi_response response
 }
 
 /**
+ * The callback invoked when the client receives a do_nothing response from the
+ * server. This function copies the result into `c.data.server_response` and
+ * wakes up the Python thread (which should be waiting in the `simulator_no_op`
+ * function) so that it can return the response back to Python.
+ *
+ * \param   c               The client that received the response.
+ * \param   agent_id        The ID of the agent that requested to do nothing.
+ * \param   response        The MPI response from the server, containing
+ *                          information about any errors.
+ */
+void on_do_nothing(client<py_client_data>& c, uint64_t agent_id, mpi_response response) {
+    check_response(response, "no_op: ");
+    std::unique_lock<std::mutex> lck(c.data.lock);
+    c.data.waiting_for_server = false;
+    c.data.server_response = response;
+    c.data.cv.notify_one();
+}
+
+/**
  * The callback invoked when the client receives a get_map response from the
  * server. This function moves the result into `c.data.response_data.map` and
  * wakes up the Python thread (which should be waiting in the `simulator_map`
@@ -733,6 +752,7 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
     simulator_config config;
     PyObject* py_allowed_movement_directions;
     PyObject* py_allowed_turn_directions;
+    PyObject* py_no_op_allowed;
     PyObject* py_items;
     PyObject* py_agent_color;
     unsigned int seed;
@@ -741,10 +761,11 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
     unsigned int save_frequency;
     char* save_filepath;
     if (!PyArg_ParseTuple(
-      args, "IIOOIIIIIOOIffIOIz", &seed, &config.max_steps_per_movement,
-      &py_allowed_movement_directions, &py_allowed_turn_directions, &config.scent_dimension,
-      &config.color_dimension, &config.vision_range, &config.patch_size, &config.mcmc_iterations,
-      &py_items, &py_agent_color, &collision_policy, &config.decay_param, &config.diffusion_param,
+      args, "IIOOOIIIIIOOIffIOIz", &seed, &config.max_steps_per_movement,
+      &py_allowed_movement_directions, &py_allowed_turn_directions, &py_no_op_allowed,
+      &config.scent_dimension, &config.color_dimension, &config.vision_range,
+      &config.patch_size, &config.mcmc_iterations, &py_items, &py_agent_color,
+      &collision_policy, &config.decay_param, &config.diffusion_param,
       &config.deleted_item_lifetime, &py_callback, &save_frequency, &save_filepath)) {
         fprintf(stderr, "Invalid argument types in the call to 'simulator_c.new'.\n");
         return NULL;
@@ -756,11 +777,17 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
     } else if (!PyList_Check(py_items)) {
         PyErr_SetString(PyExc_TypeError, "'items' must be a list.\n");
         return NULL;
-    } else if (!PyList_Check(py_allowed_movement_directions)) {
-        PyErr_SetString(PyExc_TypeError, "'allowed_movement_directions' must be a list.\n");
+    } else if (!PyList_Check(py_allowed_movement_directions)
+            || PyList_Size(py_allowed_movement_directions) != (size_t) direction::COUNT)
+    {
+        PyErr_SetString(PyExc_TypeError, "'allowed_movement_directions' must"
+            " be a list with length equal to the number of possible movement directions.\n");
         return NULL;
-    } else if (!PyList_Check(py_allowed_turn_directions)) {
-        PyErr_SetString(PyExc_TypeError, "'allowed_turn_directions' must be a list.\n");
+    } else if (!PyList_Check(py_allowed_turn_directions)
+            || PyList_Size(py_allowed_turn_directions) != (size_t) direction::COUNT)
+    {
+        PyErr_SetString(PyExc_TypeError, "'allowed_turn_directions' must be a"
+            " list with length equal to the number of possible movement directions.\n");
         return NULL;
     }
 
@@ -840,14 +867,11 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
         config.item_types.length += 1;
     }
 
-    Py_ssize_t allowed_movement_direction_count = PyList_Size(py_allowed_movement_directions);
-    Py_ssize_t allowed_turn_direction_count = PyList_Size(py_allowed_turn_directions);
-    memset(config.allowed_movement_directions, 0, sizeof(bool) * (size_t) direction::COUNT);
-    memset(config.allowed_rotations, 0, sizeof(bool) * (size_t) direction::COUNT);
-    for (Py_ssize_t i = 0; i < allowed_movement_direction_count; i++)
-        config.allowed_movement_directions[PyLong_AsUnsignedLong(PyList_GetItem(py_allowed_movement_directions, i))] = true;
-    for (Py_ssize_t i = 0; i < allowed_turn_direction_count; i++)
-        config.allowed_rotations[PyLong_AsUnsignedLong(PyList_GetItem(py_allowed_turn_directions, i))] = true;
+    for (unsigned int i = 0; i < (unsigned int) direction::COUNT; i++)
+        config.allowed_movement_directions[i] = (action_policy) PyLong_AsUnsignedLong(PyList_GetItem(py_allowed_movement_directions, i));
+    for (unsigned int i = 0; i < (unsigned int) direction::COUNT; i++)
+        config.allowed_rotations[i] = (action_policy) PyLong_AsUnsignedLong(PyList_GetItem(py_allowed_turn_directions, i));
+    config.no_op_allowed = PyObject_IsTrue(py_no_op_allowed);
 
     config.agent_color = PyArg_ParseFloatList(py_agent_color).key;
     config.collision_policy = (movement_conflict_policy) collision_policy;
@@ -1351,6 +1375,66 @@ static PyObject* simulator_turn(PyObject *self, PyObject *args) {
 }
 
 /**
+ * Attempt to instruct the agent in the simulation environment to do nothing.
+ * If the agent already has an action queued for this turn, this attempt will
+ * fail.
+ *
+ * \param   self    Pointer to the Python object calling this method.
+ * \param   args    Arguments:
+ *                  - Handle to the native simulator object as a PyLong.
+ *                  - Handle to the native client object as a PyLong. If this
+ *                    is None, `do_nothing` is directly invoked on the
+ *                    simulator object. Otherwise, the client sends a
+ *                    do_nothing message to the server and waits for its
+ *                    response.
+ *                  - Agent ID.
+ * \returns `True` if the turn command is successfully queued; `False`
+ *          otherwise.
+ */
+static PyObject* simulator_no_op(PyObject *self, PyObject *args) {
+    PyObject* py_sim_handle;
+    PyObject* py_client_handle;
+    unsigned long long agent_id;
+    if (!PyArg_ParseTuple(args, "OOK", &py_sim_handle, &py_client_handle, &agent_id))
+        return NULL;
+    if (py_client_handle == Py_None) {
+        /* the simulation is local, so call do_nothing directly */
+        simulator<py_simulator_data>* sim_handle =
+                (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
+
+        /* release the global interpreter lock */
+        PyThreadState* python_thread = PyEval_SaveThread();
+        bool result = sim_handle->do_nothing(agent_id);
+
+        /* re-acquire the global interpreter lock and return */
+        PyEval_RestoreThread(python_thread);
+        PyObject* py_result = (result ? Py_True : Py_False);
+        Py_INCREF(py_result); return py_result;
+    } else {
+        /* this is a client, so send a do_nothing message to the server */
+        client<py_client_data>* client_handle =
+                (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
+        if (!client_handle->client_running) {
+            PyErr_SetString(mpi_error, "Connection to the server was lost.");
+            return NULL;
+        }
+
+        client_handle->data.waiting_for_server = true;
+        if (!send_do_nothing(*client_handle, agent_id)) {
+            PyErr_SetString(PyExc_RuntimeError, "Unable to send do_nothing request.");
+            return NULL;
+        }
+
+        /* wait for response from server */
+        wait_for_server(*client_handle);
+
+        PyObject* result = (client_handle->data.server_response == mpi_response::SUCCESS ? Py_True : Py_False);
+        Py_INCREF(result);
+        return result;
+    }
+}
+
+/**
  * Constructs a Python list containing tuples, where each tuple contains the
  * state information of a patch in the given hash_map of patches.
  *
@@ -1624,6 +1708,7 @@ static PyMethodDef SimulatorMethods[] = {
     {"add_agent",  nel::simulator_add_agent, METH_VARARGS, "Adds an agent to the simulator and returns its ID."},
     {"move",  nel::simulator_move, METH_VARARGS, "Attempts to move the agent in the simulation environment."},
     {"turn",  nel::simulator_turn, METH_VARARGS, "Attempts to turn the agent in the simulation environment."},
+    {"no_op",  nel::simulator_no_op, METH_VARARGS, "Attempts to instruct the agent to do nothing (a no-op) in the simulation environment."},
     {"map",  nel::simulator_map, METH_VARARGS, "Returns a list of patches within a given bounding box."},
     {"set_active",  nel::simulator_set_active, METH_VARARGS, "Sets whether the agent is active or inactive."},
     {"is_active",  nel::simulator_is_active, METH_VARARGS, "Gets whether the agent is active or inactive."},

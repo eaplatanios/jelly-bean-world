@@ -8,7 +8,7 @@ import os
 
 from .item import IntensityFunction, InteractionFunction
 
-__all__ = ['MPIError', 'MovementConflictPolicy', 'SimulatorConfig', 'Simulator']
+__all__ = ['MPIError', 'MovementConflictPolicy', 'ActionPolicy', 'SimulatorConfig', 'Simulator']
 
 
 class MPIError(Exception):
@@ -22,23 +22,40 @@ class MovementConflictPolicy(Enum):
   FIRST_COME_FIRST_SERVED = 1
   RANDOM = 2
 
+class ActionPolicy(Enum):
+  """Policy used to indicate whether each action is allowed, disallowed, or
+     ignored. If the action is disallowed, then attempting to perform it will
+     immediately fail, preventing the simulator from progressing if the agent
+     hasn't performed an action during the current time step. Whereas if the
+     action is ignored, then the agent will perform a no-op for that time step."""
+
+  ALLOWED = 0
+  DISALLOWED = 0
+  IGNORED = 0
 
 class SimulatorConfig(object):
   """Represents a configuration for a simulator."""
 
   def __init__(self, max_steps_per_movement, allowed_movement_directions,
-      allowed_turn_directions, vision_range, patch_size, mcmc_num_iter, items,
-      agent_color, collision_policy, decay_param, diffusion_param,
-      deleted_item_lifetime, seed=0):
+      allowed_turn_directions, no_op_allowed, vision_range, patch_size,
+      mcmc_num_iter, items, agent_color, collision_policy, decay_param,
+      diffusion_param, deleted_item_lifetime, seed=0):
     """Creates a new simulator configuration.
 
     Arguments:
       max_steps_per_movement:      Maximum steps allowed for each agent move
                                    action.
-      allowed_movement_directions: A list of RelativeDirections that the each
-                                   agent is permitted to move.
-      allowed_turn_directions:     A list of RelativeDirections that the each
-                                   agent is permitted to turn.
+      allowed_movement_directions: A list of ActionPolicies, each element
+                                   corresponding to each possible Direction,
+                                   that specifies whether the simulator allows,
+                                   disallows, or ignores the respective
+                                   movement action.
+      allowed_turn_directions:     A list of ActionPolicies, each element
+                                   corresponding to each possible
+                                   RelativeDirection, that specifies whether
+                                   the simulator allows, disallows, or ignores
+                                   the respective turn.
+      no_op_allowed:               Whether or not actions can perform no action.
       vision_range:                Vision range of each agent.
       patch_size:                  Size of each patch used by the map
                                    generator.
@@ -53,6 +70,7 @@ class SimulatorConfig(object):
     self.max_steps_per_movement = max_steps_per_movement
     self.allowed_movement_directions = allowed_movement_directions
     self.allowed_turn_directions = allowed_turn_directions
+    self.no_op_allowed = no_op_allowed
     self.scent_num_dims = len(items[0].scent)
     self.color_num_dims = len(items[0].color)
     self.vision_range = vision_range
@@ -185,7 +203,7 @@ class Simulator(object):
         raise ValueError('"server_address" must be None if "sim_config" is specified.')
       self._handle = simulator_c.new(sim_config.seed,
         sim_config.max_steps_per_movement, [d.value for d in sim_config.allowed_movement_directions],
-        [d.value for d in sim_config.allowed_turn_directions], sim_config.scent_num_dims,
+        [d.value for d in sim_config.allowed_turn_directions], sim_config.no_op_allowed, sim_config.scent_num_dims,
         sim_config.color_num_dims, sim_config.vision_range, sim_config.patch_size, sim_config.mcmc_num_iter,
         [(i.name, i.scent, i.color, i.required_item_counts, i.required_item_costs, i.blocks_movement, i.intensity_fn, i.intensity_fn_args, i.interaction_fns) for i in sim_config.items],
         sim_config.agent_color, sim_config.collision_policy.value, sim_config.decay_param,
@@ -282,6 +300,20 @@ class Simulator(object):
     """
     return simulator_c.turn(self._handle,
       self._client_handle, agent._id, direction.value)
+
+  def no_op(self, agent,):
+    """Instructs the specified agent in the simulated environment to do nothing.
+
+    The simulator only advances the time step once all agents have requested to
+    perform an action (or a no-op).
+
+    Arguments:
+      agent:     The agent intending to do nothing.
+
+    Returns:
+      `True`, if successful; `False`, otherwise.
+    """
+    return simulator_c.no_op(self._handle, self._client_handle, agent._id)
 
   def get_agents(self):
     """Retrieves a list of the agents governed by this Simulator. This does not

@@ -15,6 +15,8 @@ enum class message_type : uint64_t {
 	MOVE_RESPONSE,
 	TURN,
 	TURN_RESPONSE,
+	DO_NOTHING,
+	DO_NOTHING_RESPONSE,
 	GET_MAP,
 	GET_MAP_RESPONSE,
 	SET_ACTIVE,
@@ -52,6 +54,7 @@ inline bool print(const message_type& type, Stream& out) {
 	case message_type::ADD_AGENT:        return core::print("ADD_AGENT", out);
 	case message_type::MOVE:             return core::print("MOVE", out);
 	case message_type::TURN:             return core::print("TURN", out);
+	case message_type::DO_NOTHING:       return core::print("DO_NOTHING", out);
 	case message_type::GET_MAP:          return core::print("GET_MAP", out);
 	case message_type::SET_ACTIVE:       return core::print("SET_ACTIVE", out);
 	case message_type::IS_ACTIVE:        return core::print("IS_ACTIVE", out);
@@ -59,6 +62,7 @@ inline bool print(const message_type& type, Stream& out) {
 	case message_type::ADD_AGENT_RESPONSE:        return core::print("ADD_AGENT_RESPONSE", out);
 	case message_type::MOVE_RESPONSE:             return core::print("MOVE_RESPONSE", out);
 	case message_type::TURN_RESPONSE:             return core::print("TURN_RESPONSE", out);
+	case message_type::DO_NOTHING_RESPONSE:       return core::print("DO_NOTHING_RESPONSE", out);
 	case message_type::GET_MAP_RESPONSE:          return core::print("GET_MAP_RESPONSE", out);
 	case message_type::SET_ACTIVE_RESPONSE:       return core::print("SET_ACTIVE_RESPONSE", out);
 	case message_type::IS_ACTIVE_RESPONSE:        return core::print("IS_ACTIVE_RESPONSE", out);
@@ -249,6 +253,34 @@ inline bool receive_turn(
 }
 
 template<typename Stream, typename SimulatorData>
+inline bool receive_do_nothing(
+		Stream& in, socket_type& connection,
+		connection_data& data,
+		simulator<SimulatorData>& sim)
+{
+	uint64_t agent_id = UINT64_MAX;
+	mpi_response response;
+	bool success = true;
+	if (!read(agent_id, in)) {
+		response = mpi_response::SERVER_PARSE_MESSAGE_ERROR;
+		success = false;
+	} else {
+		if (!data.agent_ids.contains(agent_id))
+			response = mpi_response::INVALID_AGENT_ID;
+		else if (sim.do_nothing(agent_id))
+			response = mpi_response::SUCCESS;
+		else response = mpi_response::FAILURE;
+	}
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(response));
+	fixed_width_stream<memory_stream> out(mem_stream);
+
+	success &= write(message_type::DO_NOTHING_RESPONSE, out)
+			&& write(agent_id, out) && write(response, out)
+			&& send_message(connection, mem_stream.buffer, mem_stream.position);
+	return success;
+}
+
+template<typename Stream, typename SimulatorData>
 inline bool receive_get_map(
 		Stream& in, socket_type& connection,
 		simulator<SimulatorData>& sim)
@@ -356,6 +388,8 @@ void server_process_message(socket_type& connection,
 			receive_move(in, connection, connections.get(connection), sim); return;
 		case message_type::TURN:
 			receive_turn(in, connection, connections.get(connection), sim); return;
+		case message_type::DO_NOTHING:
+			receive_do_nothing(in, connection, connections.get(connection), sim); return;
 		case message_type::GET_MAP:
 			receive_get_map(in, connection, sim); return;
 		case message_type::SET_ACTIVE:
@@ -366,6 +400,7 @@ void server_process_message(socket_type& connection,
 		case message_type::ADD_AGENT_RESPONSE:
 		case message_type::MOVE_RESPONSE:
 		case message_type::TURN_RESPONSE:
+		case message_type::DO_NOTHING_RESPONSE:
 		case message_type::GET_MAP_RESPONSE:
 		case message_type::SET_ACTIVE_RESPONSE:
 		case message_type::IS_ACTIVE_RESPONSE:
@@ -659,6 +694,24 @@ bool send_turn(ClientType& c, uint64_t agent_id, direction dir) {
 }
 
 /**
+ * Sends a `do_nothing` message to the server from the client `c`. Once the
+ * server responds, the function
+ * `on_do_nothing(ClientType&, uint64_t, mpi_response)` will be invoked, where
+ * the first argument is `c`, the second is `agent_id`, and the third is the
+ * response: SUCCESS if successful, and a different value if an error occurred.
+ *
+ * \returns `true` if the sending is successful; `false` otherwise.
+ */
+template<typename ClientType>
+bool send_do_nothing(ClientType& c, uint64_t agent_id) {
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id));
+	fixed_width_stream<memory_stream> out(mem_stream);
+	return write(message_type::DO_NOTHING, out)
+		&& write(agent_id, out)
+		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
+}
+
+/**
  * Sends an `get_map` message to the server from the client `c`. Once the
  * server responds, the function
  * `on_get_map(ClientType&, mpi_response, hash_map<position, patch_state>*)`
@@ -772,6 +825,20 @@ inline bool receive_turn_response(ClientType& c) {
 }
 
 template<typename ClientType>
+inline bool receive_do_nothing_response(ClientType& c) {
+	mpi_response response;
+	uint64_t agent_id = 0;
+	bool success = true;
+	fixed_width_stream<socket_type> in(c.connection);
+	if (!read(agent_id, in) || !read(response, in)) {
+		response = mpi_response::CLIENT_PARSE_MESSAGE_ERROR;
+		success = false;
+	}
+	on_do_nothing(c, agent_id, response);
+	return success;
+}
+
+template<typename ClientType>
 inline bool receive_get_map_response(ClientType& c) {
 	mpi_response response;
 	default_scribe scribe;
@@ -876,28 +943,31 @@ void run_response_listener(ClientType& c) {
 			return;
 		}
 		switch (type) {
-			case message_type::ADD_AGENT_RESPONSE:
-				receive_add_agent_response(c); continue;
-			case message_type::MOVE_RESPONSE:
-				receive_move_response(c); continue;
-			case message_type::TURN_RESPONSE:
-				receive_turn_response(c); continue;
-			case message_type::GET_MAP_RESPONSE:
-				receive_get_map_response(c); continue;
-			case message_type::SET_ACTIVE_RESPONSE:
-				receive_set_active_response(c); continue;
-			case message_type::IS_ACTIVE_RESPONSE:
-				receive_is_active_response(c); continue;
-			case message_type::STEP_RESPONSE:
-				receive_step_response(c); continue;
+		case message_type::ADD_AGENT_RESPONSE:
+			receive_add_agent_response(c); continue;
+		case message_type::MOVE_RESPONSE:
+			receive_move_response(c); continue;
+		case message_type::TURN_RESPONSE:
+			receive_turn_response(c); continue;
+		case message_type::DO_NOTHING_RESPONSE:
+			receive_do_nothing_response(c); continue;
+		case message_type::GET_MAP_RESPONSE:
+			receive_get_map_response(c); continue;
+		case message_type::SET_ACTIVE_RESPONSE:
+			receive_set_active_response(c); continue;
+		case message_type::IS_ACTIVE_RESPONSE:
+			receive_is_active_response(c); continue;
+		case message_type::STEP_RESPONSE:
+			receive_step_response(c); continue;
 
-			case message_type::ADD_AGENT:
-			case message_type::MOVE:
-			case message_type::TURN:
-			case message_type::GET_MAP:
-			case message_type::SET_ACTIVE:
-			case message_type::IS_ACTIVE:
-				break;
+		case message_type::ADD_AGENT:
+		case message_type::MOVE:
+		case message_type::TURN:
+		case message_type::DO_NOTHING:
+		case message_type::GET_MAP:
+		case message_type::SET_ACTIVE:
+		case message_type::IS_ACTIVE:
+			break;
 		}
 		fprintf(stderr, "run_response_listener ERROR: Received invalid message type from server %" PRId64 ".\n", (uint64_t) type);
 	}

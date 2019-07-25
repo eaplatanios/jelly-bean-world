@@ -375,6 +375,32 @@ inline bool write(const item_properties& properties, Stream& out,
     return true;
 }
 
+typedef uint8_t action_policy_type;
+enum class action_policy : action_policy_type {
+    ALLOWED,
+    DISALLOWED,
+    IGNORED
+};
+
+/**
+ * Reads a action_policy from `in` and stores the result in `type`.
+ */
+template<typename Stream>
+inline bool read(action_policy& type, Stream& in) {
+	action_policy_type v;
+	if (!read(v, in)) return false;
+	type = (action_policy) v;
+	return true;
+}
+
+/**
+ * Writes the given action_policy `type` to the stream `out`.
+ */
+template<typename Stream>
+inline bool write(const action_policy& type, Stream& out) {
+	return write((action_policy_type) type, out);
+}
+
 /**
  * Represents the configuration of a simulator. 
  */
@@ -384,8 +410,9 @@ struct simulator_config {
     unsigned int scent_dimension;
     unsigned int color_dimension;
     unsigned int vision_range;
-    bool allowed_movement_directions[(size_t) direction::COUNT];
-    bool allowed_rotations[(size_t) direction::COUNT];
+    action_policy allowed_movement_directions[(size_t) direction::COUNT];
+    action_policy allowed_rotations[(size_t) direction::COUNT];
+    bool no_op_allowed;
 
     /* world properties */
     unsigned int patch_size;
@@ -412,6 +439,7 @@ struct simulator_config {
             core::swap(first.allowed_movement_directions[i], second.allowed_movement_directions[i]);
         for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
             core::swap(first.allowed_rotations[i], second.allowed_rotations[i]);
+        core::swap(first.no_op_allowed, second.no_op_allowed);
         core::swap(first.max_steps_per_movement, second.max_steps_per_movement);
         core::swap(first.scent_dimension, second.scent_dimension);
         core::swap(first.color_dimension, second.color_dimension);
@@ -446,6 +474,7 @@ private:
             allowed_rotations[i] = src.allowed_rotations[i];
         for (unsigned int i = 0; i < src.color_dimension; i++)
             agent_color[i] = src.agent_color[i];
+        no_op_allowed = src.no_op_allowed;
 
         for (unsigned int i = 0; i < src.item_types.length; i++) {
             if (!init(item_types[i], src.item_types[i], src.scent_dimension, src.color_dimension, (unsigned int) src.item_types.length)) {
@@ -513,6 +542,7 @@ bool read(simulator_config& config, Stream& in) {
      || !read(config.vision_range, in)
      || !read(config.allowed_movement_directions, in)
      || !read(config.allowed_rotations, in)
+     || !read(config.no_op_allowed, in)
      || !read(config.patch_size, in)
      || !read(config.mcmc_iterations, in)
      || !read(config.item_types.length, in))
@@ -556,6 +586,7 @@ bool write(const simulator_config& config, Stream& out) {
         && write(config.vision_range, out)
         && write(config.allowed_movement_directions, out)
         && write(config.allowed_rotations, out)
+        && write(config.no_op_allowed, out)
         && write(config.patch_size, out)
         && write(config.mcmc_iterations, out)
         && write(config.item_types.length, out)
@@ -676,7 +707,7 @@ struct agent_state {
     /* Scent at the current position. */
     float* current_scent;
 
-    /** 
+    /**
      * Visual field at the current position. Consists of 'pixels'
      * in row-major order, where each pixel is a contiguous chunk
      * of D floats (where D is the color dimension).
@@ -708,7 +739,7 @@ struct agent_state {
     /** Number of items of each type in the agent's storage. */
     unsigned int* collected_items;
 
-    /** 
+    /**
      * Lock used by the simulator to prevent simultaneous updates
      * to an agent's state.
      */
@@ -1111,7 +1142,7 @@ class simulator {
     /* Lock for the requested_moves map, used to prevent simultaneous updates. */
     std::mutex requested_move_lock;
 
-    /** 
+    /**
      * Counter for how many agents have acted during each time step. This
      * counter is used to force the simulator to wait until all agents have
      * acted, before advancing the simulation time step.
@@ -1254,7 +1285,7 @@ public:
     inline bool move(uint64_t agent_id, direction dir, unsigned int num_steps)
     {
         if (num_steps > config.max_steps_per_movement
-         || !config.allowed_movement_directions[(size_t) dir])
+         || config.allowed_movement_directions[(size_t) dir] == action_policy::DISALLOWED)
             return false;
 
         agent_states_lock.lock();
@@ -1269,28 +1300,30 @@ public:
 
         agent.requested_position = agent.current_position;
         agent.requested_direction = agent.current_direction;
-        position diff(0, 0);
-        switch (dir) {
-        case direction::UP   : diff.x = 0; diff.y = num_steps; break;
-        case direction::DOWN : diff.x = 0; diff.y = -((int64_t) num_steps); break;
-        case direction::LEFT : diff.x = -((int64_t) num_steps); diff.y = 0; break;
-        case direction::RIGHT: diff.x = num_steps; diff.y = 0; break;
-        case direction::COUNT: break;
-        }
+        if (config.allowed_movement_directions[(size_t) dir] != action_policy::IGNORED) {
+            position diff(0, 0);
+            switch (dir) {
+            case direction::UP   : diff.x = 0; diff.y = num_steps; break;
+            case direction::DOWN : diff.x = 0; diff.y = -((int64_t) num_steps); break;
+            case direction::LEFT : diff.x = -((int64_t) num_steps); diff.y = 0; break;
+            case direction::RIGHT: diff.x = num_steps; diff.y = 0; break;
+            case direction::COUNT: break;
+            }
 
-        switch (agent.current_direction) {
-        case direction::UP: break;
-        case direction::DOWN: diff.x *= -1; diff.y *= -1; break;
-        case direction::LEFT:
-            core::swap(diff.x, diff.y);
-            diff.x *= -1; break;
-        case direction::RIGHT:
-            core::swap(diff.x, diff.y);
-            diff.y *= -1; break;
-        case direction::COUNT: break;
-        }
+            switch (agent.current_direction) {
+            case direction::UP: break;
+            case direction::DOWN: diff.x *= -1; diff.y *= -1; break;
+            case direction::LEFT:
+                core::swap(diff.x, diff.y);
+                diff.x *= -1; break;
+            case direction::RIGHT:
+                core::swap(diff.x, diff.y);
+                diff.y *= -1; break;
+            case direction::COUNT: break;
+            }
 
-        agent.requested_position += diff;
+            agent.requested_position += diff;
+        }
         agent.lock.unlock();
 
         /* add the agent's move to the list of requested moves */
@@ -1305,7 +1338,7 @@ public:
         return true;
     }
 
-    /** 
+    /**
      * Turns an agent.
      *
      * Note that the agent is only actually turned when the simulation time
@@ -1319,7 +1352,7 @@ public:
      */
     inline bool turn(uint64_t agent_id, direction dir)
     {
-        if (!config.allowed_rotations[(size_t) dir])
+        if (config.allowed_rotations[(size_t) dir] == action_policy::DISALLOWED)
             return false;
 
         agent_states_lock.lock();
@@ -1335,28 +1368,66 @@ public:
         agent.requested_position = agent.current_position;
         agent.requested_direction = agent.current_direction;
 
-        switch (dir) {
-        case direction::UP: break;
-        case direction::DOWN:
-            if (agent.current_direction == direction::UP) agent.requested_direction = direction::DOWN;
-            else if (agent.current_direction == direction::DOWN) agent.requested_direction = direction::UP;
-            else if (agent.current_direction == direction::LEFT) agent.requested_direction = direction::RIGHT;
-            else if (agent.current_direction == direction::RIGHT) agent.requested_direction = direction::LEFT;
-            break;
-        case direction::LEFT:
-            if (agent.current_direction == direction::UP) agent.requested_direction = direction::LEFT;
-            else if (agent.current_direction == direction::DOWN) agent.requested_direction = direction::RIGHT;
-            else if (agent.current_direction == direction::LEFT) agent.requested_direction = direction::DOWN;
-            else if (agent.current_direction == direction::RIGHT) agent.requested_direction = direction::UP;
-            break;
-        case direction::RIGHT:
-            if (agent.current_direction == direction::UP) agent.requested_direction = direction::RIGHT;
-            else if (agent.current_direction == direction::DOWN) agent.requested_direction = direction::LEFT;
-            else if (agent.current_direction == direction::LEFT) agent.requested_direction = direction::UP;
-            else if (agent.current_direction == direction::RIGHT) agent.requested_direction = direction::DOWN;
-            break;
-        case direction::COUNT: break;
+        if (config.allowed_rotations[(size_t) dir] != action_policy::IGNORED) {
+            switch (dir) {
+            case direction::UP: break;
+            case direction::DOWN:
+                if (agent.current_direction == direction::UP) agent.requested_direction = direction::DOWN;
+                else if (agent.current_direction == direction::DOWN) agent.requested_direction = direction::UP;
+                else if (agent.current_direction == direction::LEFT) agent.requested_direction = direction::RIGHT;
+                else if (agent.current_direction == direction::RIGHT) agent.requested_direction = direction::LEFT;
+                break;
+            case direction::LEFT:
+                if (agent.current_direction == direction::UP) agent.requested_direction = direction::LEFT;
+                else if (agent.current_direction == direction::DOWN) agent.requested_direction = direction::RIGHT;
+                else if (agent.current_direction == direction::LEFT) agent.requested_direction = direction::DOWN;
+                else if (agent.current_direction == direction::RIGHT) agent.requested_direction = direction::UP;
+                break;
+            case direction::RIGHT:
+                if (agent.current_direction == direction::UP) agent.requested_direction = direction::RIGHT;
+                else if (agent.current_direction == direction::DOWN) agent.requested_direction = direction::LEFT;
+                else if (agent.current_direction == direction::LEFT) agent.requested_direction = direction::UP;
+                else if (agent.current_direction == direction::RIGHT) agent.requested_direction = direction::DOWN;
+                break;
+            case direction::COUNT: break;
+            }
         }
+        agent.lock.unlock();
+
+        /* add the agent's move to the list of requested moves */
+        request_position(agent);
+
+        if (agent.agent_active) {
+            agent_states_lock.lock();
+            if (++acted_agent_count == active_agent_count)
+                step(); /* advance the simulation by one time step */
+            agent_states_lock.unlock();
+        }
+        return true;
+    }
+
+    /**
+     * Instructs the agent to do nothing this turn.
+     *
+     * \param   agent_id ID of the agent.
+     * \returns `true` if the action request was successful; `false` otherwise.
+     */
+    inline bool do_nothing(uint64_t agent_id)
+    {
+        if (!config.no_op_allowed) return false;
+
+        agent_states_lock.lock();
+        agent_state& agent = *agents[(size_t) agent_id];
+        agent_states_lock.unlock();
+
+        agent.lock.lock();
+        if (agent.agent_acted) {
+            agent.lock.unlock(); return false;
+        }
+        agent.agent_acted = true;
+
+        agent.requested_position = agent.current_position;
+        agent.requested_direction = agent.current_direction;
         agent.lock.unlock();
 
         /* add the agent's move to the list of requested moves */

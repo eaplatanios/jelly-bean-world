@@ -31,6 +31,12 @@ typedef enum MovementConflictPolicy {
   MovementConflictPolicyRandom
 } MovementConflictPolicy;
 
+typedef enum ActionPolicy {
+    ActionPolicyAllowed,
+    ActionPolicyDisallowed,
+    ActionPolicyIgnored
+} ActionPolicy;
+
 typedef struct Position {
   int64_t x;
   int64_t y;
@@ -87,8 +93,9 @@ typedef struct SimulatorConfig {
   unsigned int scentDimSize;
   unsigned int colorDimSize;
   unsigned int visionRange;
-  bool allowedMoveDirections[(size_t) DirectionCount];
-  bool allowedRotations[(size_t) DirectionCount];
+  ActionPolicy allowedMoveDirections[(size_t) DirectionCount];
+  ActionPolicy allowedRotations[(size_t) DirectionCount];
+  bool noOpAllowed;
 
   /* World Properties */
   unsigned int patchSize;
@@ -176,6 +183,11 @@ bool simulatorTurnAgent(
   void* clientHandle,
   uint64_t agentId,
   TurnDirection direction);
+
+bool simulatorNoOpAgent(
+  void* simulatorHandle,
+  void* clientHandle,
+  uint64_t agentId);
 
 void simulatorSetActive(
   void* simulatorHandle,

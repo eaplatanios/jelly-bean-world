@@ -67,6 +67,20 @@ inline movement_conflict_policy to_movement_conflict_policy(MovementConflictPoli
 }
 
 
+inline action_policy to_action_policy(ActionPolicy policy) {
+  switch (policy) {
+  case ActionPolicyAllowed:
+    return action_policy::ALLOWED;
+  case ActionPolicyDisallowed:
+    return action_policy::DISALLOWED;
+  case ActionPolicyIgnored:
+    return action_policy::IGNORED;
+  }
+  fprintf(stderr, "to_action_policy ERROR: Unrecognized ActionPolicy.\n");
+  exit(EXIT_FAILURE);
+}
+
+
 inline bool init(
   energy_function<intensity_function>& function,
   const IntensityFunction& src)
@@ -599,6 +613,26 @@ void on_turn(client<client_data>& c, uint64_t agent_id, mpi_response response) {
 
 
 /**
+ * The callback invoked when the client receives a do_nothing response from the
+ * server. This function copies the result into `c.data.server_response` and
+ * wakes up the parent thread (which should be waiting in the
+ * `simulatorNoOpAgent` function) so that it can return the response.
+ *
+ * \param   c               The client that received the response.
+ * \param   agent_id        The ID of the agent that requested to do nothing.
+ * \param   response        The MPI response from the server, containing
+ *                          information about any errors.
+ */
+void on_do_nothing(client<client_data>& c, uint64_t agent_id, mpi_response response) {
+  check_response(response, "no_op: ");
+  std::unique_lock<std::mutex> lck(c.data.lock);
+  c.data.waiting_for_server = false;
+  c.data.server_response = response;
+  c.data.cv.notify_one();
+}
+
+
+/**
  * The callback invoked when the client receives a get_map response from the
  * server. This function moves the result into `c.data.response_data.map` and
  * wakes up the parent thread (which should be waiting in the `simulatorMap`
@@ -748,11 +782,12 @@ void* simulatorCreate(
     return nullptr;
 
   for (unsigned int i = 0; i < (size_t) DirectionCount; i++)
-    sim_config.allowed_movement_directions[i] = config->allowedMoveDirections[i];
+    sim_config.allowed_movement_directions[i] = to_action_policy(config->allowedMoveDirections[i]);
   for (unsigned int i = 0; i < (size_t) DirectionCount; i++)
-    sim_config.allowed_rotations[i] = config->allowedRotations[i];
+    sim_config.allowed_rotations[i] = to_action_policy(config->allowedRotations[i]);
   for (unsigned int i = 0; i < config->colorDimSize; i++)
     sim_config.agent_color[i] = config->agentColor[i];
+  sim_config.no_op_allowed = config->noOpAllowed;
 
   if (!sim_config.item_types.ensure_capacity(max(1u, config->numItemTypes)))
     /* TODO: how to communicate out of memory errors to swift? */
@@ -980,6 +1015,39 @@ bool simulatorTurnAgent(
     client_ptr->data.waiting_for_server = true;
     if (!send_turn(*client_ptr, agentId, to_direction(direction))) {
       /* TODO: communicate "Unable to send turn request." error to swift */
+      return false;
+    }
+
+    /* wait for response from server */
+    wait_for_server(*client_ptr);
+
+    return client_ptr->data.server_response == mpi_response::SUCCESS;
+  }
+}
+
+
+bool simulatorNoOpAgent(
+  void* simulatorHandle,
+  void* clientHandle,
+  uint64_t agentId)
+{
+  if (clientHandle == nullptr) {
+    /* the simulation is local, so call do_nothing directly */
+    simulator<simulator_data>* sim_handle =
+        (simulator<simulator_data>*) simulatorHandle;
+    return sim_handle->do_nothing(agentId);
+  } else {
+    /* this is a client, so send a do_nothing message to the server */
+    client<client_data>* client_ptr =
+        (client<client_data>*) clientHandle;
+    if (!client_ptr->client_running) {
+      /* TODO: communicate "Connection to the server was lost." to swift */
+      return false;
+    }
+
+    client_ptr->data.waiting_for_server = true;
+    if (!send_do_nothing(*client_ptr, agentId)) {
+      /* TODO: communicate "Unable to send do_nothing request." error to swift */
       return false;
     }
 
