@@ -47,14 +47,16 @@ simulator_c = Extension(
   include_dirs = ['../../core', '../../core/deps', np.get_include()],
   # libraries = ['...'],
   # library_dirs = ['/usr/local/lib'],
-  sources = ['core/jbw/simulator.cpp'])
+  sources = ['jbw/simulator.cpp'])
 
+with open('../../README.md', 'r') as f:
+    readme = f.read()
 setup(
   name = 'jbw',
   version = '1.0',
   license='Apache License 2.0',
   description = 'Jelly Bean World',
-  long_description=read('../../README.md'),
+  long_description = readme,
   ext_modules = [simulator_c],
   packages = ['jbw'], 
   install_requires = ['enum34'],
