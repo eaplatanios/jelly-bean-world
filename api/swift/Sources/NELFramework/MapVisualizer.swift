@@ -11,25 +11,26 @@ fileprivate let AGENT_RADIUS = 0.5
 fileprivate let ITEM_RADIUS = 0.4
 fileprivate let MAXIMUM_SCENT = 0.9
 
-@inlinable
-internal func agentPosition(_ direction: Direction) -> (x: Float, y: Float, angle: Float) {
+fileprivate var FIGURE_COUNTER = 0
+
+fileprivate func agentPosition(_ direction: Direction) -> (x: Float, y: Float, angle: Float) {
   switch direction {
-    case .up: return (x: 0.0, y: -0.1, angle: 0.0)
-    case .down: return (x: 0.0, y: 0.1, angle: Float.pi)
-    case .left: return (x: 0.1, y: 0.0, angle: Float.pi / 2)
-    case .right: return (x: -0.1, y: 0.0, angle: 3 * Float.pi / 2)
+  case .up: return (x: 0.0, y: -0.1, angle: 0.0)
+  case .down: return (x: 0.0, y: 0.1, angle: Float.pi)
+  case .left: return (x: 0.1, y: 0.0, angle: Float.pi / 2)
+  case .right: return (x: -0.1, y: 0.0, angle: 3 * Float.pi / 2)
   }
 }
 
 public final class MapVisualizer {
-  let simulator: Simulator
+  private let simulator: Simulator
+  private let figureID: String
+  private let fig: PythonObject
+  private let ax: PythonObject
+  private let axAgent: PythonObject?
 
   private var xLim: (Float, Float)
   private var yLim: (Float, Float)
-  private var figId: String
-  private var fig: PythonObject
-  private var ax: PythonObject
-  private var axAgent: PythonObject?
 
   public init(
     for simulator: Simulator, 
@@ -38,18 +39,19 @@ public final class MapVisualizer {
     agentPerspective: Bool = true
   ) {
     self.simulator = simulator
+    self.figureID = "Jelly Bean World Visualization \(FIGURE_COUNTER)"
+    FIGURE_COUNTER += 1
     self.xLim = (Float(bottomLeft.x), Float(topRight.x))
     self.yLim = (Float(bottomLeft.y), Float(topRight.y))
-    self.figId = "MapVisualizer Figure 1"
     plt.ion()
     if agentPerspective {
-      let figure = plt.subplots(nrows: 1, ncols: 2, num: self.figId)
+      let figure = plt.subplots(nrows: 1, ncols: 2, num: self.figureID)
       self.fig = figure[0]
       self.ax = figure[1][0]
       self.axAgent = figure[1][1]
       self.fig.set_size_inches(w: 18, h: 9)
     } else {
-      let figure = plt.subplots(num: self.figId)
+      let figure = plt.subplots(num: self.figureID)
       self.fig = figure[0]
       self.ax = figure[1]
       self.axAgent = nil
@@ -59,7 +61,7 @@ public final class MapVisualizer {
   }
 
   deinit {
-    plt.close(self.fig)
+    plt.close(fig)
   }
 
   private func pause(_ interval: Float) {
@@ -77,13 +79,17 @@ public final class MapVisualizer {
   }
 
   public func draw() {
-    let bottomLeft = Position(x: Int64(floor(self.xLim.0)), y: Int64(floor(self.yLim.0)))
-    let topRight = Position(x: Int64(ceil(self.xLim.1)), y: Int64(ceil(self.yLim.1)))
-    let map = self.simulator.map(bottomLeft: bottomLeft, topRight: topRight)
-    let n = Int(self.simulator.configuration.patchSize)
-    self.ax.clear()
-    self.ax.set_xlim(self.xLim.0, self.xLim.1)
-    self.ax.set_ylim(self.yLim.0, self.yLim.1)
+    if !Bool(plt.fignum_exists(figureID))! {
+      fatalError("The Jelly Bean World rendering window has been closed.")
+    }
+
+    let bottomLeft = Position(x: Int64(floor(xLim.0)), y: Int64(floor(yLim.0)))
+    let topRight = Position(x: Int64(ceil(xLim.1)), y: Int64(ceil(yLim.1)))
+    let map = simulator.map(bottomLeft: bottomLeft, topRight: topRight)
+    let n = Int(simulator.configuration.patchSize)
+    ax.clear()
+    ax.set_xlim(xLim.0, xLim.1)
+    ax.set_ylim(yLim.0, yLim.1)
 
     // Draw all the map patches.
     for patch in map.patches {
@@ -103,7 +109,7 @@ public final class MapVisualizer {
         colors: color, 
         linewidths: 0.4, 
         linestyle: "solid")
-      self.ax.add_collection(verticalLineCol)
+      ax.add_collection(verticalLineCol)
 
       let horizontalLines = np.empty(shape: [n + 1, 2, 2])
       horizontalLines[a, 0, 0] = np.subtract(x * n, 0.5)
@@ -115,7 +121,7 @@ public final class MapVisualizer {
         colors: color, 
         linewidths: 0.4, 
         linestyle: "solid")
-      self.ax.add_collection(horizontalLinesCol)
+      ax.add_collection(horizontalLinesCol)
 
       var agentItemPatches = [PythonObject]()
 
@@ -129,7 +135,7 @@ public final class MapVisualizer {
           numVertices: 3,
           radius: AGENT_RADIUS,
           orientation: position.angle,
-          facecolor: self.simulator.configuration.agentColor.scalars,
+          facecolor: simulator.configuration.agentColor.scalars,
           edgecolor: [0.0, 0.0, 0.0],
           linestyle: "solid",
           linewidth: 0.4))
@@ -140,12 +146,12 @@ public final class MapVisualizer {
         let id = item.itemType
         let x = Float(item.position.x)
         let y = Float(item.position.y)
-        if self.simulator.configuration.items[id].blocksMovement {
+        if simulator.configuration.items[id].blocksMovement {
           agentItemPatches.append(patches.Rectangle(
             [x - 0.5, y - 0.5],
             width: 1.0,
             height: 1.0,
-            facecolor: self.simulator.configuration.items[id].color.scalars,
+            facecolor: simulator.configuration.items[id].color.scalars,
             edgecolor: [0.0, 0.0, 0.0],
             linestyle: "solid",
             linewidth: 0.4))
@@ -153,7 +159,7 @@ public final class MapVisualizer {
           agentItemPatches.append(patches.Circle(
             [x, y],
             radius: ITEM_RADIUS,
-            facecolor: self.simulator.configuration.items[id].color.scalars,
+            facecolor: simulator.configuration.items[id].color.scalars,
             edgecolor: [0.0, 0.0, 0.0],
             linestyle: "solid",
             linewidth: 0.4))
@@ -170,18 +176,18 @@ public final class MapVisualizer {
       let right = Float(x * n + n) - 0.5
       let bottom = Float(y * n) - 0.5
       let top = Float(y * n + n) - 0.5
-			self.ax.imshow(np.rot90(scentImg), extent: [left, right, bottom, top])
+			ax.imshow(np.rot90(scentImg), extent: [left, right, bottom, top])
       
       // Add the agent and item patches to the plots.
       let agentItemPatchCol = collections.PatchCollection(agentItemPatches, match_original: true)
-      self.ax.add_collection(agentItemPatchCol)
+      ax.add_collection(agentItemPatchCol)
     }
 
     // Draw the agent's perspective.
-    if self.simulator.agents.keys.contains(0) {
-      if let axAgent = self.axAgent {
-        let agentState = self.simulator.agentStates[0]!
-        let r = Int(self.simulator.configuration.visionRange)
+    if simulator.agents.keys.contains(0) {
+      if let axAgent = axAgent {
+        let agentState = simulator.agentStates[0]!
+        let r = Int(simulator.configuration.visionRange)
         let a = Python.slice(Python.None, Python.None, Python.None)
         
         axAgent.clear()
@@ -219,7 +225,7 @@ public final class MapVisualizer {
           numVertices: 3,
           radius: AGENT_RADIUS,
           orientation: position.angle,
-          facecolor: self.simulator.configuration.agentColor.scalars,
+          facecolor: simulator.configuration.agentColor.scalars,
           edgecolor: [0.0, 0.0, 0.0],
           linestyle: "solid",
           linewidth: 0.4)
@@ -238,12 +244,12 @@ public final class MapVisualizer {
       }
     }
 
-    self.pause(1e-16)
+    pause(1e-16)
     plt.draw()
 
-    let pltXLim = self.ax.get_xlim()
-    let pltYLim = self.ax.get_ylim()
-    self.xLim = (Float(pltXLim[0])!, Float(pltXLim[1])!)
-    self.yLim = (Float(pltYLim[0])!, Float(pltYLim[1])!)
+    let pltXLim = ax.get_xlim()
+    let pltYLim = ax.get_ylim()
+    xLim = (Float(pltXLim[0])!, Float(pltXLim[1])!)
+    yLim = (Float(pltYLim[0])!, Float(pltYLim[1])!)
   }
 }
