@@ -467,8 +467,21 @@ public struct Item: Equatable, Hashable {
   }
 }
 
+/// Energy functions for an item that define how instances of that item are distributed in the
+/// Jelly Bean World. The instances distribution is defined as a Gibbs random field which is
+/// described in terms of an intensity function and a set of interaction functions with other
+/// items. More specifically, the probability of an item `m` appearing in position `(i, j)` is:
+/// ```
+/// P[item m at position (i, j)] ∝ \exp{
+///   Intensity[m] *
+///   \sum_{(k, l)}\sum_{n} Exists[item n at position (k, l)] * Interaction[m, n, (i, j), (k, l)] }
+/// ```
+/// where `(k, l)` is a position in the map and `n` is another item type.
 public struct EnergyFunctions: Hashable {
+  /// Intensity function of an item type.
   @usableFromInline internal let intensityFn: IntensityFunction
+
+  /// Interaction functions of an item type with other other types.
   @usableFromInline internal let interactionFns: [InteractionFunction]
 
   @inlinable
@@ -478,8 +491,12 @@ public struct EnergyFunctions: Hashable {
   }
 }
 
+/// Intensity function of an item type.
 public struct IntensityFunction: Hashable {
+  /// ID of this function.
   @usableFromInline internal let id: UInt32
+
+  /// Extra arguments that are passed to the intensity function whenever it is invoked.
   @usableFromInline internal let arguments: [Float]
 
   @inlinable
@@ -490,15 +507,22 @@ public struct IntensityFunction: Hashable {
 }
 
 extension IntensityFunction {
+  /// Returns an intensity function that always returns `value`, irrespective of its inputs.
   @inlinable
   public static func constant(_ value: Float) -> IntensityFunction {
     IntensityFunction(id: 1, arguments: [value])
   }
 }
 
+/// Interaction function of an item type with another item type.
 public struct InteractionFunction: Hashable {
+  /// ID of this function.
   @usableFromInline internal let id: UInt32
-  @usableFromInline internal let itemId: UInt32 // TODO: Convert to Item.
+
+  /// ID of the item for which this interaction is defined.
+  @usableFromInline internal let itemId: UInt32
+
+  /// Extra arguments that are passed to the interaction function whenever it is invoked.
   @usableFromInline internal let arguments: [Float]
 
   @inlinable
@@ -510,6 +534,7 @@ public struct InteractionFunction: Hashable {
 }
 
 extension InteractionFunction {
+  // TODO: Document.
   @inlinable
   public static func piecewiseBox(
     itemId: UInt32, 
@@ -526,6 +551,7 @@ extension InteractionFunction {
         firstValue, secondValue])
   }
 
+  // TODO: Document.
   @inlinable
   public static func cross(
     itemId: UInt32,
@@ -543,5 +569,146 @@ extension InteractionFunction {
         nearCutoff, farCutoff,
         nearAxisAlignedValue, nearMisalignedValue, 
         farAxisAlignedValue, farMisalignedValue])
+  }
+}
+
+/// A simulation map.
+public struct SimulationMap {
+  public let patches: [Patch]
+
+  /// Creates a new simulation map which consists of the provided patches.
+  /// - Parameter patches: Patches comprising the new simulation map.
+  @inlinable
+  public init(patches: [Patch]) {
+    self.patches = patches
+  }
+
+  /// Creates a new simulation map on the Swift API side, corresponding to an exising simulation
+  /// map on the C API side.
+  @inlinable
+  internal init(fromC value: CJellyBeanWorld.SimulationMap, for simulator: Simulator) {
+    let cPatches = UnsafeBufferPointer(start: value.patches!, count: Int(value.numPatches))
+    self.patches = cPatches.map { Patch(fromC: $0, for: simulator) }
+  }
+}
+
+extension SimulationMap {
+  /// A patch of the simulation map.
+  public struct Patch {
+    /// Position of the patch.
+    @usableFromInline let position: Position
+
+    /// Flag indicating whether the patch has been sampled and fixed or whether it was sampled as a 
+    /// patch in the map boundaries that may later be resampled.
+    @usableFromInline let fixed: Bool
+
+    /// Tensor containing the scent at each cell in this patch. The shape of the tensor is
+    /// `[N, N, S]`, where `N` is the patch width and height (all patches are square) and `S` is
+    /// the scent vector size (i.e., the scent dimensionality).
+    @usableFromInline let scent: ShapedArray<Float>
+
+    /// Tensor containing the color of each cell in this patch. The shape of the tensor is
+    /// `[N, N, C]`, where `N` is the patch width and height (all patches are square) and `C` is
+    /// the color vector size (i.e., the color dimensionality).
+    @usableFromInline let vision: ShapedArray<Float>
+
+    /// Array containing all items in this patch (their types and positions).
+    @usableFromInline let items: [ItemInformation]
+
+    /// Array containing all agents in this patch (their positions and directions in which
+    /// they are facing).
+    @usableFromInline let agents: [AgentInformation]
+
+    /// Creates a new simulation map patch.
+    @inlinable
+    public init(
+      position: Position,
+      fixed: Bool,
+      scent: ShapedArray<Float>,
+      vision: ShapedArray<Float>,
+      items: [ItemInformation],
+      agents: [AgentInformation]
+    ) {
+      self.position = position
+      self.fixed = fixed
+      self.scent = scent
+      self.vision = vision
+      self.items = items
+      self.agents = agents
+    }
+
+    /// Creates a new simulation map patch on the Swift API side, corresponding to an exising
+    /// simulation map patch on the C side.
+    @inlinable
+    internal init(fromC value: CJellyBeanWorld.SimulationMapPatch, for simulator: Simulator) {
+      let n = Int(simulator.configuration.patchSize)
+      let s = Int(simulator.configuration.scentDimensionality)
+      let c = Int(simulator.configuration.colorDimensionality)
+      let scentBuffer = UnsafeBufferPointer(start: value.scent, count: n * n * s)
+      let scent = ShapedArray(shape: [n, n, s], scalars: Array(scentBuffer))
+      let visionBuffer = UnsafeBufferPointer(start: value.vision, count: n * n * c)
+      let vision = ShapedArray(shape: [n, n, c], scalars: Array(visionBuffer))
+      let items = [CJellyBeanWorld.ItemInfo](
+        UnsafeBufferPointer(start: value.items!, count: Int(value.numItems))
+      ).map { ItemInformation(fromC: $0) }
+      let agents = [CJellyBeanWorld.AgentInfo](
+        UnsafeBufferPointer(start: value.agents!, count: Int(value.numAgents))
+      ).map { AgentInformation(fromC: $0) }
+      self.init(
+        position: Position(fromC: value.position),
+        fixed: value.fixed,
+        scent: scent,
+        vision: vision,
+        items: items,
+        agents: agents)
+    }
+  }
+
+  /// Information about an item located in the simulation map.
+  public struct ItemInformation {
+    /// Item type.
+    public let itemType: Int
+
+    /// Item position in the map.
+    public let position: Position
+
+    /// Creates a new item information object.
+    @inlinable
+    public init(itemType: Int, position: Position) {
+      self.itemType = itemType
+      self.position = position
+    }
+
+    /// Creates a new item information object on the Swift API side, corresponding to an exising
+    /// item information object on the C API side.
+    @inlinable
+    internal init(fromC value: CJellyBeanWorld.ItemInfo) {
+      self.itemType = Int(value.type)
+      self.position = Position(fromC: value.position)
+    }
+  }
+
+  /// Information about an agent located in the simulation map.
+  public struct AgentInformation {
+    /// Agent position.
+    public let position: Position
+
+    /// Direction in which the agent is facing.
+    public let direction: Direction
+
+    /// Creates a new agent information object.
+    @inlinable
+    public init(position: Position, direction: Direction) {
+      self.position = position
+      self.direction = direction
+    }
+
+    /// Creates a new agent information object on the Swift API side, corresponding to an exising
+    /// agent information object on the C API side.
+    @inlinable
+    internal init(fromC value: CJellyBeanWorld.AgentInfo) {
+      self.position = Position(fromC: value.position)
+      self.direction = Direction(fromC: value.direction)
+    }
   }
 }
