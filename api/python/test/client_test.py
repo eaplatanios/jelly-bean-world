@@ -1,4 +1,4 @@
-import nel
+import jbw
 from timeit import default_timer
 from simulator_test import SimpleAgent, make_config
 from threading import Lock, Condition
@@ -20,7 +20,7 @@ def on_lost_connection():
 	cv.notify()
 
 # connect to server
-sim = nel.Simulator(server_address="localhost", on_step_callback=on_step, on_lost_connection_callback=on_lost_connection)
+sim = jbw.Simulator(server_address="localhost", on_step_callback=on_step, on_lost_connection_callback=on_lost_connection)
 
 # add agents to simulator
 agents = []
@@ -29,7 +29,7 @@ while len(agents) < 1:
 	try:
 		agent = SimpleAgent(sim)
 		agents.append(agent)
-	except nel.AddAgentError:
+	except jbw.AddAgentError:
 		pass
 
 	# move agents to avoid collision at (0,0)

@@ -1,5 +1,5 @@
-#ifndef NEL_SIMULATOR_H_
-#define NEL_SIMULATOR_H_
+#ifndef JBW_SIMULATOR_H_
+#define JBW_SIMULATOR_H_
 
 #include <core/array.h>
 #include <core/utility.h>
@@ -1965,4 +1965,4 @@ bool write(const simulator<SimulatorData>& sim, Stream& out)
 
 } /* namespace jbw */
 
-#endif /* NEL_SIMULATOR_H_ */
+#endif /* JBW_SIMULATOR_H_ */

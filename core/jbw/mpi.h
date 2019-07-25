@@ -1,5 +1,5 @@
-#ifndef NEL_MPI_H_
-#define NEL_MPI_H_
+#ifndef JBW_MPI_H_
+#define JBW_MPI_H_
 
 #include "network.h"
 #include "simulator.h"
@@ -1096,4 +1096,4 @@ void stop_client(client<ClientData>& c) {
 
 } /* namespace jbw */
 
-#endif /* NEL_MPI_H_ */
+#endif /* JBW_MPI_H_ */

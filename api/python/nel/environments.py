@@ -1,4 +1,4 @@
-"""Collection of NEL environments for OpenAI gym."""
+"""Collection of JBW environments for OpenAI gym."""
 
 from __future__ import absolute_import, division, print_function
 
@@ -65,16 +65,16 @@ if modules_loaded:
   reward_fn = lambda prev_items, items: len(items) - len(prev_items)
 
   register(
-      id='NEL-v0',
-      entry_point='nel.environment:NELEnv',
+      id='JBW-v0',
+      entry_point='jbw.environment:JBWEnv',
       kwargs={
         'sim_config': sim_config,
         'reward_fn': reward_fn,
         'render': False})
 
   register(
-      id='NEL-render-v0',
-      entry_point='nel.environment:NELEnv',
+      id='JBW-render-v0',
+      entry_point='jbw.environment:JBWEnv',
       kwargs={
         'sim_config': sim_config,
         'reward_fn': reward_fn,

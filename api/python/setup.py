@@ -27,19 +27,19 @@ class build_ext_subclass(build_ext):
     build_ext.build_extensions(self)
 
 simulator_c = Extension(
-  'nel.simulator_c',
+  'jbw.simulator_c',
   define_macros = [('MAJOR_VERSION', '1'),
                    ('MINOR_VERSION', '0')],
-  include_dirs = ['../..', '../../deps', np.get_include()],
+  include_dirs = ['../..', '../../core/deps', np.get_include()],
   # libraries = ['...'],
   # library_dirs = ['/usr/local/lib'],
-  sources = ['nel/simulator.cpp'])
+  sources = ['core/jbw/simulator.cpp'])
 
 setup(
-  name = 'nel',
+  name = 'jbw',
   version = '1.0',
-  description = 'Jelly bean world',
+  description = 'Jelly Bean World',
   ext_modules = [simulator_c],
-  packages = ['nel'], 
+  packages = ['jbw'], 
   install_requires = ['enum34'],
   cmdclass = {'build_ext' : build_ext_subclass} )

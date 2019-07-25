@@ -1,4 +1,4 @@
-import nel
+import jbw
 from timeit import default_timer
 from simulator_test import SimpleAgent, make_config
 import numpy as np
@@ -57,8 +57,8 @@ def compare_simulators(sim1, sim2, config,
 # create two simulators
 save_frequency = 50
 config = make_config()
-sim1 = nel.Simulator(sim_config=config)
-sim2 = nel.Simulator(sim_config=config, save_filepath="./temp/simulator_state", save_frequency=save_frequency)
+sim1 = jbw.Simulator(sim_config=config)
+sim2 = jbw.Simulator(sim_config=config, save_filepath="./temp/simulator_state", save_frequency=save_frequency)
 
 # add one agent to each simulator
 agent_type = SimpleAgent
@@ -88,7 +88,7 @@ for t in range(10000):
 	if sim2.time() % save_frequency == 0:
 		# reload simulator 2 from file
 		print("Reloading simulator 2 from file...")
-		sim2 = nel.Simulator(load_filepath="./temp/simulator_state", save_filepath="./temp/simulator_state", load_time=sim2.time(), save_frequency=save_frequency)
+		sim2 = jbw.Simulator(load_filepath="./temp/simulator_state", save_filepath="./temp/simulator_state", load_time=sim2.time(), save_frequency=save_frequency)
 		agents = sim2.get_agents()
 		if len(agents) != 1 or type(agents[0]) != agent_type:
 			print("Expected a single " + agent_type.__name__ + " in the loaded simulation.")

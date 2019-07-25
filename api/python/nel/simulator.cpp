@@ -1,14 +1,13 @@
 #include <Python.h>
-#define PY_ARRAY_UNIQUE_SYMBOL NEL_ARRAY_API
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 #include <numpy/arrayobject.h>
 
 #include <thread>
-#include "nel/gibbs_field.h"
-#include "nel/mpi.h"
-#include "nel/simulator.h"
+#include "core/jbw/gibbs_field.h"
+#include "core/jbw/mpi.h"
+#include "core/jbw/simulator.h"
 
-namespace nel {
+namespace jbw {
 
 using namespace core;
 
@@ -596,13 +595,13 @@ inline void wait_for_server(client<py_client_data>& c)
 }
 
 /**
- * Imports the Python exception classes from the nel module.
+ * Imports the Python exception classes from the jbw module.
  */
 static inline void import_errors() {
 #if PY_MAJOR_VERSION >= 3
-    PyObject* module_name = PyUnicode_FromString("nel");
+    PyObject* module_name = PyUnicode_FromString("jbw");
 #else
-    PyObject* module_name = PyString_FromString("nel");
+    PyObject* module_name = PyString_FromString("jbw");
 #endif
     PyObject* module = PyImport_Import(module_name);
     PyObject* module_dict = PyModule_GetDict(module);
@@ -1630,24 +1629,24 @@ static PyObject* simulator_is_active(PyObject *self, PyObject *args) {
     }
 }
 
-} /* namespace nel */
+} /* namespace jbw */
 
 static PyMethodDef SimulatorMethods[] = {
-    {"new",  nel::simulator_new, METH_VARARGS, "Creates a new simulator and returns its pointer."},
-    {"save",  nel::simulator_save, METH_VARARGS, "Saves a simulator to file."},
-    {"load",  nel::simulator_load, METH_VARARGS, "Loads a simulator from file and returns its pointer."},
-    {"delete",  nel::simulator_delete, METH_VARARGS, "Deletes an existing simulator."},
-    {"start_server",  nel::simulator_start_server, METH_VARARGS, "Starts the simulator server."},
-    {"stop_server",  nel::simulator_stop_server, METH_VARARGS, "Stops the simulator server."},
-    {"start_client",  nel::simulator_start_client, METH_VARARGS, "Starts the simulator client."},
-    {"stop_client",  nel::simulator_stop_client, METH_VARARGS, "Stops the simulator client."},
-    {"add_agent",  nel::simulator_add_agent, METH_VARARGS, "Adds an agent to the simulator and returns its ID."},
-    {"move",  nel::simulator_move, METH_VARARGS, "Attempts to move the agent in the simulation environment."},
-    {"turn",  nel::simulator_turn, METH_VARARGS, "Attempts to turn the agent in the simulation environment."},
-    {"no_op",  nel::simulator_no_op, METH_VARARGS, "Attempts to instruct the agent to do nothing (a no-op) in the simulation environment."},
-    {"map",  nel::simulator_map, METH_VARARGS, "Returns a list of patches within a given bounding box."},
-    {"set_active",  nel::simulator_set_active, METH_VARARGS, "Sets whether the agent is active or inactive."},
-    {"is_active",  nel::simulator_is_active, METH_VARARGS, "Gets whether the agent is active or inactive."},
+    {"new",  jbw::simulator_new, METH_VARARGS, "Creates a new simulator and returns its pointer."},
+    {"save",  jbw::simulator_save, METH_VARARGS, "Saves a simulator to file."},
+    {"load",  jbw::simulator_load, METH_VARARGS, "Loads a simulator from file and returns its pointer."},
+    {"delete",  jbw::simulator_delete, METH_VARARGS, "Deletes an existing simulator."},
+    {"start_server",  jbw::simulator_start_server, METH_VARARGS, "Starts the simulator server."},
+    {"stop_server",  jbw::simulator_stop_server, METH_VARARGS, "Stops the simulator server."},
+    {"start_client",  jbw::simulator_start_client, METH_VARARGS, "Starts the simulator client."},
+    {"stop_client",  jbw::simulator_stop_client, METH_VARARGS, "Stops the simulator client."},
+    {"add_agent",  jbw::simulator_add_agent, METH_VARARGS, "Adds an agent to the simulator and returns its ID."},
+    {"move",  jbw::simulator_move, METH_VARARGS, "Attempts to move the agent in the simulation environment."},
+    {"turn",  jbw::simulator_turn, METH_VARARGS, "Attempts to turn the agent in the simulation environment."},
+    {"no_op",  jbw::simulator_no_op, METH_VARARGS, "Attempts to instruct the agent to do nothing (a no-op) in the simulation environment."},
+    {"map",  jbw::simulator_map, METH_VARARGS, "Returns a list of patches within a given bounding box."},
+    {"set_active",  jbw::simulator_set_active, METH_VARARGS, "Sets whether the agent is active or inactive."},
+    {"is_active",  jbw::simulator_is_active, METH_VARARGS, "Gets whether the agent is active or inactive."},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 

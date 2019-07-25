@@ -1,5 +1,5 @@
-#ifndef NEL_GIBBS_FIELD_H_
-#define NEL_GIBBS_FIELD_H_
+#ifndef JBW_GIBBS_FIELD_H_
+#define JBW_GIBBS_FIELD_H_
 
 #include <core/random.h>
 #include <math/log.h>
@@ -550,4 +550,4 @@ private:
 
 } /* namespace jbw */
 
-#endif /* NEL_GIBBS_FIELD_H_ */
+#endif /* JBW_GIBBS_FIELD_H_ */

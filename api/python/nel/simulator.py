@@ -2,7 +2,7 @@ from __future__ import absolute_import, division, print_function
 
 from enum import Enum
 from pydoc import locate
-from nel import simulator_c
+from jbw import simulator_c
 from .direction import Direction
 import os
 

@@ -42,14 +42,14 @@ The following is a simple example where a simulator is constructed locally
 that the agent's decision-making logic goes in the `do_next_action` method.
 
 ```python
-import nel
+import jbw
 
-class SimpleAgent(nel.Agent):
+class SimpleAgent(jbw.Agent):
   def __init__(self, simulator, load_filepath=None):
     super(SimpleAgent, self).__init__(simulator, load_filepath)
 
   def do_next_action(self):
-    self.move(nel.RelativeDirection.FORWARD)
+    self.move(jbw.RelativeDirection.FORWARD)
 
   def save(self, filepath):
     pass
@@ -60,20 +60,20 @@ class SimpleAgent(nel.Agent):
 
 # specify the item types
 items = []
-items.append(nel.Item("banana", [1.0, 1.0, 0.0], [1.0, 1.0, 0.0], [0], [0], False,
-        intensity_fn=nel.IntensityFunction.CONSTANT, intensity_fn_args=[-2.0],
-        interaction_fns=[[nel.InteractionFunction.PIECEWISE_BOX, 40.0, 200.0, 0.0, -40.0]]))
+items.append(jbw.Item("banana", [1.0, 1.0, 0.0], [1.0, 1.0, 0.0], [0], [0], False,
+        intensity_fn=jbw.IntensityFunction.CONSTANT, intensity_fn_args=[-2.0],
+        interaction_fns=[[jbw.InteractionFunction.PIECEWISE_BOX, 40.0, 200.0, 0.0, -40.0]]))
 
 # construct the simulator configuration
-config = nel.SimulatorConfig(max_steps_per_movement=1, vision_range=1,
-  allowed_movement_directions=[nel.ActionPolicy.ALLOWED, nel.ActionPolicy.DISALLOWED, nel.ActionPolicy.DISALLOWED, nel.ActionPolicy.DISALLOWED],
-  allowed_turn_directions=[nel.ActionPolicy.DISALLOWED, nel.ActionPolicy.DISALLOWED, nel.ActionPolicy.ALLOWED, nel.ActionPolicy.ALLOWED],
+config = jbw.SimulatorConfig(max_steps_per_movement=1, vision_range=1,
+  allowed_movement_directions=[jbw.ActionPolicy.ALLOWED, jbw.ActionPolicy.DISALLOWED, jbw.ActionPolicy.DISALLOWED, jbw.ActionPolicy.DISALLOWED],
+  allowed_turn_directions=[jbw.ActionPolicy.DISALLOWED, jbw.ActionPolicy.DISALLOWED, jbw.ActionPolicy.ALLOWED, jbw.ActionPolicy.ALLOWED],
   no_op_allowed=False, patch_size=32, mcmc_num_iter=4000, items=items, agent_color=[0.0, 0.0, 1.0],
-  collision_policy=nel.MovementConflictPolicy.FIRST_COME_FIRST_SERVED,
+  collision_policy=jbw.MovementConflictPolicy.FIRST_COME_FIRST_SERVED,
   decay_param=0.4, diffusion_param=0.14, deleted_item_lifetime=2000)
 
 # create a local simulator
-sim = nel.Simulator(sim_config=config)
+sim = jbw.Simulator(sim_config=config)
 
 # add one agent to the simulation
 agent = SimpleAgent(sim)
@@ -90,13 +90,13 @@ an example with more types of items as well as a visualization using the
 It is straightforward to create the simulator in *server mode*, where other
 clients can connect to it:
 ```python
-sim = nel.Simulator(sim_config=config, is_server=True)
+sim = jbw.Simulator(sim_config=config, is_server=True)
 ```
 
 To connect to existing server (i.e. create the simulator in *client mode*), for
 example running on `localhost`:
 ```python
-sim = nel.Simulator(server_address="localhost")
+sim = jbw.Simulator(server_address="localhost")
 ```
 
 See [api/python/test/server_test.py](api/python/test/server_test.py) and
@@ -105,8 +105,8 @@ of simulators running in server and client modes (using MPI to communicate).
 
 #### Using with OpenAI Gym
 
-We also provide a NEL environment for OpenAI gym, which is 
-implemented in [api/python/nel/environment.py](api/python/nel/environment.py). 
+We also provide a JBW environment for OpenAI gym, which is 
+implemented in [api/python/jbw/environment.py](api/python/jbw/environment.py). 
 
 The action space consists of three actions:
   - `0`: Move forward.
@@ -122,16 +122,16 @@ The observation space consists of a dictionary:
   - `moved`: Binary value indicating whether the last 
     action resulted in the agent moving.
 
-After installing the `nel` framework and `gym`, the 
+After installing the `jbw` framework and `gym`, the 
 provided environment can be used as follows:
 
 ```python
 import gym
-import nel
+import jbw
 
-# Use 'NEL-render-v0' to include rendering support.
-# Otherwise, use 'NEL-v0', which should be much faster.
-env = gym.make('NEL-render-v0')
+# Use 'JBW-render-v0' to include rendering support.
+# Otherwise, use 'JBW-v0', which should be much faster.
+env = gym.make('JBW-render-v0')
 
 # The created environment can then be used as any other 
 # OpenAI gym environment. For example:
@@ -145,7 +145,7 @@ for t in range(10000):
 ```
 
 Environments with different configurations can be 
-registered as shown in [api/python/nel/environments.py](api/python/nel/environments.py) 
+registered as shown in [api/python/jbw/environments.py](api/python/jbw/environments.py) 
 and used as shown above.
 
 ### Agent class

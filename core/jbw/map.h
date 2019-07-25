@@ -1,5 +1,5 @@
-#ifndef NEL_MAP_H_
-#define NEL_MAP_H_
+#ifndef JBW_MAP_H_
+#define JBW_MAP_H_
 
 #include <core/map.h>
 #include "gibbs_field.h"
@@ -546,4 +546,4 @@ bool write(const map<PerPatchData, ItemType>& world, Stream& out,
 
 } /* namespace jbw */
 
-#endif /* NEL_MAP_H_ */
+#endif /* JBW_MAP_H_ */

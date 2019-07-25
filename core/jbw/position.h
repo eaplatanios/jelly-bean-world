@@ -1,5 +1,5 @@
-#ifndef NEL_POSITION_H_
-#define NEL_POSITION_H_
+#ifndef JBW_POSITION_H_
+#define JBW_POSITION_H_
 
 #include <core/map.h>
 #include <inttypes.h>
@@ -123,4 +123,4 @@ inline bool print(const position& p, Stream& out) {
 
 } /* namespace jbw */
 
-#endif /* NEL_POSITION_H_ */
+#endif /* JBW_POSITION_H_ */

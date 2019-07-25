@@ -1,4 +1,4 @@
-"""OpenAI gym environment implementation for the NEL 
+"""OpenAI gym environment implementation for the JBW 
 simulator."""
 
 from __future__ import absolute_import, division, print_function
@@ -21,10 +21,10 @@ from .visualizer import MapVisualizer
 if not modules_loaded:
   __all__ = []
 else:
-  __all__ = ['NELEnv']
+  __all__ = ['JBWEnv']
 
-  class NELEnv(gym.Env):
-      """NEL environment for OpenAI gym.
+  class JBWEnv(gym.Env):
+      """JBW environment for OpenAI gym.
 
       The action space consists of three actions:
         - `0`: Move forward.
@@ -41,17 +41,17 @@ else:
           action resulted in the agent moving.
 
       After following the instructions provided in the main 
-      `README` file to install the `nel` framework, and 
+      `README` file to install the `jbw` framework, and 
       installing `gym` using `pip install gym`, this 
       environment can be used as follows:
 
       ```
       import gym
-      import nel
+      import jbw
 
-      # Use 'NEL-render-v0' to include rendering support.
-      # Otherwise, use 'NEL-v0', which should be much faster.
-      env = gym.make('NEL-render-v0')
+      # Use 'JBW-render-v0' to include rendering support.
+      # Otherwise, use 'JBW-v0', which should be much faster.
+      env = gym.make('JBW-render-v0')
 
       # The created environment can then be used as any other 
       # OpenAI gym environment. For example:
@@ -67,7 +67,7 @@ else:
 
       def __init__(
           self, sim_config, reward_fn, render=False):
-        """Creates a new NEL environment for OpenAI gym.
+        """Creates a new JBW environment for OpenAI gym.
 
         Arguments:
           sim_config(SimulatorConfig) Simulator configuration
@@ -169,7 +169,7 @@ else:
         """Resets this environment to its initial state."""
         del self._sim
         self._sim = Simulator(sim_config=self.sim_config)
-        self._agent = _NELEnvAgent(self._sim)
+        self._agent = _JBWEnvAgent(self._sim)
         if self._render:
           del self._painter
           self._painter = MapVisualizer(
@@ -215,18 +215,18 @@ else:
         return
 
 
-class _NELEnvAgent(Agent):
-  """Helper class for the NEL environment, that represents
-  a NEL agent living in the simulator.
+class _JBWEnvAgent(Agent):
+  """Helper class for the JBW environment, that represents
+  a JBW agent living in the simulator.
   """
 
   def __init__(self, simulator):
-    """Creates a new NEL environment agent.
+    """Creates a new JBW environment agent.
     
     Arguments:
       simulator(Simulator)  The simulator the agent lives in.
     """
-    super(_NELEnvAgent, self).__init__(
+    super(_JBWEnvAgent, self).__init__(
       simulator, load_filepath=None)
     self._next_action = None
 

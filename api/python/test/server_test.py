@@ -1,4 +1,4 @@
-import nel
+import jbw
 from timeit import default_timer
 from simulator_test import SimpleAgent, make_config
 from threading import Lock, Condition
@@ -15,7 +15,7 @@ def on_step():
 
 # create new simulator server
 config = make_config()
-sim = nel.Simulator(sim_config=config, is_server=True, on_step_callback=on_step)
+sim = jbw.Simulator(sim_config=config, is_server=True, on_step_callback=on_step)
 
 # add agents to simulator
 agents = []
@@ -24,7 +24,7 @@ while len(agents) < 1:
 	try:
 		agent = SimpleAgent(sim)
 		agents.append(agent)
-	except nel.AddAgentError:
+	except jbw.AddAgentError:
 		pass
 
 	# move agents to avoid collision at (0,0)

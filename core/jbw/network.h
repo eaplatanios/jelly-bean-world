@@ -1,5 +1,5 @@
-#ifndef NEL_NETWORK_H_
-#define NEL_NETWORK_H_
+#ifndef JBW_NETWORK_H_
+#define JBW_NETWORK_H_
 
 #include <core/array.h>
 #include <core/map.h>
@@ -731,4 +731,4 @@ bool run_client(
 
 } /* namespace jbw */
 
-#endif /* NEL_NETWORK_H_ */
+#endif /* JBW_NETWORK_H_ */

@@ -1,9 +1,9 @@
 from __future__ import absolute_import, division, print_function
 
-import nel
+import jbw
 import gym
 
-env = gym.make('NEL-render-v0')
+env = gym.make('JBW-render-v0')
 
 for t in range(10000):
   env.render()
