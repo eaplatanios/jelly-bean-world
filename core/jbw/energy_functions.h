@@ -3,7 +3,7 @@
 
 #include "position.h"
 
-namespace nel {
+namespace jbw {
 
 typedef float (*intensity_function)(const position, const float*);
 typedef float (*interaction_function)(const position, const position, const float*);
@@ -199,6 +199,6 @@ inline bool is_stationary(const interaction_function function) {
 		 || function == cross_interaction_fn);
 }
 
-} /* namespace nel */
+} /* namespace jbw */
 
 #endif /* ENERGY_FUNCTIONS_H_ */

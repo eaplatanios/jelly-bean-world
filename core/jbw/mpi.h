@@ -4,7 +4,7 @@
 #include "network.h"
 #include "simulator.h"
 
-namespace nel {
+namespace jbw {
 
 using namespace core;
 
@@ -1094,6 +1094,6 @@ void stop_client(client<ClientData>& c) {
 	}
 }
 
-} /* namespace nel */
+} /* namespace jbw */
 
 #endif /* NEL_MPI_H_ */

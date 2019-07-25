@@ -2,7 +2,7 @@
 
 #include <inttypes.h>
 
-using namespace nel;
+using namespace jbw;
 using namespace core;
 
 /* a lock to synchronize printing */

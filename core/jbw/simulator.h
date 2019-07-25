@@ -8,7 +8,7 @@
 #include "map.h"
 #include "diffusion.h"
 
-namespace nel {
+namespace jbw {
 
 using namespace core;
 
@@ -1963,6 +1963,6 @@ bool write(const simulator<SimulatorData>& sim, Stream& out)
         && write(sim.active_agent_count, out);
 }
 
-} /* namespace nel */
+} /* namespace jbw */
 
 #endif /* NEL_SIMULATOR_H_ */

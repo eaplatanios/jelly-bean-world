@@ -2,12 +2,12 @@
 
 #include "include/simulator.h"
 
-#include "nel/gibbs_field.h"
-#include "nel/mpi.h"
-#include "nel/simulator.h"
+#include "core/jbw/gibbs_field.h"
+#include "core/jbw/mpi.h"
+#include "core/jbw/simulator.h"
 
 using namespace core;
-using namespace nel;
+using namespace jbw;
 
 constexpr AgentSimulationState EMPTY_AGENT_SIM_STATE = { 0 };
 constexpr SimulatorInfo EMPTY_SIM_INFO = { 0 };

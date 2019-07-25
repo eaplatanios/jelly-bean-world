@@ -1,6 +1,6 @@
 [submodule "core"]
-	path = deps/core
+	path = core/deps/core
 	url = https://github.com/asaparov/core.git
 [submodule "math"]
-	path = deps/math
+	path = core/deps/math
 	url = https://github.com/asaparov/math.git

@@ -41,7 +41,7 @@ constexpr bool init(const empty_data& data) { return true; }
 constexpr bool init(const empty_data& data, const empty_data& src) { return true; }
 
 
-namespace nel {
+namespace jbw {
 
 using namespace core;
 
@@ -729,6 +729,6 @@ bool run_client(
 	return true;
 }
 
-} /* namespace nel */
+} /* namespace jbw */
 
 #endif /* NEL_NETWORK_H_ */

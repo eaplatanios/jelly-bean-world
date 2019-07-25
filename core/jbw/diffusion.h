@@ -6,7 +6,7 @@
 #include <math.h>
 #include <string.h>
 
-namespace nel {
+namespace jbw {
 
 using namespace core;
 
@@ -112,6 +112,6 @@ bool init(diffusion<T>& model, T alpha, T lambda,
 	return true;
 }
 
-} /* namespace nel */
+} /* namespace jbw */
 
 #endif /* DIFFUSION_H_ */

@@ -9,7 +9,7 @@
 #include <signal.h>
 
 using namespace core;
-using namespace nel;
+using namespace jbw;
 
 inline void set_interaction_args(
 		item_properties* item_types, unsigned int first_item_type,

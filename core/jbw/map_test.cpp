@@ -1,6 +1,6 @@
 #include "map.h"
 
-using namespace nel;
+using namespace jbw;
 
 struct empty_data {
 	static inline void move(const empty_data& src, empty_data& dst) { }

@@ -11,7 +11,7 @@
 
 #define SAMPLING_METHOD MH_SAMPLING
 
-namespace nel {
+namespace jbw {
 
 using namespace core;
 
@@ -548,6 +548,6 @@ private:
 	}
 };
 
-} /* namespace nel */
+} /* namespace jbw */
 
 #endif /* NEL_GIBBS_FIELD_H_ */

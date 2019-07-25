@@ -16,12 +16,12 @@ let package = Package(
             name: "CJellyBeanWorld",
             path: ".", 
             sources: [
-                "./api/swift/Sources/CJellyBeanWorld",
-                "./nel/simulator.cpp"],
-            publicHeadersPath: "./api/swift/Sources/CJellyBeanWorld",
+                "api/swift/Sources/CJellyBeanWorld",
+                "core/jbw/simulator.cpp"],
+            publicHeadersPath: "api/swift/Sources/CJellyBeanWorld",
             cxxSettings: [
                 .headerSearchPath("."),
-                .headerSearchPath("./deps"),
+                .headerSearchPath("core/deps"),
                 .unsafeFlags([
                     "-std=c++11", "-Wall", "-Wpedantic", "-Ofast", "-DNDEBUG", 
                     "-fno-stack-protector", "-mtune=native", "-march=native",

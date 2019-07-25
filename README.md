@@ -178,7 +178,7 @@ The following is a simple example where a simulator is constructed locally
 #include "network.h"
 #include "simulator.h"
 
-using namespace nel;
+using namespace jbw;
 
 /** A helper function to set interaction function parameters. */
 inline void set_interaction_args(
@@ -264,25 +264,25 @@ int main(int argc, const char** argv) {
 }
 ```
 
-See [nel/simulator_test.cpp](nel/simulator_test.cpp) for an example with more
-types of items, as well as a multithreaded example and an MPI example.
+See [core/jbw/simulator_test.cpp](core/jbw/simulator_test.cpp) for an example
+with more types of items, as well as a multithreaded example and an MPI example.
 
 To setup an MPI server for a simulator `sim`, the `init_server` function in
-[nel/mpi.h](nel/mpi.h) may be used:
+[core/jbw/mpi.h](jbw/mpi.h) may be used:
 ```c++
   /* NOTE: this blocks during the lifetime of the server */
   if (!init_server(sim, 54353, 256, 8)) { /* process error */ }
 ```
 
 To set up an asynchronous MPI server (where `init_server` will not block), the
-`async_server` class in [nel/mpi.h](nel/mpi.h) is used:
+`async_server` class in [core/jbw/mpi.h](core/jbw/mpi.h) is used:
 ```c++
   async_server new_server;
   if (!init_server(new_server, sim, 54353, 256, 8)) { /* process error */ }
 ```
 
 To connect to an existing server, for example at `localhost:54353`, we use the
-`client` class defined in [nel/mpi.h](nel/mpi.h):
+`client` class defined in [core/jbw/mpi.h](core/jbw/mpi.h):
 ```c++
   client<empty_data> new_client;
   if (!init_client(new_client, "localhost", 54353, NULL, NULL, 0)) { /* process error */ }
@@ -329,9 +329,9 @@ Simulator can be constructed as a server with the appropriate constructor
 arguments. If a server address is provided to the Simulator constructor, it
 will try to connect to the Simulator running at the specified remote address,
 and all calls to the Simulator class will be issued as commands to the server.
-In C++, [nel/mpi.h](nel/mpi.h) provides the functionality to run the server and
-clients. See [nel/simulator_test.cpp](nel/simulator_test.cpp) for an example.
-
+In C++, [core/jbw/mpi.h](core/jbw/mpi.h) provides the functionality to run the
+server and clients. See [core/jbw/simulator_test.cpp](core/jbw/simulator_test.cpp)
+for an example.
 
 #### Mechanics
 

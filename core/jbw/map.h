@@ -4,7 +4,7 @@
 #include <core/map.h>
 #include "gibbs_field.h"
 
-namespace nel {
+namespace jbw {
 
 using namespace core;
 
@@ -544,6 +544,6 @@ bool write(const map<PerPatchData, ItemType>& world, Stream& out,
 		&& write(world.patches, out, scribe, patch_writer);
 }
 
-} /* namespace nel */
+} /* namespace jbw */
 
 #endif /* NEL_MAP_H_ */

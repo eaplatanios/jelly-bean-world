@@ -3,7 +3,7 @@
 #include <core/io.h>
 
 using namespace core;
-using namespace nel;
+using namespace jbw;
 
 template<typename T>
 void test_diffusion(T alpha, T lambda,

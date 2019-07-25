@@ -4,7 +4,7 @@
 #include <core/map.h>
 #include <inttypes.h>
 
-namespace nel {
+namespace jbw {
 
 using namespace core;
 
@@ -121,6 +121,6 @@ inline bool print(const position& p, Stream& out) {
 	return fprintf(out, "(%" PRId64 ", %" PRId64 ")", p.x, p.y) > 0;
 }
 
-} /* namespace nel */
+} /* namespace jbw */
 
 #endif /* NEL_POSITION_H_ */
