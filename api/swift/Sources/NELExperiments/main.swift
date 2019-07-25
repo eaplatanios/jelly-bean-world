@@ -13,8 +13,8 @@ struct DummyAgent: Agent {
 
   @inlinable
   public mutating func act(using state: AgentState) -> Action {
-    self.counter += 1
-    switch self.counter % 20 {
+    counter += 1
+    switch counter % 20 {
       case 0:  return .turn(direction: .left)
       case 5:  return .turn(direction: .left)
       case 10: return .turn(direction: .right)
@@ -30,7 +30,7 @@ struct DummyAgent: Agent {
 
   @inlinable
   public mutating func load(from file: URL) throws {
-    self.counter = try UInt64(String(contentsOf: file, encoding: .utf8))!
+    counter = try UInt64(String(contentsOf: file, encoding: .utf8))!
   }
 }
 
