@@ -39,36 +39,37 @@ public final class Simulator {
     self.configuration = configuration
     var cConfig = configuration.toC()
     defer { cConfig.deallocate() }
-    let swiftSimulator = Unmanaged.passUnretained(self).toOpaque()
-    self.handle = simulatorCreate(&cConfig.configuration, nativeOnStepCallback, swiftSimulator)
+    self.handle = simulatorCreate(&cConfig.configuration, nativeOnStepCallback)
+    simulatorSetStepCallbackData(handle, Unmanaged.passUnretained(self).toOpaque())
   }
 
-  // /// Loads a simulator from the provided file.
-  // ///
-  // /// - Parameters:
-  // ///   - file: File in which the simulator is saved.
-  // ///   - agents: Agents that this simulator manages.
-  // /// - Precondition: The number of agents provided must match the number of agents the simulator
-  // ///   managed before its state was saved.
-  // public init(fromFile file: URL, agents: [Agent]) {
-  //   let swiftSimulator = Unmanaged.passUnretained(self).toOpaque()
-  //   let info = simulatorLoad(file.absoluteString, nativeOnStepCallback, swiftSimulator)
-  //   self.configuration = info.config
-  //   self.handle = info.handle
-  //   self.time = info.time
-  //   self.agentStates = [UInt64: AgentState](
-  //     uniqueKeysWithValues: UnsafeBufferPointer(
-  //       start: info.agents!,
-  //       count: Int(info.numAgents)
-  //     ).map { ($0.id, AgentState(fromC: $0, for: self)) })
-  //   precondition(
-  //     agents.count == agentStates.count,
-  //     """
-  //     The number of agent states stored in the provided simulator file does not match
-  //     the number of agents provided.
-  //     """)
-  //   self.agents = [UInt64: Agent](uniqueKeysWithValues: zip(agentStates.keys, agents))
-  // }
+  /// Loads a simulator from the provided file.
+  ///
+  /// - Parameters:
+  ///   - file: File in which the simulator is saved.
+  ///   - agents: Agents that this simulator manages.
+  /// - Precondition: The number of agents provided must match the number of agents the simulator
+  ///   managed before its state was saved.
+  public init(fromFile file: URL, agents: [Agent]) {
+    let cSimulatorInfo = simulatorLoad(file.absoluteString, nativeOnStepCallback)
+    defer { simulatorDeleteSimulatorInfo(cSimulatorInfo) }
+    self.handle = cSimulatorInfo.handle
+    self.configuration = Configuration(fromC: cSimulatorInfo.config)
+    self.time = cSimulatorInfo.time
+    self.agentStates = [UInt64: AgentState](
+      uniqueKeysWithValues: UnsafeBufferPointer(
+        start: cSimulatorInfo.agents!,
+        count: Int(cSimulatorInfo.numAgents)
+      ).map { ($0.id, AgentState(fromC: $0, for: self)) })
+    precondition(
+      agents.count == agentStates.count,
+      """
+      The number of agent states stored in the provided simulator file does not match
+      the number of agents provided.
+      """)
+    self.agents = [UInt64: Agent](uniqueKeysWithValues: zip(agentStates.keys, agents))
+    simulatorSetStepCallbackData(handle, Unmanaged.passUnretained(self).toOpaque())
+  }
 
   deinit {
     simulatorDelete(handle)

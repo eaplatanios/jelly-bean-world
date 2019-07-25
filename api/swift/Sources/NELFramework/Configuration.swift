@@ -11,8 +11,9 @@ extension Simulator {
     public let scentDimSize: UInt32
     public let colorDimSize: UInt32
     public let visionRange: UInt32
-    public let allowedMoves: Set<Direction>
-    public let allowedTurns: Set<TurnDirection>
+    public let allowedMoves: [Direction: ActionPolicy]
+    public let allowedTurns: [TurnDirection: ActionPolicy]
+    public let noOpAllowed: Bool
 
     // World properties
     public let patchSize: UInt32
@@ -33,8 +34,9 @@ extension Simulator {
       scentDimSize: UInt32,
       colorDimSize: UInt32,
       visionRange: UInt32,
-      allowedMoves: Set<Direction>,
-      allowedTurns: Set<TurnDirection>,
+      allowedMoves: [Direction: ActionPolicy],
+      allowedTurns: [TurnDirection: ActionPolicy],
+      noOpAllowed: Bool,
       patchSize: UInt32,
       mcmcIterations: UInt32,
       items: [Item],
@@ -51,6 +53,7 @@ extension Simulator {
       self.visionRange = visionRange
       self.allowedMoves = allowedMoves
       self.allowedTurns = allowedTurns
+      self.noOpAllowed = noOpAllowed
       self.patchSize = patchSize
       self.mcmcIterations = mcmcIterations
       self.items = items
@@ -59,6 +62,39 @@ extension Simulator {
       self.scentDecay = scentDecay
       self.scentDiffusion = scentDiffusion
       self.removedItemLifetime = removedItemLifetime
+    }
+
+    @inlinable
+    internal init(fromC value: SimulatorConfig) {
+      self.randomSeed = value.randomSeed
+      self.maxStepsPerMove = value.maxStepsPerMove
+      self.scentDimSize = value.scentDimSize
+      self.colorDimSize = value.colorDimSize
+      self.visionRange = value.visionRange
+      self.allowedMoves = [
+        .up: ActionPolicy(fromC: value.allowedMoveDirections.0),
+        .down: ActionPolicy(fromC: value.allowedMoveDirections.1),
+        .left: ActionPolicy(fromC: value.allowedMoveDirections.2),
+        .right: ActionPolicy(fromC: value.allowedMoveDirections.3)]
+      self.allowedTurns = [
+        .front: ActionPolicy(fromC: value.allowedRotations.0),
+        .back: ActionPolicy(fromC: value.allowedRotations.1),
+        .left: ActionPolicy(fromC: value.allowedRotations.2),
+        .right: ActionPolicy(fromC: value.allowedRotations.3)]
+      self.noOpAllowed = value.noOpAllowed
+      self.patchSize = value.patchSize
+      self.mcmcIterations = value.mcmcIterations
+      let cItems = UnsafeBufferPointer(start: value.itemTypes!, count: Int(value.numItemTypes))
+      self.items = cItems.map { Item(fromC: $0) }
+      self.agentColor = ShapedArray(
+        shape: [Int(colorDimSize)],
+        scalars: UnsafeBufferPointer(
+          start: value.agentColor!,
+          count: Int(colorDimSize)))
+      self.moveConflictPolicy = MoveConflictPolicy(fromC: value.movementConflictPolicy)
+      self.scentDecay = value.scentDecay
+      self.scentDiffusion = value.scentDiffusion
+      self.removedItemLifetime = value.removedItemLifetime
     }
 
     @inlinable
@@ -83,15 +119,16 @@ extension Simulator {
           colorDimSize: colorDimSize,
           visionRange: visionRange,
           allowedMoveDirections: (
-            allowedMoves.contains(.up),
-            allowedMoves.contains(.down),
-            allowedMoves.contains(.left),
-            allowedMoves.contains(.right)),
+            allowedMoves[.up]?.toC() ?? ActionPolicy.disallowed.toC(),
+            allowedMoves[.down]?.toC() ?? ActionPolicy.disallowed.toC(),
+            allowedMoves[.left]?.toC() ?? ActionPolicy.disallowed.toC(),
+            allowedMoves[.right]?.toC() ?? ActionPolicy.disallowed.toC()),
           allowedRotations: (
-            allowedTurns.contains(.front),
-            allowedTurns.contains(.back),
-            allowedTurns.contains(.left),
-            allowedTurns.contains(.right)),
+            allowedTurns[.front]?.toC() ?? ActionPolicy.disallowed.toC(),
+            allowedTurns[.back]?.toC() ?? ActionPolicy.disallowed.toC(),
+            allowedTurns[.left]?.toC() ?? ActionPolicy.disallowed.toC(),
+            allowedTurns[.right]?.toC() ?? ActionPolicy.disallowed.toC()),
+          noOpAllowed: noOpAllowed,
           patchSize: patchSize,
           mcmcIterations: mcmcIterations,
           itemTypes: cItems,
@@ -138,6 +175,18 @@ public struct Item: Equatable, Hashable {
     self.requiredItemCosts = requiredItemCosts
     self.blocksMovement = blocksMovement
     self.energyFunctions = energyFunctions
+  }
+
+  @inlinable
+  internal init(fromC value: ItemProperties) {
+    fatalError("Not implemented yet!")
+    // self.name = value.name // TODO: !!!!
+    // self.scent = value.scent // TODO: !!!!
+    // self.color = value.color // TODO: !!!!
+    // self.requiredItemCounts = value.requiredItemCounts // TODO: !!!!
+    // self.requiredItemCosts = value.requiredItemCosts // TODO: !!!!
+    // self.blocksMovement = value.blocksMovement
+    // self.energyFunctions = EnergyFunctions(fromC: value.energyFunctions)
   }
 
   @inlinable

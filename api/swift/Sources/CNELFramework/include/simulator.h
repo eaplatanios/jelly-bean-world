@@ -153,13 +153,11 @@ typedef struct SimulationClientInfo {
 
 void* simulatorCreate(
   const SimulatorConfig* config,
-  OnStepCallback onStepCallback,
-  const void* callbackData);
+  OnStepCallback onStepCallback);
 
 SimulatorInfo simulatorLoad(
   const char* filePath,
-  OnStepCallback onStepCallback,
-  const void* callbackData);
+  OnStepCallback onStepCallback);
 
 void simulatorDelete(
   void* simulatorHandle);
@@ -167,6 +165,10 @@ void simulatorDelete(
 bool simulatorSave(
   void* simulatorHandle,
   const char* filePath);
+
+void simulatorSetStepCallbackData(
+  void* simulatorHandle,
+  const void* callbackData);
 
 AgentSimulationState simulatorAddAgent(
   void* simulatorHandle,

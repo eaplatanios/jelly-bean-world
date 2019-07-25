@@ -701,11 +701,7 @@ inline void wait_for_server(client<client_data>& c)
 }
 
 
-void* simulatorCreate(
-  const SimulatorConfig* config,
-  OnStepCallback onStepCallback,
-  const void* callbackData)
-{
+void* simulatorCreate(const SimulatorConfig* config, OnStepCallback onStepCallback) {
   simulator_config sim_config;
 
   sim_config.agent_color = (float*) malloc(sizeof(float) * config->colorDimSize);
@@ -745,7 +741,7 @@ void* simulatorCreate(
   sim_config.diffusion_param = config->scentDiffusion;
   sim_config.deleted_item_lifetime = config->removedItemLifetime;
 
-  simulator_data data(nullptr, onStepCallback, callbackData);
+  simulator_data data(nullptr, onStepCallback, nullptr);
 
   simulator<simulator_data>* sim =
       (simulator<simulator_data>*) malloc(sizeof(simulator<simulator_data>));
@@ -760,11 +756,7 @@ void* simulatorCreate(
 }
 
 
-SimulatorInfo simulatorLoad(
-  const char* filePath, 
-  OnStepCallback onStepCallback,
-  void* callbackData)
-{
+SimulatorInfo simulatorLoad(const char* filePath, OnStepCallback onStepCallback) {
   simulator<simulator_data>* sim =
       (simulator<simulator_data>*) malloc(sizeof(simulator<simulator_data>));
   if (sim == nullptr) {
@@ -772,7 +764,7 @@ SimulatorInfo simulatorLoad(
     return EMPTY_SIM_INFO;
   }
 
-  simulator_data data(nullptr, onStepCallback, callbackData);
+  simulator_data data(nullptr, onStepCallback, nullptr);
 
   FILE* file = open_file(filePath, "rb");
   if (file == nullptr) {
@@ -889,6 +881,12 @@ bool simulatorSave(void* simulatorHandle, const char* filePath) {
   fclose(file);
 
   return result;
+}
+
+void simulatorSetStepCallbackData(void* simulatorHandle, const void* callbackData) {
+  simulator<simulator_data>* sim = (simulator<simulator_data>*) simulatorHandle;
+  simulator_data& sim_data = sim->get_data();
+  sim_data.callback_data = callbackData;
 }
 
 AgentSimulationState simulatorAddAgent(void* simulatorHandle, void* clientHandle) {
