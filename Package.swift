@@ -20,7 +20,7 @@ let package = Package(
                 "core/jbw/simulator.cpp"],
             publicHeadersPath: "api/swift/Sources/CJellyBeanWorld",
             cxxSettings: [
-                .headerSearchPath("."),
+                .headerSearchPath("core"),
                 .headerSearchPath("core/deps"),
                 .unsafeFlags([
                     "-std=c++11", "-Wall", "-Wpedantic", "-Ofast", "-DNDEBUG", 

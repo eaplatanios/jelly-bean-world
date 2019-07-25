@@ -44,7 +44,7 @@ simulator_c = Extension(
   'jbw.simulator_c',
   define_macros = [('MAJOR_VERSION', '1'),
                    ('MINOR_VERSION', '0')],
-  include_dirs = ['../..', '../../core/deps', np.get_include()],
+  include_dirs = ['../../core', '../../core/deps', np.get_include()],
   # libraries = ['...'],
   # library_dirs = ['/usr/local/lib'],
   sources = ['core/jbw/simulator.cpp'])

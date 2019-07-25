@@ -16,9 +16,9 @@
 
 #include "include/simulator.h"
 
-#include "core/jbw/gibbs_field.h"
-#include "core/jbw/mpi.h"
-#include "core/jbw/simulator.h"
+#include "jbw/gibbs_field.h"
+#include "jbw/mpi.h"
+#include "jbw/simulator.h"
 
 using namespace core;
 using namespace jbw;
