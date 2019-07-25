@@ -1,4 +1,4 @@
-# Never-Ending Learning Framework
+# Jelly Bean World
 
 A framework for experimenting with never-ending learning.
 
