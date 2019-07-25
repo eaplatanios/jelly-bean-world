@@ -291,9 +291,6 @@ bool init(SimulationMap& map,
  */
 struct simulator_data
 {
-  char* save_directory;
-  unsigned int save_directory_length;
-  unsigned int save_frequency;
   async_server* server;
   OnStepCallback callback;
   const void* callback_data;
@@ -302,40 +299,13 @@ struct simulator_data
   array<uint64_t> agent_ids;
 
   simulator_data(
-      const char* save_filepath,
-      unsigned int save_filepath_length,
-      unsigned int save_frequency,
       async_server* server,
       OnStepCallback callback,
       const void* callback_data) :
-    save_frequency(save_frequency), server(server),
-    callback(callback), callback_data(callback_data), agent_ids(16)
-  {
-    if (save_filepath == nullptr) {
-      save_directory = nullptr;
-    } else {
-      save_directory = (char*) malloc(sizeof(char) * save_filepath_length);
-      if (save_directory == nullptr) {
-        fprintf(stderr, "simulator_data ERROR: Out of memory.\n");
-        exit(EXIT_FAILURE);
-      }
-      save_directory_length = save_filepath_length;
-      for (unsigned int i = 0; i < save_filepath_length; i++)
-        save_directory[i] = save_filepath[i];
-      }
-  }
-
-  ~simulator_data() { free_helper(); }
+    server(server), callback(callback), callback_data(callback_data), agent_ids(16) { }
 
   static inline void free(simulator_data& data) {
-    data.free_helper();
     core::free(data.agent_ids);
-  }
-
-private:
-  inline void free_helper() {
-    if (save_directory != nullptr)
-      core::free(save_directory);
   }
 };
 
@@ -353,20 +323,6 @@ inline bool init(simulator_data& data, const simulator_data& src)
   if (!array_init(data.agent_ids, src.agent_ids.capacity))
     return false;
   data.agent_ids.append(src.agent_ids.data, src.agent_ids.length);
-
-  if (src.save_directory != nullptr) {
-    data.save_directory = (char*) malloc(sizeof(char) * max(1u, src.save_directory_length));
-    if (data.save_directory == nullptr) {
-      fprintf(stderr, "init ERROR: Insufficient memory for simulator_data.save_directory.\n");
-      free(data.agent_ids); return false;
-    }
-    for (unsigned int i = 0; i < src.save_directory_length; i++)
-      data.save_directory[i] = src.save_directory[i];
-    data.save_directory_length = src.save_directory_length;
-  } else {
-    data.save_directory = nullptr;
-  }
-  data.save_frequency = src.save_frequency;
   data.server = src.server;
   data.callback = src.callback;
   data.callback_data = src.callback_data;
@@ -414,53 +370,10 @@ inline bool init(client_data& data) {
 
 
 /**
- * Saves the simulator given by the specified pointer `sim` to the filepath
- * specified by the `simulator_data` structure inside `sim`.
- *
- * \param   sim     The simulator to save.
- * \param   time    The simulation time of `sim`.
- * \returns `true` if successful; and `false` otherwise.
- */
-bool save(const simulator<simulator_data>* sim, uint64_t time)
-{
-  int length = snprintf(nullptr, 0, "%" PRIu64, time);
-  if (length < 0) {
-    fprintf(stderr, "save ERROR: Error computing filepath to save simulation.\n");
-    return false;
-  }
-
-  const simulator_data& data = sim->get_data();
-  char* filepath = (char*) malloc(sizeof(char) * (data.save_directory_length + length + 1));
-  if (filepath == nullptr) {
-    fprintf(stderr, "save ERROR: Insufficient memory for filepath.\n");
-    return false;
-  }
-
-  for (unsigned int i = 0; i < data.save_directory_length; i++)
-    filepath[i] = data.save_directory[i];
-  snprintf(filepath + data.save_directory_length, length + 1, "%" PRIu64, time);
-
-  FILE* file = open_file(filepath, "wb");
-  if (file == nullptr) {
-    fprintf(stderr, "save ERROR: Unable to open '%s' for writing. ", filepath);
-    perror(""); return false;
-  }
-
-  fixed_width_stream<FILE*> out(file);
-  bool result = write(*sim, out)
-             && write(data.agent_ids.length, out)
-             && write(data.agent_ids.data, out, data.agent_ids.length);
-  fclose(file);
-  return result;
-}
-
-
-/**
  * The callback function invoked by the simulator when time is advanced. This
- * function is only called if the simulator is run locally or as a server. This
- * function first checks if the simulator should be saved to file. Next, in
- * server mode, the simulator sends a step response message to all connected
- * clients. Finally, it constructs a list of agent states and invokes the
+ * function is only called if the simulator is run locally or as a server. In
+ * server mode, the simulator first sends a step response message to all connected
+ * clients. Then, it constructs a list of agent states and invokes the
  * callback in `data.callback`.
  *
  * \param   sim     The simulator invoking this function.
@@ -468,16 +381,12 @@ bool save(const simulator<simulator_data>* sim, uint64_t time)
  * \param   time    The new simulation time of `sim`.
  */
 void on_step(const simulator<simulator_data>* sim,
-        const array<agent_state*>& agents, uint64_t time)
+    const array<agent_state*>& agents, uint64_t time)
 {
-  bool saved = false;
   const simulator_data& data = sim->get_data();
-  if (data.save_directory != nullptr && time % data.save_frequency == 0) {
-    /* save the simulator to a local file */
-    saved = save(sim, time);
-  } if (data.server != nullptr) {
+  if (data.server != nullptr) {
     /* this simulator is a server, so send a step response to every client */
-    if (!send_step_response(*data.server, agents, sim->get_config(), saved))
+    if (!send_step_response(*data.server, agents, sim->get_config()))
       fprintf(stderr, "on_step ERROR: send_step_response failed.\n");
   }
 
@@ -496,7 +405,7 @@ void on_step(const simulator<simulator_data>* sim,
   }
 
   /* invoke callback */
-  data.callback(data.callback_data, agent_states, data.agent_ids.length, saved);
+  data.callback(data.callback_data, agent_states, data.agent_ids.length);
 
   for (size_t i = 0; i < data.agent_ids.length; i++)
     free(agent_states[i]);
@@ -557,7 +466,7 @@ inline void check_response(mpi_response response, const char* prefix) {
  * \param   new_agent The state of the new agent.
  */
 void on_add_agent(client<client_data>& c, uint64_t agent_id,
-        mpi_response response, const agent_state& new_agent)
+    mpi_response response, const agent_state& new_agent)
 {
   check_response(response, "add_agent: ");
   AgentSimulationState new_agent_state;
@@ -716,9 +625,6 @@ void on_step(client<client_data>& c,
 {
   check_response(response, "on_step: ");
 
-  bool saved;
-  if (!read(saved, c.connection)) return;
-
   AgentSimulationState* agents = (AgentSimulationState*) malloc(sizeof(AgentSimulationState) * agent_ids.length);
   if (agents == nullptr) {
     fprintf(stderr, "on_step ERROR: Insufficient memory for agents.\n");
@@ -732,7 +638,7 @@ void on_step(client<client_data>& c,
     }
   }
 
-  c.data.step_callback(c.data.callback_data, agents, agent_ids.length, saved);
+  c.data.step_callback(c.data.callback_data, agents, agent_ids.length);
 
   for (size_t i = 0; i < agent_ids.length; i++)
     free(agents[i]);
@@ -768,11 +674,9 @@ inline void wait_for_server(client<client_data>& c)
 
 
 void* simulatorCreate(
-  const SimulatorConfig* config, 
+  const SimulatorConfig* config,
   OnStepCallback onStepCallback,
-  const void* callbackData,
-  unsigned int saveFrequency,
-  const char* savePath)
+  const void* callbackData)
 {
   simulator_config sim_config;
 
@@ -813,9 +717,7 @@ void* simulatorCreate(
   sim_config.diffusion_param = config->scentDiffusion;
   sim_config.deleted_item_lifetime = config->removedItemLifetime;
 
-  simulator_data data(savePath,
-      (savePath == nullptr) ? 0 : strlen(savePath),
-      saveFrequency, nullptr, onStepCallback, callbackData);
+  simulator_data data(nullptr, onStepCallback, callbackData);
 
   simulator<simulator_data>* sim =
       (simulator<simulator_data>*) malloc(sizeof(simulator<simulator_data>));
@@ -833,9 +735,7 @@ void* simulatorCreate(
 SimulatorInfo simulatorLoad(
   const char* filePath, 
   OnStepCallback onStepCallback,
-  void* callbackData,
-  unsigned int saveFrequency,
-  const char* savePath)
+  void* callbackData)
 {
   simulator<simulator_data>* sim =
       (simulator<simulator_data>*) malloc(sizeof(simulator<simulator_data>));
@@ -844,9 +744,7 @@ SimulatorInfo simulatorLoad(
     return EMPTY_SIM_INFO;
   }
 
-  simulator_data data(savePath,
-      (savePath == nullptr) ? 0 : strlen(savePath),
-      saveFrequency, nullptr, onStepCallback, callbackData);
+  simulator_data data(nullptr, onStepCallback, callbackData);
 
   FILE* file = open_file(filePath, "rb");
   if (file == nullptr) {
@@ -903,23 +801,33 @@ SimulatorInfo simulatorLoad(
 }
 
 
-void simulatorDelete(
-  void* simulatorHandle)
-{
-  simulator<simulator_data>* sim =
-      (simulator<simulator_data>*) simulatorHandle;
+void simulatorDelete(void* simulatorHandle) {
+  simulator<simulator_data>* sim = (simulator<simulator_data>*) simulatorHandle;
   free(*sim); free(sim);
 }
 
+bool simulatorSave(void* simulatorHandle, const char* filePath) {
+  FILE* file = open_file(filePath, "wb");
+  if (file == nullptr) {
+    fprintf(stderr, "save ERROR: Unable to open '%s' for writing. ", filePath);
+    perror(""); return false;
+  }
 
-AgentSimulationState simulatorAddAgent(
-  void* simulatorHandle,
-  void* clientHandle)
-{
+  simulator<simulator_data>* sim = (simulator<simulator_data>*) simulatorHandle;
+  const simulator_data& data = sim->get_data();
+  fixed_width_stream<FILE*> out(file);
+  bool result = write(*sim, out)
+    && write(data.agent_ids.length, out)
+    && write(data.agent_ids.data, out, data.agent_ids.length);
+  fclose(file);
+
+  return result;
+}
+
+AgentSimulationState simulatorAddAgent(void* simulatorHandle, void* clientHandle) {
   if (clientHandle == nullptr) {
     /* the simulation is local, so call add_agent directly */
-    simulator<simulator_data>* sim_handle =
-        (simulator<simulator_data>*) simulatorHandle;
+    simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
     pair<uint64_t, agent_state*> new_agent = sim_handle->add_agent();
     if (new_agent.key == UINT64_MAX) {
       /* TODO: communicate the error "Failed to add new agent." to swift */
@@ -966,8 +874,7 @@ bool simulatorMoveAgent(
 {
   if (clientHandle == nullptr) {
     /* the simulation is local, so call move directly */
-    simulator<simulator_data>* sim_handle =
-        (simulator<simulator_data>*) simulatorHandle;
+    simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
     return sim_handle->move(agentId, to_direction(direction), numSteps);
   } else {
     /* this is a client, so send a move message to the server */
@@ -1000,8 +907,7 @@ bool simulatorTurnAgent(
 {
   if (clientHandle == nullptr) {
     /* the simulation is local, so call turn directly */
-    simulator<simulator_data>* sim_handle =
-        (simulator<simulator_data>*) simulatorHandle;
+    simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
     return sim_handle->turn(agentId, to_direction(direction));
   } else {
     /* this is a client, so send a turn message to the server */
@@ -1033,8 +939,7 @@ bool simulatorNoOpAgent(
 {
   if (clientHandle == nullptr) {
     /* the simulation is local, so call do_nothing directly */
-    simulator<simulator_data>* sim_handle =
-        (simulator<simulator_data>*) simulatorHandle;
+    simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
     return sim_handle->do_nothing(agentId);
   } else {
     /* this is a client, so send a do_nothing message to the server */
@@ -1067,8 +972,7 @@ void simulatorSetActive(
 {
   if (clientHandle == nullptr) {
     /* the simulation is local, so call get_map directly */
-    simulator<simulator_data>* sim_handle =
-        (simulator<simulator_data>*) simulatorHandle;
+    simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
     sim_handle->set_agent_active(agentId, active);
   } else {
     /* this is a client, so send a get_map message to the server */
@@ -1097,8 +1001,7 @@ bool simulatorIsActive(
 {
   if (clientHandle == nullptr) {
     /* the simulation is local, so call get_map directly */
-    simulator<simulator_data>* sim_handle =
-        (simulator<simulator_data>*) simulatorHandle;
+    simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
     return sim_handle->is_agent_active(agentId);
   } else {
     /* this is a client, so send a get_map message to the server */
@@ -1138,8 +1041,7 @@ const SimulationMap simulatorMap(
 
   if (clientHandle == nullptr) {
     /* the simulation is local, so call get_map directly */
-    simulator<simulator_data>* sim_handle =
-        (simulator<simulator_data>*) simulatorHandle;
+    simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
     hash_map<position, patch_state> patches(16, alloc_position_keys);
     if (!sim_handle->get_map(bottom_left, top_right, patches)) {
       /* TODO: communicate "simulator.get_map failed." to swift */
@@ -1189,8 +1091,7 @@ void* simulationServerStart(
   unsigned int connectionQueueCapacity,
   unsigned int numWorkers)
 {
-  simulator<simulator_data>* sim_handle =
-      (simulator<simulator_data>*) simulatorHandle;
+  simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
   async_server* server = (async_server*) malloc(sizeof(async_server));
   if (server == nullptr || !init(*server)) {
     /* TODO: communicate out of memory errors to swift */
@@ -1205,9 +1106,7 @@ void* simulationServerStart(
 }
 
 
-void simulationServerStop(
-  void* serverHandle)
-{
+void simulationServerStop(void* serverHandle) {
   async_server* server = (async_server*) serverHandle;
   stop_server(*server);
   free(*server); free(server);
@@ -1229,8 +1128,7 @@ SimulationClientInfo simulationClientStart(
     return EMPTY_CLIENT_INFO;
   }
 
-  client<client_data>* new_client =
-            (client<client_data>*) malloc(sizeof(client<client_data>));
+  client<client_data>* new_client = (client<client_data>*) malloc(sizeof(client<client_data>));
   if (new_client == nullptr || !init(*new_client)) {
     /* TODO: communicate out of memory errors to swift */
     if (new_client != nullptr) free(new_client);

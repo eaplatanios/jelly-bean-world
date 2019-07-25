@@ -2,10 +2,15 @@ import CNELFramework
 import Foundation
 import TensorFlow
 
+public enum JellyBeanWorldError: Error {
+  /// Failure while trying to save the simulator state at the specified path.
+  case SimulatorSaveFailure(URL)
+}
+
 /// Jelly Bean World (JBW) simulator.
 public final class Simulator {
   /// Simulator configuration.
-  public let configuration: Simulator.Configuration
+  public let configuration: Configuration
 
   /// Number of simulation steps that have been executed so far.
   public private(set) var time: UInt64 = 0
@@ -30,7 +35,7 @@ public final class Simulator {
   /// Creates a new simulator.
   ///
   /// - Parameter configuration: Configuration for the new simulator.
-  public init(using configuration: Simulator.Configuration) {
+  public init(using configuration: Configuration) {
     self.configuration = configuration
     var cConfig = configuration.toC()
     defer { cConfig.deallocate() }
@@ -38,32 +43,32 @@ public final class Simulator {
     self.handle = simulatorCreate(&cConfig.configuration, nativeOnStepCallback, swiftSimulator)
   }
 
-  /// Loads a simulator from the provided file.
-  ///
-  /// - Parameters:
-  ///   - file: File in which the simulator is saved.
-  ///   - agents: Agents that this simulator manages.
-  /// - Precondition: The number of agents provided must match the number of agents the simulator
-  ///   managed before its state was saved.
-  public init(fromFile file: URL, agents: [Agent]) {
-    let swiftSimulator = Unmanaged.passUnretained(self).toOpaque()
-    let info = simulatorLoad(file.absoluteString, nativeOnStepCallback, swiftSimulator)
-    self.configuration = info.config
-    self.handle = info.handle
-    self.time = info.time
-    self.agentStates = [UInt64: AgentState](
-      uniqueKeysWithValues: UnsafeBufferPointer(
-        start: info.agents!,
-        count: Int(info.numAgents)
-      ).map { ($0.id, AgentState(fromC: $0, for: self)) })
-    precondition(
-      agents.count == agentStates.count,
-      """
-      The number of agent states stored in the provided simulator file does not match
-      the number of agents provided.
-      """)
-    self.agents = [UInt64: Agent](uniqueKeysWithValues: zip(agentStates.keys, agents))
-  }
+  // /// Loads a simulator from the provided file.
+  // ///
+  // /// - Parameters:
+  // ///   - file: File in which the simulator is saved.
+  // ///   - agents: Agents that this simulator manages.
+  // /// - Precondition: The number of agents provided must match the number of agents the simulator
+  // ///   managed before its state was saved.
+  // public init(fromFile file: URL, agents: [Agent]) {
+  //   let swiftSimulator = Unmanaged.passUnretained(self).toOpaque()
+  //   let info = simulatorLoad(file.absoluteString, nativeOnStepCallback, swiftSimulator)
+  //   self.configuration = info.config
+  //   self.handle = info.handle
+  //   self.time = info.time
+  //   self.agentStates = [UInt64: AgentState](
+  //     uniqueKeysWithValues: UnsafeBufferPointer(
+  //       start: info.agents!,
+  //       count: Int(info.numAgents)
+  //     ).map { ($0.id, AgentState(fromC: $0, for: self)) })
+  //   precondition(
+  //     agents.count == agentStates.count,
+  //     """
+  //     The number of agent states stored in the provided simulator file does not match
+  //     the number of agents provided.
+  //     """)
+  //   self.agents = [UInt64: Agent](uniqueKeysWithValues: zip(agentStates.keys, agents))
+  // }
 
   deinit {
     simulatorDelete(handle)
@@ -114,6 +119,16 @@ public final class Simulator {
     }
   }
 
+  /// Saves this simulator in the provided file.
+  ///
+  /// - Parameter file: File in which to save the state of this simulator.
+  @inlinable
+  public func save(to file: URL) throws {
+    if !simulatorSave(handle, file.absoluteString) {
+      throw JellyBeanWorldError.SimulatorSaveFailure(file)
+    }
+  }
+
   /// Returns the portion of the simulator map that lies within the rectangle formed by the
   /// `bottomLeft` and `topRight` corners.
   ///
@@ -160,17 +175,6 @@ public protocol Agent {
   ///   issues a notification about that event. The simulator only advances by a time step only
   ///   once all agents have requested some action.
   mutating func act(using state: AgentState) -> Action
-
-  /// Saves this agent's state to the specified file.
-  ///
-  /// - Parameter file: URL of the file in which to save the agent's state.
-  /// - Note: If the provided file exists, it may be overwritten by this function.
-  func save(to file: URL) throws
-
-  /// Loads this agent's state from the specified file.
-  ///
-  /// - Parameter file: URL of the file from which to load the agent's state.
-  mutating func load(from file: URL) throws
 }
 
 /// State of an agent in the Jelly Bean World.
@@ -237,6 +241,12 @@ public enum Action {
   /// Turn action (without any movement to a different cell).
   case turn(direction: TurnDirection)
 
+  /// Invokes this action in the simulator.
+  ///
+  /// - Parameters:
+  ///   - simulatorHandle: Pointer to the C simulator instance.
+  ///   - clientHandle: Pointer to the C simulator client instance (if a client is being used).
+  ///   - agentID: Identifier of the agent for which to invoke this action.
   @inlinable
   internal func invoke(
     simulatorHandle: UnsafeMutableRawPointer?,
@@ -259,8 +269,12 @@ public enum Action {
   }
 }
 
+/// Position in the simulation map.
 public struct Position: Equatable {
+  /// Horizontal coordinate of the position.
   public let x: Int64
+
+  /// Vertical coordination of the position.
   public let y: Int64
 
   public init(x: Int64, y: Int64) {
@@ -268,11 +282,14 @@ public struct Position: Equatable {
     self.y = y
   }
 
+  /// Creates a new position instance on the Swift API side, corresponding to an exising position
+  /// instance on the C API side.
   @inlinable
   internal init(fromC value: CNELFramework.Position) {
     self.init(x: value.x, y: value.y)
   }
 
+  /// Creates a new position instance on the C API side, corresponding to this position.
   @inlinable
   internal func toC() -> CNELFramework.Position {
     CNELFramework.Position(x: x, y: y)
@@ -318,5 +335,19 @@ public enum MoveConflictPolicy: UInt32 {
   @inlinable
   internal func toC() -> CNELFramework.MovementConflictPolicy {
     CNELFramework.MovementConflictPolicy(rawValue: rawValue)
+  }
+}
+
+public enum ActionPolicy: UInt32 {
+  case allowed = 0, disallowed, ignored
+
+  @inlinable
+  internal init(fromC value: CNELFramework.ActionPolicy) {
+    self.init(rawValue: value.rawValue)!
+  }
+
+  @inlinable
+  internal func toC() -> CNELFramework.ActionPolicy {
+    CNELFramework.ActionPolicy(rawValue: rawValue)
   }
 }
