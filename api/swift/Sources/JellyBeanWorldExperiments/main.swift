@@ -1,5 +1,5 @@
 import Foundation
-import NELFramework
+import JellyBeanWorld
 import Python
 import TensorFlow
 

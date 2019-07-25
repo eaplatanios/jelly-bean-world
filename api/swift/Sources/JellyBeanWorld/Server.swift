@@ -1,4 +1,4 @@
-import CNELFramework
+import CJellyBeanWorld
 
 public class SimulationServer {
   internal var handle: UnsafeMutableRawPointer
@@ -9,7 +9,7 @@ public class SimulationServer {
     connectionQueueCapacity: UInt32 = 256, 
     numWorkers: UInt32 = 8
   ) {
-    self.handle = CNELFramework.simulationServerStart(
+    self.handle = CJellyBeanWorld.simulationServerStart(
       &simulator.handle, 
       port, 
       connectionQueueCapacity,
@@ -19,12 +19,12 @@ public class SimulationServer {
   deinit {
     // Deletes the underlying native simulator and 
     // deallocates all associated memory.
-    CNELFramework.simulationServerStop(&self.handle)
+    CJellyBeanWorld.simulationServerStop(&self.handle)
   }
 }
 
 // public class SimulationClient {
-//   internal let client: CNELFramework.SimulationClient
+//   internal let client: CJellyBeanWorld.SimulationClient
 
 //   public init(
 //     serverAddress: String, 
@@ -33,7 +33,7 @@ public class SimulationServer {
 //     onLostConnection: onLostConnectionCallback: @escaping @convention(c) () -> (),
 //     // TODO: agents and numAgents
 //   ) {
-//     self.client = CNELFramework.simulationClientStart(
+//     self.client = CJellyBeanWorld.simulationClientStart(
 //       serverAddress, 
 //       serverPort, 
 //       onStepCallback, 
@@ -43,6 +43,6 @@ public class SimulationServer {
 //   }
 
 //   deinit {
-//     CNELFramework.simulationClientStop(self.client)
+//     CJellyBeanWorld.simulationClientStop(self.client)
 //   }
 // }

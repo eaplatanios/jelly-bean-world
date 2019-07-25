@@ -1,66 +1,66 @@
-import CNELFramework
+import CJellyBeanWorld
 import TensorFlow
 
 internal extension Position {
   /// Creates a new position instance on the Swift API side, corresponding to an exising position
   /// instance on the C API side.
   @inlinable
-  init(fromC value: CNELFramework.Position) {
+  init(fromC value: CJellyBeanWorld.Position) {
     self.init(x: value.x, y: value.y)
   }
 
   /// Creates a new position instance on the C API side, corresponding to this position.
   @inlinable
-  func toC() -> CNELFramework.Position {
-    CNELFramework.Position(x: x, y: y)
+  func toC() -> CJellyBeanWorld.Position {
+    CJellyBeanWorld.Position(x: x, y: y)
   }
 }
 
 internal extension Direction {
   @inlinable
-  init(fromC value: CNELFramework.Direction) {
+  init(fromC value: CJellyBeanWorld.Direction) {
     self.init(rawValue: value.rawValue)!
   }
 
   @inlinable
-  func toC() -> CNELFramework.Direction {
-    CNELFramework.Direction(rawValue: rawValue)
+  func toC() -> CJellyBeanWorld.Direction {
+    CJellyBeanWorld.Direction(rawValue: rawValue)
   }
 }
 
 internal extension TurnDirection {
   @inlinable
-  init(fromC value: CNELFramework.TurnDirection) {
+  init(fromC value: CJellyBeanWorld.TurnDirection) {
     self.init(rawValue: value.rawValue)!
   }
 
   @inlinable
-  func toC() -> CNELFramework.TurnDirection {
-    CNELFramework.TurnDirection(rawValue: rawValue)
+  func toC() -> CJellyBeanWorld.TurnDirection {
+    CJellyBeanWorld.TurnDirection(rawValue: rawValue)
   }
 }
 
 internal extension MoveConflictPolicy {
   @inlinable
-  init(fromC value: CNELFramework.MovementConflictPolicy) {
+  init(fromC value: CJellyBeanWorld.MovementConflictPolicy) {
     self.init(rawValue: value.rawValue)!
   }
 
   @inlinable
-  func toC() -> CNELFramework.MovementConflictPolicy {
-    CNELFramework.MovementConflictPolicy(rawValue: rawValue)
+  func toC() -> CJellyBeanWorld.MovementConflictPolicy {
+    CJellyBeanWorld.MovementConflictPolicy(rawValue: rawValue)
   }
 }
 
 internal extension ActionPolicy {
   @inlinable
-  init(fromC value: CNELFramework.ActionPolicy) {
+  init(fromC value: CJellyBeanWorld.ActionPolicy) {
     self.init(rawValue: value.rawValue)!
   }
 
   @inlinable
-  func toC() -> CNELFramework.ActionPolicy {
-    CNELFramework.ActionPolicy(rawValue: rawValue)
+  func toC() -> CJellyBeanWorld.ActionPolicy {
+    CJellyBeanWorld.ActionPolicy(rawValue: rawValue)
   }
 }
 
@@ -253,7 +253,7 @@ internal extension Item {
 
 internal extension EnergyFunctions {
   @inlinable
-  init(fromC value: CNELFramework.EnergyFunctions) {
+  init(fromC value: CJellyBeanWorld.EnergyFunctions) {
     self.intensityFn = IntensityFunction(fromC: value.intensityFn)
     self.interactionFns = UnsafeBufferPointer(
       start: value.interactionFns!,
@@ -262,19 +262,19 @@ internal extension EnergyFunctions {
   }
 
   @inlinable
-  func toC() -> (energyFunctions: CNELFramework.EnergyFunctions, deallocate: () -> Void) {
+  func toC() -> (energyFunctions: CJellyBeanWorld.EnergyFunctions, deallocate: () -> Void) {
     let cIntensityFn = intensityFn.toC()
     let (interactionFns, interactionFnDeallocators) = self.interactionFns
       .map { $0.toC() }
-      .reduce(into: ([CNELFramework.InteractionFunction](), [() -> Void]())) {
+      .reduce(into: ([CJellyBeanWorld.InteractionFunction](), [() -> Void]())) {
         $0.0.append($1.interactionFunction)
         $0.1.append($1.deallocate)
       }
-    let cInteractionFns = UnsafeMutablePointer<CNELFramework.InteractionFunction>.allocate(
+    let cInteractionFns = UnsafeMutablePointer<CJellyBeanWorld.InteractionFunction>.allocate(
       capacity: interactionFns.count)
     cInteractionFns.initialize(from: interactionFns, count: interactionFns.count)
     return (
-      energyFunctions: CNELFramework.EnergyFunctions(
+      energyFunctions: CJellyBeanWorld.EnergyFunctions(
         intensityFn: cIntensityFn.intensityFunction,
         interactionFns: cInteractionFns,
         numInteractionFns: UInt32(interactionFns.count)),
@@ -290,17 +290,17 @@ internal extension EnergyFunctions {
 
 internal extension IntensityFunction {
   @inlinable
-  init(fromC value: CNELFramework.IntensityFunction) {
+  init(fromC value: CJellyBeanWorld.IntensityFunction) {
     self.id = value.id
     self.arguments = [Float](UnsafeBufferPointer(start: value.args!, count: Int(value.numArgs)))
   }
 
   @inlinable
-  func toC() -> (intensityFunction: CNELFramework.IntensityFunction, deallocate: () -> Void) {
+  func toC() -> (intensityFunction: CJellyBeanWorld.IntensityFunction, deallocate: () -> Void) {
     let cArgs = UnsafeMutablePointer<Float>.allocate(capacity: arguments.count)
     cArgs.initialize(from: arguments, count: arguments.count)
     return (
-      intensityFunction: CNELFramework.IntensityFunction(
+      intensityFunction: CJellyBeanWorld.IntensityFunction(
         id: id,
         args: cArgs,
         numArgs: UInt32(arguments.count)),
@@ -310,18 +310,21 @@ internal extension IntensityFunction {
 
 internal extension InteractionFunction {
   @inlinable
-  init(fromC value: CNELFramework.InteractionFunction) {
+  init(fromC value: CJellyBeanWorld.InteractionFunction) {
     self.id = value.id
     self.itemId = value.itemId
     self.arguments = [Float](UnsafeBufferPointer(start: value.args!, count: Int(value.numArgs)))
   }
 
   @inlinable
-  func toC() -> (interactionFunction: CNELFramework.InteractionFunction, deallocate: () -> Void) {
+  func toC() -> (
+    interactionFunction: CJellyBeanWorld.InteractionFunction,
+    deallocate: () -> Void
+  ) {
     let cArgs = UnsafeMutablePointer<Float>.allocate(capacity: arguments.count)
     cArgs.initialize(from: arguments, count: arguments.count)
     return (
-      interactionFunction: CNELFramework.InteractionFunction(
+      interactionFunction: CJellyBeanWorld.InteractionFunction(
         id: id,
         itemId: itemId,
         args: cArgs,
