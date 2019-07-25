@@ -196,39 +196,6 @@ public struct AgentState {
 
   /// Items that collected by the agent so far represented as a dictionary mapping items to counts.
   public let items: [Item: Int]
-
-  /// Creates a new agent state on the Swift API side, corresponding to an exising agent state on
-  /// the C API side.
-  @inlinable
-  internal init(fromC value: AgentSimulationState, for simulator: Simulator) {
-    self.position = Position(fromC: value.position)
-    self.direction = Direction(fromC: value.direction)
-
-    // Construct the scent vector.
-    let scentShape = [Int(simulator.configuration.scentDimSize)]
-    let scentBuffer = UnsafeBufferPointer(start: value.scent!, count: scentShape[0])
-    self.scent = Tensor(shape: TensorShape(scentShape), scalars: [Float](scentBuffer))
-
-    // Construct the visual field.
-    let visionShape = [
-      2 * Int(simulator.configuration.visionRange) + 1,
-      2 * Int(simulator.configuration.visionRange) + 1,
-      Int(simulator.configuration.colorDimSize)]
-    let visionSize = Int(
-      (2 * simulator.configuration.visionRange + 1) *
-      (2 * simulator.configuration.visionRange + 1) *
-      simulator.configuration.colorDimSize)
-    let visionBuffer = UnsafeBufferPointer(start: value.vision!, count: visionSize)
-    self.vision = Tensor(shape: TensorShape(visionShape), scalars: [Float](visionBuffer))
-
-    // Construcct the collected items dictionary.
-    let simulatorItems = simulator.configuration.items
-    self.items = [Item: Int](uniqueKeysWithValues: zip(
-      simulatorItems,
-      UnsafeBufferPointer(
-        start: value.collectedItems!,
-        count: simulatorItems.count).map(Int.init)))
-  }
 }
 
 /// Action that can be taken by agents in the jelly bean world.
@@ -282,73 +249,20 @@ public struct Position: Equatable {
     self.x = x
     self.y = y
   }
-
-  /// Creates a new position instance on the Swift API side, corresponding to an exising position
-  /// instance on the C API side.
-  @inlinable
-  internal init(fromC value: CNELFramework.Position) {
-    self.init(x: value.x, y: value.y)
-  }
-
-  /// Creates a new position instance on the C API side, corresponding to this position.
-  @inlinable
-  internal func toC() -> CNELFramework.Position {
-    CNELFramework.Position(x: x, y: y)
-  }
 }
 
 public enum Direction: UInt32 {
   case up = 0, down, left, right
-
-  @inlinable
-  internal init(fromC value: CNELFramework.Direction) {
-    self.init(rawValue: value.rawValue)!
-  }
-
-  @inlinable
-  internal func toC() -> CNELFramework.Direction {
-    CNELFramework.Direction(rawValue: rawValue)
-  }
 }
 
 public enum TurnDirection: UInt32 {
   case front = 0, back, left, right
-
-  @inlinable
-  internal init(fromC value: CNELFramework.TurnDirection) {
-    self.init(rawValue: value.rawValue)!
-  }
-
-  @inlinable
-  internal func toC() -> CNELFramework.TurnDirection {
-    CNELFramework.TurnDirection(rawValue: rawValue)
-  }
 }
 
 public enum MoveConflictPolicy: UInt32 {
   case noCollisions = 0, firstComeFirstServe, random
-
-  @inlinable
-  internal init(fromC value: CNELFramework.MovementConflictPolicy) {
-    self.init(rawValue: value.rawValue)!
-  }
-
-  @inlinable
-  internal func toC() -> CNELFramework.MovementConflictPolicy {
-    CNELFramework.MovementConflictPolicy(rawValue: rawValue)
-  }
 }
 
 public enum ActionPolicy: UInt32 {
   case allowed = 0, disallowed, ignored
-
-  @inlinable
-  internal init(fromC value: CNELFramework.ActionPolicy) {
-    self.init(rawValue: value.rawValue)!
-  }
-
-  @inlinable
-  internal func toC() -> CNELFramework.ActionPolicy {
-    CNELFramework.ActionPolicy(rawValue: rawValue)
-  }
 }
