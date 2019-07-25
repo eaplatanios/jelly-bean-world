@@ -137,6 +137,7 @@ struct map {
 	unsigned int mcmc_iterations;
 
 	std::minstd_rand rng;
+	uint_fast32_t initial_seed;
 	gibbs_field_cache<ItemType> cache;
 
 	typedef patch<PerPatchData> patch_type;
@@ -144,7 +145,7 @@ struct map {
 
 public:
 	map(unsigned int n, unsigned int mcmc_iterations, const ItemType* item_types, unsigned int item_type_count, uint_fast32_t seed) :
-		patches(1024, alloc_position_keys), n(n), mcmc_iterations(mcmc_iterations), cache(item_types, item_type_count, n)
+		patches(1024, alloc_position_keys), n(n), mcmc_iterations(mcmc_iterations), initial_seed(seed), cache(item_types, item_type_count, n)
 	{
 		rng.seed(seed);
 #if !defined(NDEBUG)
@@ -163,10 +164,6 @@ public:
 #endif
 
 	~map() { free_helper(); }
-
-	inline void set_seed(uint_fast32_t new_seed) {
-		rng.seed(new_seed);
-	}
 
 	inline patch_type& get_existing_patch(const position& patch_position) {
 #if !defined(NDEBUG)
@@ -467,6 +464,7 @@ inline bool init(map<PerPatchData, ItemType>& world, unsigned int n,
 		return false;
 	world.n = n;
 	world.mcmc_iterations = mcmc_iterations;
+	world.initial_seed = seed;
 	if (!init(world.cache, item_types, item_type_count, n)) {
 		free(world.patches);
 		return false;
@@ -507,6 +505,7 @@ bool read(map<PerPatchData, ItemType>& world, Stream& in,
 	default_scribe scribe;
 	if (!read(world.n, in)
 	 || !read(world.mcmc_iterations, in)
+	 || !read(world.initial_seed, in)
 	 || !read(world.patches, in, alloc_position_keys, scribe, patch_reader))
 		return false;
 	if (!init(world.cache, item_types, item_type_count, world.n)) {
@@ -532,6 +531,7 @@ bool write(const map<PerPatchData, ItemType>& world, Stream& out,
 	default_scribe scribe;
 	return write(world.n, out)
 		&& write(world.mcmc_iterations, out)
+		&& write(world.initial_seed, out)
 		&& write(world.patches, out, scribe, patch_writer);
 }
 

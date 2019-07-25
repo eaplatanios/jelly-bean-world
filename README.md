@@ -349,10 +349,8 @@ the 2-dimensional grid of integers. The probability of a collection of points
 Here, `c` is a normalizing constant. `f(x)` is the **intensity** function, that
 controls the likelihood of generating a point at `x` independent of other
 points. `g(x,y)` is the **interaction** function, which controls the likelihood
-of generating the point at `x` given the existence of a point at `y`. Gibbs
-sampling is used to sample from this distribution, and only requires a small
-number of iterations to mix for non-pathological intensity/interaction
-functions.
+of generating the point at `x` given the existence of a point at `y`.
+Metropolis-Hastings sampling is used to sample from this distribution.
 
 It is through the interaction function that we can control whether items of one
 type are "attracted to" or "repelled by" items of another type. We allow the

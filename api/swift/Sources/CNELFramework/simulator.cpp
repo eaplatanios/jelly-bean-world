@@ -115,7 +115,7 @@ inline bool init(
 {
   function.fn = get_intensity_fn((intensity_fns) src.id, src.args, src.numArgs);
   function.args = (float*) malloc(sizeof(float) * src.numArgs);
-  if (function.args == NULL) {
+  if (function.args == nullptr) {
     /* TODO: communicate out of memory error to swift */
     return false;
   }
@@ -126,18 +126,60 @@ inline bool init(
 
 
 inline bool init(
+  IntensityFunction& function,
+  const energy_function<intensity_function>& src)
+{
+  function.id = (unsigned int) get_intensity_fn(src.fn);
+  function.args = (float*) malloc(sizeof(float) * src.arg_count);
+  if (function.args == nullptr) {
+    /* TODO: communicate out of memory error to swift */
+    return false;
+  }
+  memcpy(function.args, src.args, sizeof(float) * src.arg_count);
+  function.numArgs = src.arg_count;
+  return true;
+}
+
+inline void free(IntensityFunction& function) {
+  free(function.args);
+}
+
+
+inline bool init(
   energy_function<interaction_function>& function,
   const InteractionFunction& src)
 {
   function.fn = get_interaction_fn((interaction_fns) src.id, src.args, src.numArgs);
   function.args = (float*) malloc(sizeof(float) * src.numArgs);
-  if (function.args == NULL) {
+  if (function.args == nullptr) {
     /* TODO: communicate out of memory error to swift */
     return false;
   }
   memcpy(function.args, src.args, sizeof(float) * src.numArgs);
   function.arg_count = src.numArgs;
   return true;
+}
+
+
+inline bool init(
+  InteractionFunction& function,
+  const energy_function<interaction_function>& src,
+  unsigned int item_id)
+{
+  function.id = (unsigned int) get_interaction_fn(src.fn);
+  function.args = (float*) malloc(sizeof(float) * src.arg_count);
+  if (function.args == nullptr) {
+    /* TODO: communicate out of memory error to swift */
+    return false;
+  }
+  memcpy(function.args, src.args, sizeof(float) * src.arg_count);
+  function.numArgs = src.arg_count;
+  function.itemId = item_id;
+  return true;
+}
+
+inline void free(InteractionFunction& function) {
+  free(function.args);
 }
 
 
@@ -168,7 +210,7 @@ inline bool init(
   for (unsigned int i = 0; i < src.energyFunctions.numInteractionFns; i++) {
     interaction_fns.keys[i] = src.energyFunctions.interactionFns[i].itemId;
     if (!init(interaction_fns.values[i], src.energyFunctions.interactionFns[i])) {
-      for (unsigned int j = 0; j < i; j++) free(interaction_fns.values[i]);
+      for (unsigned int j = 0; j < i; j++) free(interaction_fns.values[j]);
       free(intensity_fn); return false;
     }
   }
@@ -183,6 +225,95 @@ inline bool init(
   for (auto entry : interaction_fns) free(entry.value);
   free(intensity_fn);
   return success;
+}
+
+
+inline bool init(
+  ItemProperties& properties, const item_properties& src,
+  unsigned int scent_dimension, unsigned int color_dimension,
+  unsigned int item_type_count)
+{
+  properties.name = (char*) malloc(sizeof(char) * (src.name.length + 1));
+  if (properties.name == nullptr) {
+    fprintf(stderr, "init ERROR: Insufficient memory for `ItemProperties.name`.\n");
+    return false;
+  }
+  for (unsigned int i = 0; i < src.name.length; i++)
+    properties.name[i] = src.name.data[i];
+  properties.name[src.name.length] = '\0';
+
+  properties.scent = (float*) malloc(sizeof(float) * scent_dimension);
+  if (properties.scent == nullptr) {
+    fprintf(stderr, "init ERROR: Insufficient memory for `ItemProperties.scent`.\n");
+    free(properties.name); return false;
+  }
+  for (unsigned int i = 0; i < scent_dimension; i++)
+    properties.scent[i] = src.scent[i];
+
+  properties.color = (float*) malloc(sizeof(float) * color_dimension);
+  if (properties.color == nullptr) {
+    fprintf(stderr, "init ERROR: Insufficient memory for `ItemProperties.color`.\n");
+    free(properties.name); free(properties.scent);
+    return false;
+  }
+  for (unsigned int i = 0; i < color_dimension; i++)
+    properties.color[i] = src.color[i];
+
+  properties.requiredItemCosts = (unsigned int*) malloc(sizeof(unsigned int) * item_type_count);
+  if (properties.requiredItemCosts == nullptr) {
+    fprintf(stderr, "init ERROR: Insufficient memory for `ItemProperties.requiredItemCosts`.\n");
+    free(properties.name); free(properties.scent);
+    free(properties.color); return false;
+  }
+  for (unsigned int i = 0; i < item_type_count; i++)
+    properties.requiredItemCosts[i] = src.required_item_costs[i];
+
+  properties.requiredItemCounts = (unsigned int*) malloc(sizeof(unsigned int) * item_type_count);
+  if (properties.requiredItemCounts == nullptr) {
+    fprintf(stderr, "init ERROR: Insufficient memory for `ItemProperties.requiredItemCounts`.\n");
+    free(properties.name); free(properties.scent);
+    free(properties.color); free(properties.requiredItemCosts);
+    return false;
+  }
+  for (unsigned int i = 0; i < item_type_count; i++)
+    properties.requiredItemCounts[i] = src.required_item_counts[i];
+
+  properties.blocksMovement = src.blocks_movement;
+  if (!init(properties.energyFunctions.intensityFn, src.intensity_fn)) {
+    free(properties.name); free(properties.scent); free(properties.color);
+    free(properties.requiredItemCosts); free(properties.requiredItemCounts);
+    return false;
+  }
+
+  /* count the number of non-zero interaction functions */
+  properties.energyFunctions.numInteractionFns = 0;
+  for (unsigned int i = 0; i < item_type_count; i++)
+    if (src.interaction_fns[i].fn != zero_interaction_fn)
+      properties.energyFunctions.numInteractionFns++;
+
+  /* initialize the interaction functions */
+  properties.energyFunctions.interactionFns = (InteractionFunction*) malloc(sizeof(InteractionFunction) * properties.energyFunctions.numInteractionFns);
+  if (properties.energyFunctions.interactionFns == NULL) {
+    fprintf(stderr, "init ERROR: Insufficient memory for `ItemProperties.requiredItemCounts`.\n");
+    free(properties.name); free(properties.scent); free(properties.color);
+    free(properties.requiredItemCosts); free(properties.requiredItemCounts);
+    free(properties.energyFunctions.intensityFn); return false;
+  }
+  unsigned int index = 0;
+  for (unsigned int i = 0; i < item_type_count; i++) {
+    if (src.interaction_fns[i].fn == zero_interaction_fn) continue;
+    if (!init(properties.energyFunctions.interactionFns[index], src.interaction_fns[i], i)) {
+      free(properties.name); free(properties.scent); free(properties.color);
+      free(properties.requiredItemCosts); free(properties.requiredItemCounts);
+      for (unsigned int j = 0; j < index; j++)
+        free(properties.energyFunctions.interactionFns[j]);
+      free(properties.energyFunctions.intensityFn);
+      free(properties.energyFunctions.interactionFns);
+      return false;
+    }
+    index++;
+  }
+  return true;
 }
 
 
@@ -227,6 +358,92 @@ inline void free(AgentSimulationState& state) {
   free(state.scent);
   free(state.vision);
   free(state.collectedItems);
+}
+
+
+inline bool init(simulator_config& config, const SimulatorConfig& src)
+{
+  config.agent_color = (float*) malloc(sizeof(float) * src.colorDimSize);
+  if (config.agent_color == nullptr)
+    /* TODO: how to communicate out of memory errors to swift? */
+    return false;
+
+  for (unsigned int i = 0; i < (size_t) DirectionCount; i++)
+    config.allowed_movement_directions[i] = to_action_policy(src.allowedMoveDirections[i]);
+  for (unsigned int i = 0; i < (size_t) DirectionCount; i++)
+    config.allowed_rotations[i] = to_action_policy(src.allowedRotations[i]);
+  for (unsigned int i = 0; i < src.colorDimSize; i++)
+    config.agent_color[i] = src.agentColor[i];
+  config.no_op_allowed = src.noOpAllowed;
+
+  if (!config.item_types.ensure_capacity(max(1u, src.numItemTypes)))
+    /* TODO: how to communicate out of memory errors to swift? */
+    return false;
+  for (unsigned int i = 0; i < src.numItemTypes; i++) {
+    if (!init(config.item_types[i], src.itemTypes[i], src.scentDimSize, src.colorDimSize, src.numItemTypes)) {
+      /* TODO: how to communicate out of memory errors to swift? */
+      for (unsigned int j = 0; j < i; j++)
+        core::free(config.item_types[j], src.numItemTypes);
+      return false;
+    }
+  }
+  config.item_types.length = src.numItemTypes;
+
+  config.max_steps_per_movement = src.maxStepsPerMove;
+  config.scent_dimension = src.scentDimSize;
+  config.color_dimension = src.colorDimSize;
+  config.vision_range = src.visionRange;
+  config.patch_size = src.patchSize;
+  config.mcmc_iterations = src.mcmcIterations;
+  config.collision_policy = to_movement_conflict_policy(src.movementConflictPolicy);
+  config.decay_param = src.scentDecay;
+  config.diffusion_param = src.scentDiffusion;
+  config.deleted_item_lifetime = src.removedItemLifetime;
+  return true;
+}
+
+
+inline bool init(SimulatorConfig& config, const simulator_config& src, unsigned int initial_seed)
+{
+  config.randomSeed = initial_seed;
+  config.agentColor = (float*) malloc(sizeof(float) * src.color_dimension);
+  if (config.agentColor == nullptr)
+    /* TODO: how to communicate out of memory errors to swift? */
+    return false;
+
+  for (unsigned int i = 0; i < (size_t) DirectionCount; i++)
+    config.allowedMoveDirections[i] = to_ActionPolicy(src.allowed_movement_directions[i]);
+  for (unsigned int i = 0; i < (size_t) DirectionCount; i++)
+    config.allowedRotations[i] = to_ActionPolicy(src.allowed_rotations[i]);
+  for (unsigned int i = 0; i < src.color_dimension; i++)
+    config.agentColor[i] = src.agent_color[i];
+  config.noOpAllowed = src.no_op_allowed;
+
+  config.itemTypes = (ItemProperties*) malloc(sizeof(ItemProperties) * src.item_types.length);
+  if (config.itemTypes == nullptr)
+    /* TODO: how to communicate out of memory errors to swift? */
+    return false;
+  for (unsigned int i = 0; i < src.item_types.length; i++) {
+    if (!init(config.itemTypes[i], src.item_types[i], src.scent_dimension, src.color_dimension, src.item_types.length)) {
+      /* TODO: how to communicate out of memory errors to swift? */
+      for (unsigned int j = 0; j < i; j++)
+        core::free(config.itemTypes[j]);
+      return false;
+    }
+  }
+  config.numItemTypes = src.item_types.length;
+
+  config.maxStepsPerMove = src.max_steps_per_movement;
+  config.scentDimSize = src.scent_dimension;
+  config.colorDimSize = src.color_dimension;
+  config.visionRange = src.vision_range;
+  config.patchSize = src.patch_size;
+  config.mcmcIterations = src.mcmc_iterations;
+  config.movementConflictPolicy = to_MovementConflictPolicy(src.collision_policy);
+  config.scentDecay = src.decay_param;
+  config.scentDiffusion = src.diffusion_param;
+  config.removedItemLifetime = src.deleted_item_lifetime;
+  return true;
 }
 
 
@@ -449,9 +666,9 @@ inline char* concat(const char* first, const char* second) {
   size_t first_length = strlen(first);
   size_t second_length = strlen(second);
   char* buf = (char*) malloc(sizeof(char) * (first_length + second_length + 1));
-  if (buf == NULL) {
+  if (buf == nullptr) {
     fprintf(stderr, "concat ERROR: Out of memory.\n");
-    return NULL;
+    return nullptr;
   }
   for (unsigned int i = 0; i < first_length; i++)
     buf[i] = first[i];
@@ -466,13 +683,13 @@ inline void check_response(mpi_response response, const char* prefix) {
   switch (response) {
   case mpi_response::INVALID_AGENT_ID:
     message = concat(prefix, "Invalid agent ID.");
-    if (message != NULL) { /* TODO: communicate error `message` to swift */ free(message); } break;
+    if (message != nullptr) { /* TODO: communicate error `message` to swift */ free(message); } break;
   case mpi_response::SERVER_PARSE_MESSAGE_ERROR:
     message = concat(prefix, "Server was unable to parse MPI message from client.");
-    if (message != NULL) { /* TODO: communicate error `message` to swift */ free(message); } break;
+    if (message != nullptr) { /* TODO: communicate error `message` to swift */ free(message); } break;
   case mpi_response::CLIENT_PARSE_MESSAGE_ERROR:
     message = concat(prefix, "Client was unable to parse MPI message from server.");
-    if (message != NULL) { /* TODO: communicate error `message` to swift */ free(message); } break;
+    if (message != nullptr) { /* TODO: communicate error `message` to swift */ free(message); } break;
   case mpi_response::SUCCESS:
   case mpi_response::FAILURE:
     break;
@@ -703,43 +920,7 @@ inline void wait_for_server(client<client_data>& c)
 
 void* simulatorCreate(const SimulatorConfig* config, OnStepCallback onStepCallback) {
   simulator_config sim_config;
-
-  sim_config.agent_color = (float*) malloc(sizeof(float) * config->colorDimSize);
-  if (sim_config.agent_color == nullptr)
-    /* TODO: how to communicate out of memory errors to swift? */
-    return nullptr;
-
-  for (unsigned int i = 0; i < (size_t) DirectionCount; i++)
-    sim_config.allowed_movement_directions[i] = to_action_policy(config->allowedMoveDirections[i]);
-  for (unsigned int i = 0; i < (size_t) DirectionCount; i++)
-    sim_config.allowed_rotations[i] = to_action_policy(config->allowedRotations[i]);
-  for (unsigned int i = 0; i < config->colorDimSize; i++)
-    sim_config.agent_color[i] = config->agentColor[i];
-  sim_config.no_op_allowed = config->noOpAllowed;
-
-  if (!sim_config.item_types.ensure_capacity(max(1u, config->numItemTypes)))
-    /* TODO: how to communicate out of memory errors to swift? */
-    return nullptr;
-  for (unsigned int i = 0; i < config->numItemTypes; i++) {
-    if (!init(sim_config.item_types[i], config->itemTypes[i], config->scentDimSize, config->colorDimSize, config->numItemTypes)) {
-      /* TODO: how to communicate out of memory errors to swift? */
-      for (unsigned int j = 0; j < i; j++)
-        core::free(sim_config.item_types[i], config->numItemTypes);
-      return nullptr;
-    }
-  }
-  sim_config.item_types.length = config->numItemTypes;
-
-  sim_config.max_steps_per_movement = config->maxStepsPerMove;
-  sim_config.scent_dimension = config->scentDimSize;
-  sim_config.color_dimension = config->colorDimSize;
-  sim_config.vision_range = config->visionRange;
-  sim_config.patch_size = config->patchSize;
-  sim_config.mcmc_iterations = config->mcmcIterations;
-  sim_config.collision_policy = to_movement_conflict_policy(config->movementConflictPolicy);
-  sim_config.decay_param = config->scentDecay;
-  sim_config.diffusion_param = config->scentDiffusion;
-  sim_config.deleted_item_lifetime = config->removedItemLifetime;
+  if (!init(sim_config, *config)) return nullptr;
 
   simulator_data data(nullptr, onStepCallback, nullptr);
 
@@ -797,44 +978,6 @@ SimulatorInfo simulatorLoad(const char* filePath, OnStepCallback onStepCallback)
   sim->get_agent_states(agent_states, sim_data.agent_ids.data, (unsigned int) agent_id_count);
 
   const simulator_config& sim_config = sim->get_config();
-  SimulatorConfig config;
-
-  // TODO[abs]: Expose the simulator random seed.
-  // config.randomSeed = sim->world.rng.seed;
-  config.maxStepsPerMove = sim_config.max_steps_per_movement;
-  config.scentDimSize = sim_config.scent_dimension;
-  config.colorDimSize = sim_config.color_dimension;
-  config.visionRange = sim_config.vision_range;
-  for (unsigned int i = 0; i < (size_t) DirectionCount; i++)
-    config.allowedMoveDirections[i] = to_ActionPolicy(sim_config.allowed_movement_directions[i]);
-  for (unsigned int i = 0; i < (size_t) DirectionCount; i++)
-    config.allowedRotations[i] = to_ActionPolicy(sim_config.allowed_rotations[i]);
-  config.noOpAllowed = sim_config.no_op_allowed;
-  config.patchSize = sim_config.patch_size;
-  config.mcmcIterations = sim_config.mcmc_iterations;
-  config.itemTypes = (ItemProperties*) malloc(sizeof(ItemProperties) * sim_config.item_types.length);
-  if (config.itemTypes == nullptr)
-    /* TODO: how to communicate out of memory errors to swift? */
-    return EMPTY_SIM_INFO;
-  // TODO[abs]: Copy `sim_config.item_types` to `config.itemTypes`.
-  // for (unsigned int i = 0; i < sim_config.item_types.length; i++) {
-  //   if (!init(sim_config.item_types[i], config->itemTypes[i], config->scentDimSize, config->colorDimSize, config->numItemTypes)) {
-  //     /* TODO: how to communicate out of memory errors to swift? */
-  //     for (unsigned int j = 0; j < i; j++)
-  //       core::free(sim_config.item_types[i], config->numItemTypes);
-  //     return EMPTY_SIM_INFO;
-  //   }
-  // }
-  config.numItemTypes = sim_config.item_types.length;
-  config.agentColor = (float*) malloc(sizeof(float) * sim_config.color_dimension);
-  if (config.agentColor == nullptr)
-    /* TODO: how to communicate out of memory errors to swift? */
-    return EMPTY_SIM_INFO;
-  config.movementConflictPolicy = to_MovementConflictPolicy(sim_config.collision_policy);
-  config.scentDecay = sim_config.decay_param;
-  config.scentDiffusion = sim_config.diffusion_param;
-  config.removedItemLifetime = sim_config.deleted_item_lifetime;
-
   AgentSimulationState* agents = (AgentSimulationState*) malloc(sizeof(AgentSimulationState) * agent_id_count);
   if (agents == nullptr) {
     /* TODO: how to communicate out of memory errors to swift? */
@@ -843,7 +986,7 @@ SimulatorInfo simulatorLoad(const char* filePath, OnStepCallback onStepCallback)
   }
   for (size_t i = 0; i < agent_id_count; i++) {
     if (!init(agents[i], *agent_states[i], sim_config, sim_data.agent_ids[i])) {
-      for (size_t j = 0; j < i; j++) free(agents[i]);
+      for (size_t j = 0; j < i; j++) free(agents[j]);
       free(*sim); free(sim); free(agent_states);
       free(agents); return EMPTY_SIM_INFO;
     }
@@ -852,10 +995,14 @@ SimulatorInfo simulatorLoad(const char* filePath, OnStepCallback onStepCallback)
 
   SimulatorInfo sim_info;
   sim_info.handle = (void*) sim;
-  sim_info.config = config;
   sim_info.time = sim->time;
   sim_info.agents = agents;
   sim_info.numAgents = (unsigned int) agent_id_count;
+  if (!init(sim_info.config, sim_config, sim->get_world().initial_seed)) {
+    for (size_t j = 0; j < agent_id_count; j++) free(agents[j]);
+    free(*sim); free(sim);
+    free(agents); return EMPTY_SIM_INFO;
+  }
   return sim_info;
 }
 
@@ -869,7 +1016,7 @@ bool simulatorSave(void* simulatorHandle, const char* filePath) {
   FILE* file = open_file(filePath, "wb");
   if (file == nullptr) {
     fprintf(stderr, "save ERROR: Unable to open '%s' for writing. ", filePath);
-    perror(""); return false;
+    perror(nullptr); return false;
   }
 
   simulator<simulator_data>* sim = (simulator<simulator_data>*) simulatorHandle;
