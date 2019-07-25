@@ -48,11 +48,18 @@ public final class Simulator {
   /// Simulator configuration.
   public let configuration: Configuration
 
+  /// Simulation server configuration. This is `nil` if this is not a simulation server.
+  public let serverConfiguration: ServerConfiguration?
+
   /// Number of simulation steps that have been executed so far.
   public private(set) var time: UInt64 = 0
 
   /// Pointer to the underlying C API simulator instance.
   @usableFromInline internal var handle: UnsafeMutableRawPointer?
+
+  /// Pointer to the underlying C API simulator server instance. This is `nil` if this is not a
+  /// simulation server.
+  @usableFromInline internal var serverHandle: UnsafeMutableRawPointer?
 
   /// States of the agents managed by this simulator (keyed by the agents' unique identifiers).
   @usableFromInline internal var agentStates: [UInt64: AgentState] = [:]
@@ -70,13 +77,27 @@ public final class Simulator {
 
   /// Creates a new simulator.
   ///
-  /// - Parameter configuration: Configuration for the new simulator.
-  public init(using configuration: Configuration) {
+  /// - Parameters:
+  ///   - configuration: Configuration for the new simulator.
+  ///   - serverConfiguration: Optional server configuration. If this is provided, then the new
+  ///     simulator will also act as a simulation server.
+  public init(
+    using configuration: Configuration,
+    serverConfiguration: ServerConfiguration? = nil
+  ) {
     self.configuration = configuration
+    self.serverConfiguration = serverConfiguration
     var cConfig = configuration.toC()
     defer { cConfig.deallocate() }
     self.handle = simulatorCreate(&cConfig.configuration, nativeOnStepCallback)
     simulatorSetStepCallbackData(handle, Unmanaged.passUnretained(self).toOpaque())
+    if let config = serverConfiguration {
+      self.serverHandle = simulationServerStart(
+        handle,
+        config.port,
+        config.connectionQueueCapacity,
+        config.workerCount)
+    }
   }
 
   /// Loads a simulator from the provided file.
@@ -84,13 +105,20 @@ public final class Simulator {
   /// - Parameters:
   ///   - file: File in which the simulator is saved.
   ///   - agents: Agents that this simulator manages.
+  ///   - serverConfiguration: Optional server configuration. If this is provided, then the loaded
+  ///     simulator will also act as a simulation server.
   /// - Precondition: The number of agents provided must match the number of agents the simulator
   ///   managed before its state was saved.
-  public init(fromFile file: URL, agents: [Agent]) {
+  public init(
+    fromFile file: URL,
+    agents: [Agent],
+    serverConfiguration: ServerConfiguration? = nil
+  ) {
     let cSimulatorInfo = simulatorLoad(file.absoluteString, nativeOnStepCallback)
     defer { simulatorDeleteSimulatorInfo(cSimulatorInfo) }
     self.handle = cSimulatorInfo.handle
     self.configuration = Configuration(fromC: cSimulatorInfo.config)
+    self.serverConfiguration = serverConfiguration
     self.time = cSimulatorInfo.time
     self.agentStates = [UInt64: AgentState](
       uniqueKeysWithValues: UnsafeBufferPointer(
@@ -105,9 +133,17 @@ public final class Simulator {
       """)
     self.agents = [UInt64: Agent](uniqueKeysWithValues: zip(agentStates.keys, agents))
     simulatorSetStepCallbackData(handle, Unmanaged.passUnretained(self).toOpaque())
+    if let config = serverConfiguration {
+      self.serverHandle = simulationServerStart(
+        handle,
+        config.port,
+        config.connectionQueueCapacity,
+        config.workerCount)
+    }
   }
 
   deinit {
+    if let h = serverHandle { simulationServerStop(h) }
     simulatorDelete(handle)
   }
 
@@ -327,7 +363,6 @@ extension Simulator {
     /// Lifetime of removed items (used by the scent simulation algorithm).
     public let removedItemLifetime: UInt32
 
-    @inlinable
     public init(
       randomSeed: UInt32,
       maxStepsPerMove: UInt32,
@@ -362,6 +397,25 @@ extension Simulator {
       self.scentDecay = scentDecay
       self.scentDiffusion = scentDiffusion
       self.removedItemLifetime = removedItemLifetime
+    }
+  }
+
+  /// Simulation server configuration.
+  public struct ServerConfiguration {
+    /// Port in which the simulation server will be listening.
+    public let port: UInt32
+
+    /// Maximum number of simultaneous new connections that can be handled by the server.
+    public let connectionQueueCapacity: UInt32
+
+    /// Number of worker threads to dispatch. They are tasked with processing incoming messages
+    ///  from clients.
+    public let workerCount: UInt32
+
+    public init(port: UInt32, connectionQueueCapacity: UInt32 = 256, workerCount: UInt32 = 8) {
+      self.port = port
+      self.connectionQueueCapacity = connectionQueueCapacity
+      self.workerCount = workerCount
     }
   }
 }
