@@ -66,4 +66,25 @@ public enum Action {
 
   /// Turn action (without any movement to a different cell).
   case turn(direction: TurnDirection)
+
+  @inlinable
+  internal func invoke(
+    simulatorHandle: UnsafeMutableRawPointer?,
+    clientHandle: UnsafeMutableRawPointer?,
+    agentID: UInt64
+  ) {
+    switch self {
+    case .none:
+      simulatorNoOpAgent(simulatorHandle, clientHandle, agentID)
+    case let .move(direction, stepCount):
+      simulatorMoveAgent(
+        simulatorHandle,
+        clientHandle,
+        agentID,
+        direction.toC(),
+        UInt32(stepCount))
+    case let .turn(direction):
+      simulatorTurnAgent(simulatorHandle, clientHandle, agentID, direction.toC())
+    }
+  }
 }

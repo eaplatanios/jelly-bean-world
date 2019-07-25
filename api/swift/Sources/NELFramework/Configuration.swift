@@ -62,24 +62,21 @@ extension Simulator {
     }
 
     @inlinable
-    internal func toC() -> (
-      simulatorConfig: CNELFramework.SimulatorConfig,
-      deallocate: () -> Void
-    ) {
+    internal func toC() -> (configuration: SimulatorConfig, deallocate: () -> Void) {
       let (items, itemDeallocators) = self.items
         .map { $0.toC(in: self) }
-        .reduce(into: ([CNELFramework.ItemProperties](), [() -> Void]())) {
+        .reduce(into: ([ItemProperties](), [() -> Void]())) {
           $0.0.append($1.item)
           $0.1.append($1.deallocate)
         }
       let color = agentColor.scalars
-      let cItems = UnsafeMutablePointer<CNELFramework.ItemProperties>.allocate(
+      let cItems = UnsafeMutablePointer<ItemProperties>.allocate(
         capacity: items.count)
       let cColor = UnsafeMutablePointer<Float>.allocate(capacity: color.count)
       cItems.initialize(from: items, count: items.count)
       cColor.initialize(from: color, count: color.count)
       return (
-        simulatorConfig: CNELFramework.SimulatorConfig(
+        configuration: SimulatorConfig(
           randomSeed: randomSeed,
           maxStepsPerMove: maxStepsPerMove,
           scentDimSize: scentDimSize,
