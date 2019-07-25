@@ -53,6 +53,20 @@ inline direction to_direction(TurnDirection dir) {
 }
 
 
+inline MovementConflictPolicy to_MovementConflictPolicy(movement_conflict_policy policy) {
+  switch (policy) {
+  case movement_conflict_policy::NO_COLLISIONS:
+    return MovementConflictPolicyNoCollisions;
+  case movement_conflict_policy::FIRST_COME_FIRST_SERVED:
+    return MovementConflictPolicyFirstComeFirstServe;
+  case movement_conflict_policy::RANDOM:
+    return MovementConflictPolicyRandom;
+  }
+  fprintf(stderr, "to_MovementConflictPolicy ERROR: Unrecognized movement_conflict_policy.\n");
+  exit(EXIT_FAILURE);
+}
+
+
 inline movement_conflict_policy to_movement_conflict_policy(MovementConflictPolicy policy) {
   switch (policy) {
   case MovementConflictPolicyNoCollisions:
@@ -63,6 +77,20 @@ inline movement_conflict_policy to_movement_conflict_policy(MovementConflictPoli
     return movement_conflict_policy::RANDOM;
   }
   fprintf(stderr, "to_movement_conflict_policy ERROR: Unrecognized MovementConflictPolicy.\n");
+  exit(EXIT_FAILURE);
+}
+
+
+inline ActionPolicy to_ActionPolicy(action_policy policy) {
+  switch (policy) {
+  case action_policy::ALLOWED:
+    return ActionPolicyAllowed;
+  case action_policy::DISALLOWED:
+    return ActionPolicyDisallowed;
+  case action_policy::IGNORED:
+    return ActionPolicyIgnored;
+  }
+  fprintf(stderr, "to_ActionPolicy ERROR: Unrecognized action_policy.\n");
   exit(EXIT_FAILURE);
 }
 
@@ -776,7 +804,45 @@ SimulatorInfo simulatorLoad(
 
   sim->get_agent_states(agent_states, sim_data.agent_ids.data, (unsigned int) agent_id_count);
 
-  const simulator_config& config = sim->get_config();
+  const simulator_config& sim_config = sim->get_config();
+  SimulatorConfig config;
+
+  // TODO[abs]: Expose the simulator random seed.
+  // config.randomSeed = sim->world.rng.seed;
+  config.maxStepsPerMove = sim_config.max_steps_per_movement;
+  config.scentDimSize = sim_config.scent_dimension;
+  config.colorDimSize = sim_config.color_dimension;
+  config.visionRange = sim_config.vision_range;
+  for (unsigned int i = 0; i < (size_t) DirectionCount; i++)
+    config.allowedMoveDirections[i] = to_ActionPolicy(sim_config.allowed_movement_directions[i]);
+  for (unsigned int i = 0; i < (size_t) DirectionCount; i++)
+    config.allowedRotations[i] = to_ActionPolicy(sim_config.allowed_rotations[i]);
+  config.noOpAllowed = sim_config.no_op_allowed;
+  config.patchSize = sim_config.patch_size;
+  config.mcmcIterations = sim_config.mcmc_iterations;
+  config.itemTypes = (ItemProperties*) malloc(sizeof(ItemProperties) * sim_config.item_types.length);
+  if (config.itemTypes == nullptr)
+    /* TODO: how to communicate out of memory errors to swift? */
+    return EMPTY_SIM_INFO;
+  // TODO[abs]: Copy `sim_config.item_types` to `config.itemTypes`.
+  // for (unsigned int i = 0; i < sim_config.item_types.length; i++) {
+  //   if (!init(sim_config.item_types[i], config->itemTypes[i], config->scentDimSize, config->colorDimSize, config->numItemTypes)) {
+  //     /* TODO: how to communicate out of memory errors to swift? */
+  //     for (unsigned int j = 0; j < i; j++)
+  //       core::free(sim_config.item_types[i], config->numItemTypes);
+  //     return EMPTY_SIM_INFO;
+  //   }
+  // }
+  config.numItemTypes = sim_config.item_types.length;
+  config.agentColor = (float*) malloc(sizeof(float) * sim_config.color_dimension);
+  if (config.agentColor == nullptr)
+    /* TODO: how to communicate out of memory errors to swift? */
+    return EMPTY_SIM_INFO;
+  config.movementConflictPolicy = to_MovementConflictPolicy(sim_config.collision_policy);
+  config.scentDecay = sim_config.decay_param;
+  config.scentDiffusion = sim_config.diffusion_param;
+  config.removedItemLifetime = sim_config.deleted_item_lifetime;
+
   AgentSimulationState* agents = (AgentSimulationState*) malloc(sizeof(AgentSimulationState) * agent_id_count);
   if (agents == nullptr) {
     /* TODO: how to communicate out of memory errors to swift? */
@@ -784,7 +850,7 @@ SimulatorInfo simulatorLoad(
     return EMPTY_SIM_INFO;
   }
   for (size_t i = 0; i < agent_id_count; i++) {
-    if (!init(agents[i], *agent_states[i], config, sim_data.agent_ids[i])) {
+    if (!init(agents[i], *agent_states[i], sim_config, sim_data.agent_ids[i])) {
       for (size_t j = 0; j < i; j++) free(agents[i]);
       free(*sim); free(sim); free(agent_states);
       free(agents); return EMPTY_SIM_INFO;
@@ -794,6 +860,7 @@ SimulatorInfo simulatorLoad(
 
   SimulatorInfo sim_info;
   sim_info.handle = (void*) sim;
+  sim_info.config = config;
   sim_info.time = sim->time;
   sim_info.agents = agents;
   sim_info.numAgents = (unsigned int) agent_id_count;
@@ -1172,45 +1239,33 @@ SimulationClientInfo simulationClientStart(
 }
 
 
-void simulationClientStop(
-  void* clientHandle)
-{
-  client<client_data>* client_ptr =
-      (client<client_data>*) clientHandle;
+void simulationClientStop(void* clientHandle) {
+  client<client_data>* client_ptr = (client<client_data>*) clientHandle;
   stop_client(*client_ptr);
   free(*client_ptr); free(client_ptr);
 }
 
 
-void simulatorDeleteSimulatorInfo(
-  SimulatorInfo info)
-{
+void simulatorDeleteSimulatorInfo(SimulatorInfo info) {
   for (unsigned int i = 0; i < info.numAgents; i++)
     free(info.agents[i]);
   free(info.agents);
 }
 
 
-void simulatorDeleteSimulationClientInfo(
-  SimulationClientInfo clientInfo,
-  unsigned int numAgents)
-{
+void simulatorDeleteSimulationClientInfo(SimulationClientInfo clientInfo, unsigned int numAgents) {
   for (unsigned int i = 0; i < numAgents; i++)
     free(clientInfo.agentStates[i]);
   free(clientInfo.agentStates);
 }
 
 
-void simulatorDeleteAgentSimulationState(
-  AgentSimulationState agentState)
-{
+void simulatorDeleteAgentSimulationState(AgentSimulationState agentState) {
   free(agentState);
 }
 
 
-void simulatorDeleteSimulationMap(
-  SimulationMap map)
-{
+void simulatorDeleteSimulationMap(SimulationMap map) {
   for (unsigned int i = 0; i < map.numPatches; i++)
     free(map.patches[i]);
   free(map.patches);

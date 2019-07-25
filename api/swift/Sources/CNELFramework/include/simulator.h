@@ -32,9 +32,9 @@ typedef enum MovementConflictPolicy {
 } MovementConflictPolicy;
 
 typedef enum ActionPolicy {
-    ActionPolicyAllowed,
-    ActionPolicyDisallowed,
-    ActionPolicyIgnored
+  ActionPolicyAllowed,
+  ActionPolicyDisallowed,
+  ActionPolicyIgnored
 } ActionPolicy;
 
 typedef struct Position {
@@ -113,6 +113,7 @@ typedef struct SimulatorConfig {
 
 typedef struct SimulatorInfo {
   void* handle;
+  SimulatorConfig config;
   uint64_t time;
   AgentSimulationState* agents;
   unsigned int numAgents;
