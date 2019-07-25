@@ -233,15 +233,17 @@ internal extension Item {
 
     let cEnergyFunctions = energyFunctions.toC()
     return (
-      item: ItemProperties(
-        name: name,
-        scent: cScent,
-        color: cColor,
-        requiredItemCounts: cCounts, 
-        requiredItemCosts: cCosts, 
-        blocksMovement: blocksMovement,
-        energyFunctions: cEnergyFunctions.energyFunctions),
-      deallocate: { () in 
+      item: name.withCString {
+        ItemProperties(
+          name: UnsafeMutablePointer(mutating: $0),
+          scent: cScent,
+          color: cColor,
+          requiredItemCounts: cCounts, 
+          requiredItemCosts: cCosts, 
+          blocksMovement: blocksMovement,
+          energyFunctions: cEnergyFunctions.energyFunctions)
+      },
+      deallocate: { () in
         cScent.deallocate()
         cColor.deallocate()
         cCounts.deallocate()

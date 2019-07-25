@@ -317,6 +317,17 @@ inline bool init(
 }
 
 
+inline void free(ItemProperties& properties) {
+  free(properties.name);
+  free(properties.scent);
+  free(properties.color);
+  free(properties.requiredItemCounts);
+  free(properties.requiredItemCosts);
+  free(properties.energyFunctions.intensityFn);
+  free(properties.energyFunctions.interactionFns);
+}
+
+
 inline bool init(
   AgentSimulationState& state,
   const agent_state& src,
@@ -427,7 +438,7 @@ inline bool init(SimulatorConfig& config, const simulator_config& src, unsigned 
     if (!init(config.itemTypes[i], src.item_types[i], src.scent_dimension, src.color_dimension, src.item_types.length)) {
       /* TODO: how to communicate out of memory errors to swift? */
       for (unsigned int j = 0; j < i; j++)
-        core::free(config.itemTypes[j]);
+        free(config.itemTypes[j]);
       return false;
     }
   }
