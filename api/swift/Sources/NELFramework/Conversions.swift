@@ -69,15 +69,15 @@ internal extension Simulator.Configuration {
   init(fromC value: SimulatorConfig) {
     self.randomSeed = value.randomSeed
     self.maxStepsPerMove = value.maxStepsPerMove
-    self.scentDimSize = value.scentDimSize
-    self.colorDimSize = value.colorDimSize
+    self.scentDimensionality = value.scentDimSize
+    self.colorDimensionality = value.colorDimSize
     self.visionRange = value.visionRange
-    self.allowedMoves = [
+    self.movePolicies = [
       .up: ActionPolicy(fromC: value.allowedMoveDirections.0),
       .down: ActionPolicy(fromC: value.allowedMoveDirections.1),
       .left: ActionPolicy(fromC: value.allowedMoveDirections.2),
       .right: ActionPolicy(fromC: value.allowedMoveDirections.3)]
-    self.allowedTurns = [
+    self.turnPolicies = [
       .front: ActionPolicy(fromC: value.allowedRotations.0),
       .back: ActionPolicy(fromC: value.allowedRotations.1),
       .left: ActionPolicy(fromC: value.allowedRotations.2),
@@ -88,13 +88,13 @@ internal extension Simulator.Configuration {
     self.items = UnsafeBufferPointer(start: value.itemTypes!, count: Int(value.numItemTypes)).map {
       Item(
         fromC: $0,
-        scentDimSize: value.scentDimSize,
-        colorDimSize: value.colorDimSize,
+        scentDimensionality: value.scentDimSize,
+        colorDimensionality: value.colorDimSize,
         itemCount: Int(value.numItemTypes))
     }
     self.agentColor = ShapedArray(
-      shape: [Int(colorDimSize)],
-      scalars: UnsafeBufferPointer(start: value.agentColor!, count: Int(colorDimSize)))
+      shape: [Int(colorDimensionality)],
+      scalars: UnsafeBufferPointer(start: value.agentColor!, count: Int(colorDimensionality)))
     self.moveConflictPolicy = MoveConflictPolicy(fromC: value.movementConflictPolicy)
     self.scentDecay = value.scentDecay
     self.scentDiffusion = value.scentDiffusion
@@ -119,19 +119,19 @@ internal extension Simulator.Configuration {
       configuration: SimulatorConfig(
         randomSeed: randomSeed,
         maxStepsPerMove: maxStepsPerMove,
-        scentDimSize: scentDimSize,
-        colorDimSize: colorDimSize,
+        scentDimSize: scentDimensionality,
+        colorDimSize: colorDimensionality,
         visionRange: visionRange,
         allowedMoveDirections: (
-          allowedMoves[.up]?.toC() ?? ActionPolicy.disallowed.toC(),
-          allowedMoves[.down]?.toC() ?? ActionPolicy.disallowed.toC(),
-          allowedMoves[.left]?.toC() ?? ActionPolicy.disallowed.toC(),
-          allowedMoves[.right]?.toC() ?? ActionPolicy.disallowed.toC()),
+          movePolicies[.up]?.toC() ?? ActionPolicy.disallowed.toC(),
+          movePolicies[.down]?.toC() ?? ActionPolicy.disallowed.toC(),
+          movePolicies[.left]?.toC() ?? ActionPolicy.disallowed.toC(),
+          movePolicies[.right]?.toC() ?? ActionPolicy.disallowed.toC()),
         allowedRotations: (
-          allowedTurns[.front]?.toC() ?? ActionPolicy.disallowed.toC(),
-          allowedTurns[.back]?.toC() ?? ActionPolicy.disallowed.toC(),
-          allowedTurns[.left]?.toC() ?? ActionPolicy.disallowed.toC(),
-          allowedTurns[.right]?.toC() ?? ActionPolicy.disallowed.toC()),
+          turnPolicies[.front]?.toC() ?? ActionPolicy.disallowed.toC(),
+          turnPolicies[.back]?.toC() ?? ActionPolicy.disallowed.toC(),
+          turnPolicies[.left]?.toC() ?? ActionPolicy.disallowed.toC(),
+          turnPolicies[.right]?.toC() ?? ActionPolicy.disallowed.toC()),
         noOpAllowed: noOpAllowed,
         patchSize: patchSize,
         mcmcIterations: mcmcIterations,
@@ -161,7 +161,7 @@ internal extension AgentState {
     self.direction = Direction(fromC: value.direction)
 
     // Construct the scent vector.
-    let scentShape = [Int(simulator.configuration.scentDimSize)]
+    let scentShape = [Int(simulator.configuration.scentDimensionality)]
     let scentBuffer = UnsafeBufferPointer(start: value.scent!, count: scentShape[0])
     self.scent = Tensor(shape: TensorShape(scentShape), scalars: [Float](scentBuffer))
 
@@ -169,11 +169,11 @@ internal extension AgentState {
     let visionShape = [
       2 * Int(simulator.configuration.visionRange) + 1,
       2 * Int(simulator.configuration.visionRange) + 1,
-      Int(simulator.configuration.colorDimSize)]
+      Int(simulator.configuration.colorDimensionality)]
     let visionSize = Int(
       (2 * simulator.configuration.visionRange + 1) *
       (2 * simulator.configuration.visionRange + 1) *
-      simulator.configuration.colorDimSize)
+      simulator.configuration.colorDimensionality)
     let visionBuffer = UnsafeBufferPointer(start: value.vision!, count: visionSize)
     self.vision = Tensor(shape: TensorShape(visionShape), scalars: [Float](visionBuffer))
 
@@ -189,14 +189,19 @@ internal extension AgentState {
 
 internal extension Item {
   @inlinable
-  init(fromC value: ItemProperties, scentDimSize: UInt32, colorDimSize: UInt32, itemCount: Int) {
+  init(
+    fromC value: ItemProperties,
+    scentDimensionality: UInt32,
+    colorDimensionality: UInt32,
+    itemCount: Int
+  ) {
     self.name = String(cString: value.name)
     self.scent = ShapedArray(
-      shape: [Int(scentDimSize)],
-      scalars: UnsafeBufferPointer(start: value.scent!, count: Int(scentDimSize)))
+      shape: [Int(scentDimensionality)],
+      scalars: UnsafeBufferPointer(start: value.scent!, count: Int(scentDimensionality)))
     self.color = ShapedArray(
-      shape: [Int(colorDimSize)],
-      scalars: UnsafeBufferPointer(start: value.color!, count: Int(colorDimSize)))
+      shape: [Int(colorDimensionality)],
+      scalars: UnsafeBufferPointer(start: value.color!, count: Int(colorDimensionality)))
     self.requiredItemCounts = [Int: UInt32](uniqueKeysWithValues: zip(
       0..<itemCount,
       UnsafeBufferPointer(start: value.requiredItemCounts!, count: Int(itemCount))))

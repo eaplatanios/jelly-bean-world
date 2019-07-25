@@ -71,8 +71,8 @@ extension SimulationMap {
     @inlinable
     internal init(fromC value: CNELFramework.SimulationMapPatch, for simulator: Simulator) {
       let n = Int(simulator.configuration.patchSize)
-      let s = Int(simulator.configuration.scentDimSize)
-      let c = Int(simulator.configuration.colorDimSize)
+      let s = Int(simulator.configuration.scentDimensionality)
+      let c = Int(simulator.configuration.colorDimensionality)
       let scentBuffer = UnsafeBufferPointer(start: value.scent, count: n * n * s)
       let scent = ShapedArray(shape: [n, n, s], scalars: Array(scentBuffer))
       let visionBuffer = UnsafeBufferPointer(start: value.vision, count: n * n * c)
