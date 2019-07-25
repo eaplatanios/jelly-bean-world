@@ -84,13 +84,19 @@ extension Simulator {
       self.noOpAllowed = value.noOpAllowed
       self.patchSize = value.patchSize
       self.mcmcIterations = value.mcmcIterations
-      let cItems = UnsafeBufferPointer(start: value.itemTypes!, count: Int(value.numItemTypes))
-      self.items = cItems.map { Item(fromC: $0) }
+      self.items = UnsafeBufferPointer(
+        start: value.itemTypes!,
+        count: Int(value.numItemTypes)
+      ).map {
+        Item(
+          fromC: $0,
+          scentDimSize: value.scentDimSize,
+          colorDimSize: value.colorDimSize,
+          itemCount: Int(value.numItemTypes))
+      }
       self.agentColor = ShapedArray(
         shape: [Int(colorDimSize)],
-        scalars: UnsafeBufferPointer(
-          start: value.agentColor!,
-          count: Int(colorDimSize)))
+        scalars: UnsafeBufferPointer(start: value.agentColor!, count: Int(colorDimSize)))
       self.moveConflictPolicy = MoveConflictPolicy(fromC: value.movementConflictPolicy)
       self.scentDecay = value.scentDecay
       self.scentDiffusion = value.scentDiffusion
@@ -178,15 +184,27 @@ public struct Item: Equatable, Hashable {
   }
 
   @inlinable
-  internal init(fromC value: ItemProperties) {
-    fatalError("Not implemented yet!")
-    // self.name = value.name // TODO: !!!!
-    // self.scent = value.scent // TODO: !!!!
-    // self.color = value.color // TODO: !!!!
-    // self.requiredItemCounts = value.requiredItemCounts // TODO: !!!!
-    // self.requiredItemCosts = value.requiredItemCosts // TODO: !!!!
-    // self.blocksMovement = value.blocksMovement
-    // self.energyFunctions = EnergyFunctions(fromC: value.energyFunctions)
+  internal init(
+    fromC value: ItemProperties,
+    scentDimSize: UInt32,
+    colorDimSize: UInt32,
+    itemCount: Int
+  ) {
+    self.name = String(cString: value.name)
+    self.scent = ShapedArray(
+      shape: [Int(scentDimSize)],
+      scalars: UnsafeBufferPointer(start: value.scent!, count: Int(scentDimSize)))
+    self.color = ShapedArray(
+      shape: [Int(colorDimSize)],
+      scalars: UnsafeBufferPointer(start: value.color!, count: Int(colorDimSize)))
+    self.requiredItemCounts = [Int: UInt32](uniqueKeysWithValues: zip(
+      0..<itemCount,
+      UnsafeBufferPointer(start: value.requiredItemCounts!, count: Int(itemCount))))
+    self.requiredItemCosts = [Int: UInt32](uniqueKeysWithValues: zip(
+      0..<itemCount,
+      UnsafeBufferPointer(start: value.requiredItemCosts!, count: Int(itemCount))))
+    self.blocksMovement = value.blocksMovement
+    self.energyFunctions = EnergyFunctions(fromC: value.energyFunctions)
   }
 
   @inlinable
@@ -240,6 +258,15 @@ public struct EnergyFunctions: Hashable {
   }
 
   @inlinable
+  internal init(fromC value: CNELFramework.EnergyFunctions) {
+    self.intensityFn = IntensityFunction(fromC: value.intensityFn)
+    self.interactionFns = UnsafeBufferPointer(
+      start: value.interactionFns!,
+      count: Int(value.numInteractionFns)
+    ).map { InteractionFunction(fromC: $0) }
+  }
+
+  @inlinable
   internal func toC() -> (energyFunctions: CNELFramework.EnergyFunctions, deallocate: () -> Void) {
     let cIntensityFn = intensityFn.toC()
     let (interactionFns, interactionFnDeallocators) = self.interactionFns
@@ -277,6 +304,12 @@ public struct IntensityFunction: Hashable {
   }
 
   @inlinable
+  internal init(fromC value: CNELFramework.IntensityFunction) {
+    self.id = value.id
+    self.arguments = [Float](UnsafeBufferPointer(start: value.args!, count: Int(value.numArgs)))
+  }
+
+  @inlinable
   internal func toC() -> (
     intensityFunction: CNELFramework.IntensityFunction,
     deallocate: () -> Void
@@ -309,6 +342,13 @@ public struct InteractionFunction: Hashable {
     self.id = id
     self.itemId = itemId
     self.arguments = arguments
+  }
+
+  @inlinable
+  internal init(fromC value: CNELFramework.InteractionFunction) {
+    self.id = value.id
+    self.itemId = value.itemId
+    self.arguments = [Float](UnsafeBufferPointer(start: value.args!, count: Int(value.numArgs)))
   }
 
   @inlinable
