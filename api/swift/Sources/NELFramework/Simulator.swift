@@ -147,6 +147,118 @@ public final class Simulator {
   }
 }
 
+/// Simulation agent. Agents can interact with the Jelly Bean World by being added to simulators
+/// that manage them.
+public protocol Agent {
+  /// Returns the agent's desired next action. This function is called automatically by all
+  /// simulators managing this agent, whenever the `Simulator.step()` function is invoked.
+  ///
+  /// - Parameter state: Current state of the agent.
+  /// - Returns: Action requested by the agent.
+  ///
+  /// - Note: The action is not actually performed until the simulator advances by a time step and
+  ///   issues a notification about that event. The simulator only advances by a time step only
+  ///   once all agents have requested some action.
+  mutating func act(using state: AgentState) -> Action
+
+  /// Saves this agent's state to the specified file.
+  ///
+  /// - Parameter file: URL of the file in which to save the agent's state.
+  /// - Note: If the provided file exists, it may be overwritten by this function.
+  func save(to file: URL) throws
+
+  /// Loads this agent's state from the specified file.
+  ///
+  /// - Parameter file: URL of the file from which to load the agent's state.
+  mutating func load(from file: URL) throws
+}
+
+/// State of an agent in the Jelly Bean World.
+public struct AgentState {
+  /// Position of the agent.
+  public let position: Position
+
+  /// Direction in which the agent is facing.
+  public let direction: Direction
+
+  /// Scent that the agent smells. This is a vector with size `S`, where `S` is the scent vector
+  /// size (i.e., the scent dimensionality).
+  public let scent: Tensor<Float>
+
+  /// Visual field of the agent. This is a matrix with shape `[V + 1, V + 1, C]`, where `V` is the
+  /// visual range of the agent and `C` is the color vector size (i.e., the color dimensionality).
+  public let vision: Tensor<Float>
+
+  /// Items that collected by the agent so far represented as a dictionary mapping items to counts.
+  public let items: [Item: Int]
+
+  /// Creates a new agent state on the Swift API side, corresponding to an exising agent state on
+  /// the C API side.
+  @inlinable
+  internal init(fromC value: AgentSimulationState, for simulator: Simulator) {
+    self.position = Position(fromC: value.position)
+    self.direction = Direction(fromC: value.direction)
+
+    // Construct the scent vector.
+    let scentShape = [Int(simulator.configuration.scentDimSize)]
+    let scentBuffer = UnsafeBufferPointer(start: value.scent!, count: scentShape[0])
+    self.scent = Tensor(shape: TensorShape(scentShape), scalars: [Float](scentBuffer))
+
+    // Construct the visual field.
+    let visionShape = [
+      2 * Int(simulator.configuration.visionRange) + 1,
+      2 * Int(simulator.configuration.visionRange) + 1,
+      Int(simulator.configuration.colorDimSize)]
+    let visionSize = Int(
+      (2 * simulator.configuration.visionRange + 1) *
+      (2 * simulator.configuration.visionRange + 1) *
+      simulator.configuration.colorDimSize)
+    let visionBuffer = UnsafeBufferPointer(start: value.vision!, count: visionSize)
+    self.vision = Tensor(shape: TensorShape(visionShape), scalars: [Float](visionBuffer))
+
+    // Construcct the collected items dictionary.
+    let simulatorItems = simulator.configuration.items
+    self.items = [Item: Int](uniqueKeysWithValues: zip(
+      simulatorItems,
+      UnsafeBufferPointer(
+        start: value.collectedItems!,
+        count: simulatorItems.count).map(Int.init)))
+  }
+}
+
+/// Action that can be taken by agents in the jelly bean world.
+public enum Action {
+  /// No action.
+  case none
+
+  /// Move action, along the specified direction and for the provided number of steps.
+  case move(direction: Direction, stepCount: Int = 1)
+
+  /// Turn action (without any movement to a different cell).
+  case turn(direction: TurnDirection)
+
+  @inlinable
+  internal func invoke(
+    simulatorHandle: UnsafeMutableRawPointer?,
+    clientHandle: UnsafeMutableRawPointer?,
+    agentID: UInt64
+  ) {
+    switch self {
+    case .none:
+      simulatorNoOpAgent(simulatorHandle, clientHandle, agentID)
+    case let .move(direction, stepCount):
+      simulatorMoveAgent(
+        simulatorHandle,
+        clientHandle,
+        agentID,
+        direction.toC(),
+        UInt32(stepCount))
+    case let .turn(direction):
+      simulatorTurnAgent(simulatorHandle, clientHandle, agentID, direction.toC())
+    }
+  }
+}
+
 public struct Position: Equatable {
   public let x: Int64
   public let y: Int64

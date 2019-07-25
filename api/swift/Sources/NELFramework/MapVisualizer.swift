@@ -13,6 +13,7 @@ fileprivate let MAXIMUM_SCENT = 0.9
 
 fileprivate var FIGURE_COUNTER = 0
 
+/// Returns the agent's position in the figure, given the direction in which it is facing.
 fileprivate func agentPosition(_ direction: Direction) -> (x: Float, y: Float, angle: Float) {
   switch direction {
   case .up: return (x: 0.0, y: -0.1, angle: 0.0)
@@ -22,6 +23,7 @@ fileprivate func agentPosition(_ direction: Direction) -> (x: Float, y: Float, a
   }
 }
 
+/// Simulation map visualizer.
 public final class MapVisualizer {
   private let simulator: Simulator
   private let figureID: String
@@ -33,9 +35,9 @@ public final class MapVisualizer {
   private var yLim: (Float, Float)
 
   public init(
-    for simulator: Simulator, 
-    bottomLeft: Position, 
-    topRight: Position, 
+    for simulator: Simulator,
+    bottomLeft: Position,
+    topRight: Position,
     agentPerspective: Bool = true
   ) {
     self.simulator = simulator
