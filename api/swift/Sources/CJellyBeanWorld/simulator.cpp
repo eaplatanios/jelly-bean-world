@@ -937,6 +937,25 @@ void* simulatorCreate(const SimulatorConfig* config, OnStepCallback onStepCallba
 }
 
 
+bool simulatorSave(void* simulatorHandle, const char* filePath) {
+  FILE* file = open_file(filePath, "wb");
+  if (file == nullptr) {
+    fprintf(stderr, "save ERROR: Unable to open '%s' for writing. ", filePath);
+    perror(nullptr); return false;
+  }
+
+  simulator<simulator_data>* sim = (simulator<simulator_data>*) simulatorHandle;
+  const simulator_data& data = sim->get_data();
+  fixed_width_stream<FILE*> out(file);
+  bool result = write(*sim, out)
+    && write(data.agent_ids.length, out)
+    && write(data.agent_ids.data, out, data.agent_ids.length);
+  fclose(file);
+
+  return result;
+}
+
+
 SimulatorInfo simulatorLoad(const char* filePath, OnStepCallback onStepCallback) {
   simulator<simulator_data>* sim =
       (simulator<simulator_data>*) malloc(sizeof(simulator<simulator_data>));
@@ -1010,24 +1029,6 @@ SimulatorInfo simulatorLoad(const char* filePath, OnStepCallback onStepCallback)
 void simulatorDelete(void* simulatorHandle) {
   simulator<simulator_data>* sim = (simulator<simulator_data>*) simulatorHandle;
   free(*sim); free(sim);
-}
-
-bool simulatorSave(void* simulatorHandle, const char* filePath) {
-  FILE* file = open_file(filePath, "wb");
-  if (file == nullptr) {
-    fprintf(stderr, "save ERROR: Unable to open '%s' for writing. ", filePath);
-    perror(nullptr); return false;
-  }
-
-  simulator<simulator_data>* sim = (simulator<simulator_data>*) simulatorHandle;
-  const simulator_data& data = sim->get_data();
-  fixed_width_stream<FILE*> out(file);
-  bool result = write(*sim, out)
-    && write(data.agent_ids.length, out)
-    && write(data.agent_ids.data, out, data.agent_ids.length);
-  fclose(file);
-
-  return result;
 }
 
 void simulatorSetStepCallbackData(void* simulatorHandle, const void* callbackData) {

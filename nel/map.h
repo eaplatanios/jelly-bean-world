@@ -193,18 +193,27 @@ public:
 		if (!contains) {
 			/* uniformly sample an existing patch to initialize the new patch */
 			if (patches.table.size > 0) {
-				unsigned int sampled_index = patches.table.capacity;
-				for (unsigned int i = rng() % patches.table.capacity; i < patches.table.capacity; i++) {
-					if (!is_empty(patches.table.keys[i])) {
-						sampled_index = i; break;
-					}
-				} if (sampled_index == patches.table.capacity) {
-					sampled_index = 0;
-					while (is_empty(patches.table.keys[sampled_index])) { sampled_index++; }
+				position patch_positions[8];
+				patch_positions[0] = patch_position.up();
+				patch_positions[1] = patch_position.down();
+				patch_positions[2] = patch_position.left();
+				patch_positions[3] = patch_position.right();
+				patch_positions[4] = patch_position.up().left();
+				patch_positions[5] = patch_position.up().right();
+				patch_positions[6] = patch_position.down().left();
+				patch_positions[7] = patch_position.down().right();
+
+				patch_type* neighbors[8]; unsigned int neighbor_count = 0;
+				for (unsigned int i = 0; i < 8; i++) {
+					neighbors[neighbor_count] = get_patch_if_exists(patch_positions[i]);
+					if (neighbors[neighbor_count] != nullptr)
+						patch_positions[neighbor_count++] = patch_positions[i];
 				}
 
+				unsigned int sampled_index = rng() % neighbor_count;
+
 				/* copy the items from the existing patch into the new patch */
-				init(p, patches.values[sampled_index].items, (patch_position - patches.table.keys[sampled_index]) * n);
+				init(p, neighbors[sampled_index]->items, (patch_position - patch_positions[sampled_index]) * n);
 			} else {
 				/* there are no patches so initialize an empty patch */
 				init(p);

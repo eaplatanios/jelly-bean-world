@@ -34,35 +34,17 @@ static PyObject* mpi_error;
  */
 struct py_simulator_data
 {
-    char* save_directory;
-    size_t save_directory_length;
-    unsigned int save_frequency;
     async_server* server;
     PyObject* callback;
 
     /* agents owned by the simulator */
     array<uint64_t> agent_ids;
 
-    py_simulator_data(const char* save_filepath,
-            size_t save_filepath_length,
-            unsigned int save_frequency,
+    py_simulator_data(
             async_server* server,
             PyObject* callback) :
-        save_frequency(save_frequency), server(server),
-        callback(callback), agent_ids(16)
+        server(server), callback(callback), agent_ids(16)
     {
-        if (save_filepath == NULL) {
-            save_directory = NULL;
-        } else {
-            save_directory = (char*) malloc(sizeof(char) * save_filepath_length);
-            if (save_directory == NULL) {
-                fprintf(stderr, "py_simulator_data ERROR: Out of memory.\n");
-                exit(EXIT_FAILURE);
-            }
-            save_directory_length = save_filepath_length;
-            for (size_t i = 0; i < save_filepath_length; i++)
-                save_directory[i] = save_filepath[i];
-        }
         Py_INCREF(callback);
     }
 
@@ -75,8 +57,6 @@ struct py_simulator_data
 
 private:
     inline void free_helper() {
-        if (save_directory != NULL)
-            core::free(save_directory);
         if (callback != NULL)
             Py_DECREF(callback);
     }
@@ -96,19 +76,6 @@ inline bool init(py_simulator_data& data, const py_simulator_data& src)
         return false;
     data.agent_ids.append(src.agent_ids.data, src.agent_ids.length);
 
-    if (src.save_directory != NULL) {
-        data.save_directory = (char*) malloc(sizeof(char) * max((size_t) 1, src.save_directory_length));
-        if (data.save_directory == NULL) {
-            fprintf(stderr, "init ERROR: Insufficient memory for py_simulator_data.save_directory.\n");
-            free(data.agent_ids); return false;
-        }
-        for (size_t i = 0; i < src.save_directory_length; i++)
-            data.save_directory[i] = src.save_directory[i];
-        data.save_directory_length = src.save_directory_length;
-    } else {
-        data.save_directory = NULL;
-    }
-    data.save_frequency = src.save_frequency;
     data.server = src.server;
     data.callback = src.callback;
     Py_INCREF(data.callback);
@@ -178,47 +145,6 @@ static pair<float*, Py_ssize_t> PyArg_ParseFloatList(PyObject* arg, Py_ssize_t s
     for (Py_ssize_t i = start; i < len; i++)
         items[i - start] = (float) PyFloat_AsDouble(PyList_GetItem(arg, i));
     return make_pair(items, len - start);
-}
-
-/**
- * Saves the simulator given by the specified pointer `sim` to the filepath
- * specified by the `py_simulator_data` structure inside `sim`.
- *
- * \param   sim     The simulator to save.
- * \param   time    The simulation time of `sim`.
- * \returns `true` if successful; and `false` otherwise.
- */
-bool save(const simulator<py_simulator_data>* sim, uint64_t time)
-{
-    int length = snprintf(NULL, 0, "%" PRIu64, time);
-    if (length < 0) {
-        fprintf(stderr, "save ERROR: Error computing filepath to save simulation.\n");
-        return false;
-    }
-
-    const py_simulator_data& data = sim->get_data();
-    char* filepath = (char*) malloc(sizeof(char) * (data.save_directory_length + length + 1));
-    if (filepath == NULL) {
-        fprintf(stderr, "save ERROR: Insufficient memory for filepath.\n");
-        return false;
-    }
-
-    for (size_t i = 0; i < data.save_directory_length; i++)
-        filepath[i] = data.save_directory[i];
-    snprintf(filepath + data.save_directory_length, length + 1, "%" PRIu64, time);
-
-    FILE* file = open_file(filepath, "wb");
-    if (file == NULL) {
-        fprintf(stderr, "save ERROR: Unable to open '%s' for writing. ", filepath);
-        perror(""); return false;
-    }
-
-    fixed_width_stream<FILE*> out(file);
-    bool result = write(*sim, out)
-               && write(data.agent_ids.length, out)
-               && write(data.agent_ids.data, out, data.agent_ids.length);
-    fclose(file);
-    return result;
 }
 
 /**
@@ -355,8 +281,7 @@ static PyObject* build_py_agent(
 
 /**
  * The callback function invoked by the simulator when time is advanced. This
- * function is only called if the simulator is run locally or as a server. This
- * function first checks if the simulator should be saved to file. Next, in
+ * function is only called if the simulator is run locally or as a server. In
  * server mode, the simulator sends a step response message to all connected
  * clients. Finally, it constructs a Python list of agent states and invokes
  * the Python callback in `data.callback`.
@@ -368,14 +293,10 @@ static PyObject* build_py_agent(
 void on_step(const simulator<py_simulator_data>* sim,
         const array<agent_state*>& agents, uint64_t time)
 {
-    bool saved = false;
     const py_simulator_data& data = sim->get_data();
-    if (data.save_directory != NULL && time % data.save_frequency == 0) {
-        /* save the simulator to a local file */
-        saved = save(sim, time);
-    } if (data.server != NULL) {
+    if (data.server != NULL) {
         /* this simulator is a server, so send a step response to every client */
-        if (!send_step_response(*data.server, agents, sim->get_config(), saved))
+        if (!send_step_response(*data.server, agents, sim->get_config()))
             fprintf(stderr, "on_step ERROR: send_step_response failed.\n");
     }
 
@@ -392,12 +313,9 @@ void on_step(const simulator<py_simulator_data>* sim,
         PyList_SetItem(py_states, i, build_py_agent(*agents[(size_t) data.agent_ids[i]], config, data.agent_ids[i]));
 
     /* call python callback */
-    PyObject* py_saved = saved ? Py_True : Py_False;
-    Py_INCREF(py_saved);
-    PyObject* args = Py_BuildValue("(OO)", py_states, py_saved);
+    PyObject* args = Py_BuildValue("(O)", py_states);
     PyObject* result = PyEval_CallObject(data.callback, args);
     Py_DECREF(args);
-    Py_DECREF(py_saved);
     Py_DECREF(py_states);
     if (result != NULL)
         Py_DECREF(result);
@@ -616,9 +534,6 @@ void on_step(client<py_client_data>& c,
 {
     check_response(response, "on_step: ");
 
-    bool saved;
-    if (!read(saved, c.connection)) return;
-
     PyGILState_STATE gstate;
     gstate = PyGILState_Ensure(); /* acquire global interpreter lock */
     PyObject* py_states = PyList_New(agent_ids.length);
@@ -631,12 +546,9 @@ void on_step(client<py_client_data>& c,
         PyList_SetItem(py_states, i, build_py_agent(agent_states[i], c.config, agent_ids[i]));
 
     /* invoke python callback */
-    PyObject* py_saved = saved ? Py_True : Py_False;
-    Py_INCREF(py_saved);
-    PyObject* args = Py_BuildValue("(OO)", py_states, py_saved);
+    PyObject* args = Py_BuildValue("(O)", py_states);
     PyObject* result = PyEval_CallObject(c.data.step_callback, args);
     Py_DECREF(args);
-    Py_DECREF(py_saved);
     Py_DECREF(py_states);
     if (result != NULL)
         Py_DECREF(result);
@@ -707,6 +619,9 @@ static inline void import_errors() {
  *                  - (int) The seed for the pseudorandom number generator.
  *                  - (int) The maximum movement distance per turn for all
  *                  agents.
+ *                  - (list of ints) The ActionPolicy for each possible movement.
+ *                  - (list of ints) The ActionPolicy for each possible turn.
+ *                  - (bool) Whether or not the no-op action is allowed.
  *                  - (int) The scent dimension.
  *                  - (int) The color dimension for visual perception.
  *                  - (int) The range of vision for all agents.
@@ -723,11 +638,6 @@ static inline void import_errors() {
  *                    scent contribution.
  *                  - (function) The function to invoke when the simulator
  *                    advances time.
- *                  - (int) The frequency by which the simulator is saved to
- *                    file.
- *                  - (string) The filepath to save the simulator (the
- *                    simulator time will be appended to this filepath when
- *                    saving).
  *
  *                  The list of item types must contain tuples containing:
  *                  - (string) The name.
@@ -758,15 +668,13 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
     unsigned int seed;
     unsigned int collision_policy;
     PyObject* py_callback;
-    unsigned int save_frequency;
-    char* save_filepath;
     if (!PyArg_ParseTuple(
-      args, "IIOOOIIIIIOOIffIOIz", &seed, &config.max_steps_per_movement,
+      args, "IIOOOIIIIIOOIffIO", &seed, &config.max_steps_per_movement,
       &py_allowed_movement_directions, &py_allowed_turn_directions, &py_no_op_allowed,
       &config.scent_dimension, &config.color_dimension, &config.vision_range,
       &config.patch_size, &config.mcmc_iterations, &py_items, &py_agent_color,
       &collision_policy, &config.decay_param, &config.diffusion_param,
-      &config.deleted_item_lifetime, &py_callback, &save_frequency, &save_filepath)) {
+      &config.deleted_item_lifetime, &py_callback)) {
         fprintf(stderr, "Invalid argument types in the call to 'simulator_c.new'.\n");
         return NULL;
     }
@@ -876,9 +784,7 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
     config.agent_color = PyArg_ParseFloatList(py_agent_color).key;
     config.collision_policy = (movement_conflict_policy) collision_policy;
 
-    py_simulator_data data(save_filepath,
-            (save_filepath == NULL) ? 0 : strlen(save_filepath),
-            save_frequency, NULL, py_callback);
+    py_simulator_data data(NULL, py_callback);
 
     simulator<py_simulator_data>* sim =
             (simulator<py_simulator_data>*) malloc(sizeof(simulator<py_simulator_data>));
@@ -894,6 +800,44 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
 }
 
 /**
+ * Saves a simulator to file.
+ *
+ * \param   self    Pointer to the Python object calling this method.
+ * \param   args    A Python tuple containing the arguments to this function:
+ *                  - Handle to the native simulator object as a PyLong.
+ *                  - (string) The full path to the file to which to save the
+ *                    simulator.
+ * \returns `True` if successful; `False` otherwise.
+ */
+static PyObject* simulator_save(PyObject *self, PyObject *args)
+{
+    PyObject* py_sim_handle;
+    char* save_filepath;
+    if (!PyArg_ParseTuple(args, "Os", &py_sim_handle, &save_filepath)) {
+        fprintf(stderr, "Invalid argument types in the call to 'simulator_c.save'.\n");
+        return NULL;
+    }
+    FILE* file = open_file(save_filepath, "wb");
+    if (file == nullptr) {
+        fprintf(stderr, "save ERROR: Unable to open '%s' for writing. ", save_filepath);
+        perror(nullptr); Py_INCREF(Py_False);
+        return Py_False;
+    }
+
+    simulator<py_simulator_data>* sim_handle =
+            (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
+    const py_simulator_data& data = sim_handle->get_data();
+    fixed_width_stream<FILE*> out(file);
+    bool result = write(*sim_handle, out)
+               && write(data.agent_ids.length, out)
+               && write(data.agent_ids.data, out, data.agent_ids.length);
+    fclose(file);
+
+    PyObject* py_result = (result ? Py_True : Py_False);
+    Py_INCREF(py_result); return py_result;
+}
+
+/**
  * Loads a simulator from file.
  *
  * \param   self    Pointer to the Python object calling this method.
@@ -902,11 +846,6 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
  *                    simulator.
  *                  - (function) The callback to invoke whenever the simulator
  *                    advances time.
- *                  - (int) The frequency by which the simulator is saved to
- *                    file.
- *                  - (string) The filepath to save the simulator (the
- *                    simulator time will be appended to this filepath when
- *                    saving).
  * \returns A Python tuple containing:
  *          - The simulation time.
  *          - A pointer to the loaded simulator.
@@ -918,9 +857,7 @@ static PyObject* simulator_load(PyObject *self, PyObject *args)
 {
     char* load_filepath;
     PyObject* py_callback;
-    unsigned int save_frequency;
-    char* save_filepath;
-    if (!PyArg_ParseTuple(args, "sOIz", &load_filepath, &py_callback, &save_frequency, &save_filepath)) {
+    if (!PyArg_ParseTuple(args, "sO", &load_filepath, &py_callback)) {
         fprintf(stderr, "Invalid argument types in the call to 'simulator_c.load'.\n");
         return NULL;
     }
@@ -936,9 +873,7 @@ static PyObject* simulator_load(PyObject *self, PyObject *args)
         PyErr_NoMemory(); return NULL;
     }
 
-    py_simulator_data data(save_filepath,
-            (save_filepath == NULL) ? 0 : strlen(save_filepath),
-            save_frequency, NULL, py_callback);
+    py_simulator_data data(NULL, py_callback);
 
     FILE* file = open_file(load_filepath, "rb");
     if (file == NULL) {
@@ -1699,6 +1634,7 @@ static PyObject* simulator_is_active(PyObject *self, PyObject *args) {
 
 static PyMethodDef SimulatorMethods[] = {
     {"new",  nel::simulator_new, METH_VARARGS, "Creates a new simulator and returns its pointer."},
+    {"save",  nel::simulator_save, METH_VARARGS, "Saves a simulator to file."},
     {"load",  nel::simulator_load, METH_VARARGS, "Loads a simulator from file and returns its pointer."},
     {"delete",  nel::simulator_delete, METH_VARARGS, "Deletes an existing simulator."},
     {"start_server",  nel::simulator_start_server, METH_VARARGS, "Starts the simulator server."},

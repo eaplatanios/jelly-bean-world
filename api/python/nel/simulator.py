@@ -170,6 +170,7 @@ class Simulator(object):
     self._server_handle = None
     self._client_handle = None
     self._save_filepath = save_filepath
+    self._save_frequency = save_frequency
     self.agents = dict()
     if on_step_callback == None:
       self._on_step = lambda *args: None
@@ -207,8 +208,7 @@ class Simulator(object):
         sim_config.color_num_dims, sim_config.vision_range, sim_config.patch_size, sim_config.mcmc_num_iter,
         [(i.name, i.scent, i.color, i.required_item_counts, i.required_item_costs, i.blocks_movement, i.intensity_fn, i.intensity_fn_args, i.interaction_fns) for i in sim_config.items],
         sim_config.agent_color, sim_config.collision_policy.value, sim_config.decay_param,
-        sim_config.diffusion_param, sim_config.deleted_item_lifetime, self._step_callback,
-        save_frequency, save_filepath)
+        sim_config.diffusion_param, sim_config.deleted_item_lifetime, self._step_callback)
       if is_server:
         self._server_handle = simulator_c.start_server(
           self._handle, port, conn_queue_capacity, num_workers)
@@ -231,7 +231,7 @@ class Simulator(object):
       if load_filepath == None:
         raise ValueError('"load_filepath" must be non-None if "sim_config" and "server_address" are None.')
       self._load_agents(load_filepath, load_time)
-      (self._time, self._handle, agent_states) = simulator_c.load(load_filepath + str(load_time), self._step_callback, save_frequency, save_filepath)
+      (self._time, self._handle, agent_states) = simulator_c.load(load_filepath + str(load_time), self._step_callback)
       for agent_state in agent_states:
         (position, direction, scent, vision, items, id) = agent_state
         agent = self.agents[id]
@@ -301,7 +301,7 @@ class Simulator(object):
     return simulator_c.turn(self._handle,
       self._client_handle, agent._id, direction.value)
 
-  def no_op(self, agent,):
+  def no_op(self, agent):
     """Instructs the specified agent in the simulated environment to do nothing.
 
     The simulator only advances the time step once all agents have requested to
@@ -320,22 +320,21 @@ class Simulator(object):
     include the agents governed by other clients."""
     return list(self.agents.values())
 
-  def _step_callback(self, agent_states, saved):
+  def _step_callback(self, agent_states):
     """The callback invoked when the simulator has advanced time.
 
     Arguments:
       agent_states: A list of tuples containing the states of each agent
                     governed by this Simulator. This does not include agents
                     governed by other clients.
-      saved:        A boolean indicating whether the simulation was saved this
-                    turn.
     """
     self._time += 1
     for agent_state in agent_states:
       (position, direction, scent, vision, items, id) = agent_state
       agent = self.agents[id]
       (agent._position, agent._direction, agent._scent, agent._vision, agent._items) = (position, Direction(direction), scent, vision, items)
-    if saved:
+    if self._save_filepath != None and self._time % self._save_frequency == 0:
+      simulator_c.save(self._handle, self._save_filepath + str(self._time))
       self._save_agents()
     self._on_step()
 

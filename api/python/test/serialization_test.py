@@ -98,4 +98,4 @@ for t in range(10000):
 	if not compare_simulators(sim1, sim2, config,
 			min_agent_position_x, min_agent_position_y,
 			max_agent_position_x, max_agent_position_y):
-		continue #break
+		break

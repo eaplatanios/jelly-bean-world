@@ -66,9 +66,9 @@ items.append(nel.Item("banana", [1.0, 1.0, 0.0], [1.0, 1.0, 0.0], [0], [0], Fals
 
 # construct the simulator configuration
 config = nel.SimulatorConfig(max_steps_per_movement=1, vision_range=1,
-  allowed_movement_directions=[nel.RelativeDirection.FORWARD],
-  allowed_turn_directions=[nel.RelativeDirection.LEFT, nel.RelativeDirection.RIGHT],
-  patch_size=32, mcmc_num_iter=4000, items=items, agent_color=[0.0, 0.0, 1.0],
+	allowed_movement_directions=[nel.ActionPolicy.ALLOWED, nel.ActionPolicy.DISALLOWED, nel.ActionPolicy.DISALLOWED, nel.ActionPolicy.DISALLOWED],
+	allowed_turn_directions=[nel.ActionPolicy.DISALLOWED, nel.ActionPolicy.DISALLOWED, nel.ActionPolicy.ALLOWED, nel.ActionPolicy.ALLOWED],
+  no_op_allowed=False, patch_size=32, mcmc_num_iter=4000, items=items, agent_color=[0.0, 0.0, 1.0],
   collision_policy=nel.MovementConflictPolicy.FIRST_COME_FIRST_SERVED,
   decay_param=0.4, diffusion_param=0.14, deleted_item_lifetime=2000)
 
@@ -205,9 +205,10 @@ int main(int argc, const char** argv) {
   config.color_dimension = 3;
   config.vision_range = 10;
   for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
-    config.allowed_movement_directions[i] = true;
+    config.allowed_movement_directions[i] = action_policy::ALLOWED;
   for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
-    config.allowed_rotations[i] = true;
+    config.allowed_rotations[i] = action_policy::ALLOWED;
+  config.no_op_allowed = false;
   config.patch_size = 32;
   config.mcmc_iterations = 4000;
   config.agent_color = (float*) calloc(config.color_dimension, sizeof(float));

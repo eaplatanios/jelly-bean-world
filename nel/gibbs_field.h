@@ -181,6 +181,21 @@ bool init(gibbs_field_cache<ItemType>& cache,
 	return cache.init_helper(n);
 }
 
+template<typename T, typename RNGType>
+void shuffle(T* array, unsigned int length, RNGType& rng) {
+#if !defined(NDEBUG)
+	if (length == 0) {
+		fprintf(stderr, "shuffle WARNING: Length is zero.\n");
+		return;
+	}
+#endif
+	for (unsigned int i = length - 1; i > 0; i--) {
+		unsigned int next = rng() % (i + 1);
+		if (next != i)
+			core::swap(array[next], array[i]);
+	}
+}
+
 template<typename Map>
 class gibbs_field
 {
@@ -267,10 +282,10 @@ public:
 #if SAMPLING_METHOD == GIBBS_SAMPLING
 
 			unsigned int half_n_squared = (n / 2) * (n / 2);
-			shuffle(cache.bottom_left_positions, half_n_squared);
-			shuffle(cache.top_left_positions, half_n_squared);
-			shuffle(cache.bottom_right_positions, half_n_squared);
-			shuffle(cache.top_right_positions, half_n_squared);
+			shuffle(cache.bottom_left_positions, half_n_squared, rng);
+			shuffle(cache.top_left_positions, half_n_squared, rng);
+			shuffle(cache.bottom_right_positions, half_n_squared, rng);
+			shuffle(cache.top_right_positions, half_n_squared, rng);
 
 			for (unsigned int j = 0; j < half_n_squared; j++)
 				gibbs_sample_cell(rng, bottom_left_neighborhood, bottom_left_neighbor_count, patch_positions[i], patch_position_offset + cache.bottom_left_positions[j]);
