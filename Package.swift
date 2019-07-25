@@ -5,20 +5,20 @@ import Foundation
 import PackageDescription
 
 let package = Package(
-    name: "NELFramework",
+    name: "JellyBeanWorld",
     products: [
         .library(
-            name: "NELFramework",
-            targets: ["NELFramework"]),
+            name: "JellyBeanWorld",
+            targets: ["JellyBeanWorld"]),
     ],
     targets: [
         .target(
-            name: "CNELFramework",
+            name: "CJellyBeanWorld",
             path: ".", 
             sources: [
-                "./api/swift/Sources/CNELFramework",
+                "./api/swift/Sources/CJellyBeanWorld",
                 "./nel/simulator.cpp"],
-            publicHeadersPath: "./api/swift/Sources/CNELFramework",
+            publicHeadersPath: "./api/swift/Sources/CJellyBeanWorld",
             cxxSettings: [
                 .headerSearchPath("."),
                 .headerSearchPath("./deps"),
@@ -28,12 +28,12 @@ let package = Package(
                ]),
             ]),
         .target(
-            name: "NELFramework",
-            dependencies: ["CNELFramework"],
-            path: "api/swift/Sources/NELFramework"),
+            name: "JellyBeanWorld",
+            dependencies: ["CJellyBeanWorld"],
+            path: "api/swift/Sources/JellyBeanWorld"),
         .target(
-            name: "NELExperiments",
-            dependencies: ["NELFramework"],
-            path: "api/swift/Sources/NELExperiments"),
+            name: "JellyBeanWorldExperiments",
+            dependencies: ["JellyBeanWorld"],
+            path: "api/swift/Sources/JellyBeanWorldExperiments"),
     ]
 )

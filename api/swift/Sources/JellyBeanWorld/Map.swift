@@ -1,4 +1,4 @@
-import CNELFramework
+import CJellyBeanWorld
 import TensorFlow
 
 /// A simulation map.
@@ -15,7 +15,7 @@ public struct SimulationMap {
   /// Creates a new simulation map on the Swift API side, corresponding to an exising simulation
   /// map on the C API side.
   @inlinable
-  internal init(fromC value: CNELFramework.SimulationMap, for simulator: Simulator) {
+  internal init(fromC value: CJellyBeanWorld.SimulationMap, for simulator: Simulator) {
     let cPatches = UnsafeBufferPointer(start: value.patches!, count: Int(value.numPatches))
     self.patches = cPatches.map { Patch(fromC: $0, for: simulator) }
   }
@@ -69,18 +69,18 @@ extension SimulationMap {
     /// Creates a new simulation map patch on the Swift API side, corresponding to an exising
     /// simulation map patch on the C side.
     @inlinable
-    internal init(fromC value: CNELFramework.SimulationMapPatch, for simulator: Simulator) {
+    internal init(fromC value: CJellyBeanWorld.SimulationMapPatch, for simulator: Simulator) {
       let n = Int(simulator.configuration.patchSize)
-      let s = Int(simulator.configuration.scentDimSize)
-      let c = Int(simulator.configuration.colorDimSize)
+      let s = Int(simulator.configuration.scentDimensionality)
+      let c = Int(simulator.configuration.colorDimensionality)
       let scentBuffer = UnsafeBufferPointer(start: value.scent, count: n * n * s)
       let scent = ShapedArray(shape: [n, n, s], scalars: Array(scentBuffer))
       let visionBuffer = UnsafeBufferPointer(start: value.vision, count: n * n * c)
       let vision = ShapedArray(shape: [n, n, c], scalars: Array(visionBuffer))
-      let items = [CNELFramework.ItemInfo](
+      let items = [CJellyBeanWorld.ItemInfo](
         UnsafeBufferPointer(start: value.items!, count: Int(value.numItems))
       ).map { ItemInformation(fromC: $0) }
-      let agents = [CNELFramework.AgentInfo](
+      let agents = [CJellyBeanWorld.AgentInfo](
         UnsafeBufferPointer(start: value.agents!, count: Int(value.numAgents))
       ).map { AgentInformation(fromC: $0) }
       self.init(
@@ -111,7 +111,7 @@ extension SimulationMap {
     /// Creates a new item information object on the Swift API side, corresponding to an exising
     /// item information object on the C API side.
     @inlinable
-    internal init(fromC value: CNELFramework.ItemInfo) {
+    internal init(fromC value: CJellyBeanWorld.ItemInfo) {
       self.itemType = Int(value.type)
       self.position = Position(fromC: value.position)
     }
@@ -135,7 +135,7 @@ extension SimulationMap {
     /// Creates a new agent information object on the Swift API side, corresponding to an exising
     /// agent information object on the C API side.
     @inlinable
-    internal init(fromC value: CNELFramework.AgentInfo) {
+    internal init(fromC value: CJellyBeanWorld.AgentInfo) {
       self.position = Position(fromC: value.position)
       self.direction = Direction(fromC: value.direction)
     }

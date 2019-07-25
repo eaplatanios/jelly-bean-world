@@ -1,5 +1,5 @@
 import Foundation
-import NELFramework
+import JellyBeanWorld
 import Python
 import TensorFlow
 
@@ -93,11 +93,11 @@ let wall = Item(
 let configuration = Simulator.Configuration(
   randomSeed: 1234567890,
   maxStepsPerMove: 1,
-  scentDimSize: 3,
-  colorDimSize: 3,
+  scentDimensionality: 3,
+  colorDimensionality: 3,
   visionRange: 5,
-  allowedMoves: [.up: .allowed],
-  allowedTurns: [.left: .allowed, .right: .allowed],
+  movePolicies: [.up: .allowed],
+  turnPolicies: [.left: .allowed, .right: .allowed],
   noOpAllowed: false,
   patchSize: 32,
   mcmcIterations: 4000,

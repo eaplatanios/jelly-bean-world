@@ -1,10 +1,46 @@
-import CNELFramework
+import CJellyBeanWorld
 import Foundation
 import TensorFlow
 
 public enum JellyBeanWorldError: Error {
   /// Failure while trying to save the simulator state at the specified path.
   case SimulatorSaveFailure(URL)
+}
+
+/// Position in the simulation map.
+public struct Position: Equatable {
+  /// Horizontal coordinate of the position.
+  public let x: Int64
+
+  /// Vertical coordination of the position.
+  public let y: Int64
+
+  public init(x: Int64, y: Int64) {
+    self.x = x
+    self.y = y
+  }
+}
+
+/// Direction in the simulation map. This can either be the direction in which an agent is facing,
+/// or the direction in which an agent is moving.
+public enum Direction: UInt32 {
+  case up = 0, down, left, right
+}
+
+/// Direction for turning actions.
+public enum TurnDirection: UInt32 {
+  case front = 0, back, left, right
+}
+
+/// Conflict resolution policy for when multiple agents request to move to the same location.
+public enum MoveConflictPolicy: UInt32 {
+  case noCollisions = 0, firstComeFirstServe, random
+}
+
+/// Policy that determines whether specific actions are allowed, disallowed, or simply allowed but
+/// ignored by the simulator (i.e., nothing happens if an ignored action is requested).
+public enum ActionPolicy: UInt32 {
+  case allowed = 0, disallowed, ignored
 }
 
 /// Jelly Bean World (JBW) simulator.
@@ -188,47 +224,14 @@ public struct AgentState {
 
   /// Scent that the agent smells. This is a vector with size `S`, where `S` is the scent vector
   /// size (i.e., the scent dimensionality).
-  public let scent: Tensor<Float>
+  public let scent: ShapedArray<Float>
 
   /// Visual field of the agent. This is a matrix with shape `[V + 1, V + 1, C]`, where `V` is the
   /// visual range of the agent and `C` is the color vector size (i.e., the color dimensionality).
-  public let vision: Tensor<Float>
+  public let vision: ShapedArray<Float>
 
   /// Items that collected by the agent so far represented as a dictionary mapping items to counts.
   public let items: [Item: Int]
-
-  /// Creates a new agent state on the Swift API side, corresponding to an exising agent state on
-  /// the C API side.
-  @inlinable
-  internal init(fromC value: AgentSimulationState, for simulator: Simulator) {
-    self.position = Position(fromC: value.position)
-    self.direction = Direction(fromC: value.direction)
-
-    // Construct the scent vector.
-    let scentShape = [Int(simulator.configuration.scentDimSize)]
-    let scentBuffer = UnsafeBufferPointer(start: value.scent!, count: scentShape[0])
-    self.scent = Tensor(shape: TensorShape(scentShape), scalars: [Float](scentBuffer))
-
-    // Construct the visual field.
-    let visionShape = [
-      2 * Int(simulator.configuration.visionRange) + 1,
-      2 * Int(simulator.configuration.visionRange) + 1,
-      Int(simulator.configuration.colorDimSize)]
-    let visionSize = Int(
-      (2 * simulator.configuration.visionRange + 1) *
-      (2 * simulator.configuration.visionRange + 1) *
-      simulator.configuration.colorDimSize)
-    let visionBuffer = UnsafeBufferPointer(start: value.vision!, count: visionSize)
-    self.vision = Tensor(shape: TensorShape(visionShape), scalars: [Float](visionBuffer))
-
-    // Construcct the collected items dictionary.
-    let simulatorItems = simulator.configuration.items
-    self.items = [Item: Int](uniqueKeysWithValues: zip(
-      simulatorItems,
-      UnsafeBufferPointer(
-        start: value.collectedItems!,
-        count: simulatorItems.count).map(Int.init)))
-  }
 }
 
 /// Action that can be taken by agents in the jelly bean world.
@@ -270,85 +273,221 @@ public enum Action {
   }
 }
 
-/// Position in the simulation map.
-public struct Position: Equatable {
-  /// Horizontal coordinate of the position.
-  public let x: Int64
+extension Simulator {
+  /// Simulator configuration.
+  public struct Configuration: Equatable, Hashable {
+    /// Seed used by the random number generator that is used while proceeduraly generating the
+    /// Jelly Bean World map.
+    public let randomSeed: UInt32
 
-  /// Vertical coordination of the position.
-  public let y: Int64
+    /// Maximum movement steps allowed during each simulation step.
+    public let maxStepsPerMove: UInt32
 
-  public init(x: Int64, y: Int64) {
-    self.x = x
-    self.y = y
-  }
+    /// Dimensionality (i.e., size) of the scent vector.
+    public let scentDimensionality: UInt32
 
-  /// Creates a new position instance on the Swift API side, corresponding to an exising position
-  /// instance on the C API side.
-  @inlinable
-  internal init(fromC value: CNELFramework.Position) {
-    self.init(x: value.x, y: value.y)
-  }
+    /// Dimensionality (i.e., size) of the color vector.
+    public let colorDimensionality: UInt32
 
-  /// Creates a new position instance on the C API side, corresponding to this position.
-  @inlinable
-  internal func toC() -> CNELFramework.Position {
-    CNELFramework.Position(x: x, y: y)
+    /// Vision range for the agents (i.e., how far they can see).
+    public let visionRange: UInt32
+
+    /// Policies for the available move actions. The default policy for move directions not
+    /// included in this dictionary is that they are disallowed.
+    public let movePolicies: [Direction: ActionPolicy]
+
+    /// Policies for the available turn actions. The default policy for turn directions not
+    /// included in this dictionary is that they are disallowed.
+    public let turnPolicies: [TurnDirection: ActionPolicy]
+
+    /// Boolean flag that indicates whether no-op actions are permitted.
+    public let noOpAllowed: Bool
+
+    /// Size of each map patch. All patches are square and this quantity denotes their length.
+    public let patchSize: UInt32
+
+    /// Number of Markov Chain Monte Carlo (MCMC) iterations used when sampling map patches.
+    public let mcmcIterations: UInt32
+
+    /// All possible items that can exist in this simulation.
+    public let items: [Item]
+
+    /// Color of each agent. This is a vector of size `colorDimensionality`.
+    public let agentColor: ShapedArray<Float>
+
+    /// Conflict resolution policy for when multiple agents request to move to the same location.
+    public let moveConflictPolicy: MoveConflictPolicy
+
+    /// Scent decay parameter (used by the scent simulation algorithm).
+    public let scentDecay: Float
+
+    /// Scent diffusion parameter (used by the scent simulation algorithm).
+    public let scentDiffusion: Float
+
+    /// Lifetime of removed items (used by the scent simulation algorithm).
+    public let removedItemLifetime: UInt32
+
+    @inlinable
+    public init(
+      randomSeed: UInt32,
+      maxStepsPerMove: UInt32,
+      scentDimensionality: UInt32,
+      colorDimensionality: UInt32,
+      visionRange: UInt32,
+      movePolicies: [Direction: ActionPolicy],
+      turnPolicies: [TurnDirection: ActionPolicy],
+      noOpAllowed: Bool,
+      patchSize: UInt32,
+      mcmcIterations: UInt32,
+      items: [Item],
+      agentColor: ShapedArray<Float>,
+      moveConflictPolicy: MoveConflictPolicy,
+      scentDecay: Float,
+      scentDiffusion: Float,
+      removedItemLifetime: UInt32
+    ) {
+      self.randomSeed = randomSeed
+      self.maxStepsPerMove = maxStepsPerMove
+      self.scentDimensionality = scentDimensionality
+      self.colorDimensionality = colorDimensionality
+      self.visionRange = visionRange
+      self.movePolicies = movePolicies
+      self.turnPolicies = turnPolicies
+      self.noOpAllowed = noOpAllowed
+      self.patchSize = patchSize
+      self.mcmcIterations = mcmcIterations
+      self.items = items
+      self.agentColor = agentColor
+      self.moveConflictPolicy = moveConflictPolicy
+      self.scentDecay = scentDecay
+      self.scentDiffusion = scentDiffusion
+      self.removedItemLifetime = removedItemLifetime
+    }
   }
 }
 
-public enum Direction: UInt32 {
-  case up = 0, down, left, right
+/// Item type.
+public struct Item: Equatable, Hashable {
+  /// Name of this item type.
+  public let name: String
+
+  /// Scent of this item type. This is a vector with size `S`, where `S` is the scent vector
+  /// size (i.e., the scent dimensionality).
+  public let scent: ShapedArray<Float>
+
+  /// Color of this item type. This is a vector with size `C`, where `C` is the color vector
+  /// size (i.e., the color dimensionality).
+  public let color: ShapedArray<Float>
+
+  /// Map from item ID to counts that represents how many of each item are required to be collected
+  /// first, before being able to collect this item.
+  public let requiredItemCounts: [Int: UInt32] // TODO: Convert to [Item: Int].
+
+  /// Map from item ID to counts that represents how many of each item are required to be exchanged
+  /// for collecting this item.
+  public let requiredItemCosts: [Int: UInt32] // TODO: Convert to [Item: Int].
+
+  /// Indicates whether this item blocks the movement of agents (e.g., used for walls).
+  public let blocksMovement: Bool
+
+  /// Energy functions that represent how instances of this item type are distributed in the world.
+  public let energyFunctions: EnergyFunctions
 
   @inlinable
-  internal init(fromC value: CNELFramework.Direction) {
-    self.init(rawValue: value.rawValue)!
-  }
-
-  @inlinable
-  internal func toC() -> CNELFramework.Direction {
-    CNELFramework.Direction(rawValue: rawValue)
+  public init(
+    name: String,
+    scent: ShapedArray<Float>,
+    color: ShapedArray<Float>,
+    requiredItemCounts: [Int: UInt32],
+    requiredItemCosts: [Int: UInt32],
+    blocksMovement: Bool,
+    energyFunctions: EnergyFunctions
+  ) {
+    self.name = name
+    self.scent = scent
+    self.color = color
+    self.requiredItemCounts = requiredItemCounts
+    self.requiredItemCosts = requiredItemCosts
+    self.blocksMovement = blocksMovement
+    self.energyFunctions = energyFunctions
   }
 }
 
-public enum TurnDirection: UInt32 {
-  case front = 0, back, left, right
+public struct EnergyFunctions: Hashable {
+  @usableFromInline internal let intensityFn: IntensityFunction
+  @usableFromInline internal let interactionFns: [InteractionFunction]
 
   @inlinable
-  internal init(fromC value: CNELFramework.TurnDirection) {
-    self.init(rawValue: value.rawValue)!
-  }
-
-  @inlinable
-  internal func toC() -> CNELFramework.TurnDirection {
-    CNELFramework.TurnDirection(rawValue: rawValue)
+  public init(intensityFn: IntensityFunction, interactionFns: [InteractionFunction]) {
+    self.intensityFn = intensityFn
+    self.interactionFns = interactionFns
   }
 }
 
-public enum MoveConflictPolicy: UInt32 {
-  case noCollisions = 0, firstComeFirstServe, random
+public struct IntensityFunction: Hashable {
+  @usableFromInline internal let id: UInt32
+  @usableFromInline internal let arguments: [Float]
 
   @inlinable
-  internal init(fromC value: CNELFramework.MovementConflictPolicy) {
-    self.init(rawValue: value.rawValue)!
-  }
-
-  @inlinable
-  internal func toC() -> CNELFramework.MovementConflictPolicy {
-    CNELFramework.MovementConflictPolicy(rawValue: rawValue)
+  public init(id: UInt32, arguments: [Float] = []) {
+    self.id = id
+    self.arguments = arguments
   }
 }
 
-public enum ActionPolicy: UInt32 {
-  case allowed = 0, disallowed, ignored
+extension IntensityFunction {
+  @inlinable
+  public static func constant(_ value: Float) -> IntensityFunction {
+    IntensityFunction(id: 1, arguments: [value])
+  }
+}
+
+public struct InteractionFunction: Hashable {
+  @usableFromInline internal let id: UInt32
+  @usableFromInline internal let itemId: UInt32 // TODO: Convert to Item.
+  @usableFromInline internal let arguments: [Float]
 
   @inlinable
-  internal init(fromC value: CNELFramework.ActionPolicy) {
-    self.init(rawValue: value.rawValue)!
+  public init(id: UInt32, itemId: UInt32, arguments: [Float] = []) {
+    self.id = id
+    self.itemId = itemId
+    self.arguments = arguments
+  }
+}
+
+extension InteractionFunction {
+  @inlinable
+  public static func piecewiseBox(
+    itemId: UInt32, 
+    _ firstCutoff: Float, 
+    _ secondCutoff: Float,
+    _ firstValue: Float,
+    _ secondValue: Float
+  ) -> InteractionFunction {
+    InteractionFunction(
+      id: 1,
+      itemId: itemId,
+      arguments: [
+        firstCutoff, secondCutoff, 
+        firstValue, secondValue])
   }
 
   @inlinable
-  internal func toC() -> CNELFramework.ActionPolicy {
-    CNELFramework.ActionPolicy(rawValue: rawValue)
+  public static func cross(
+    itemId: UInt32,
+    _ nearCutoff: Float,
+    _ farCutoff: Float,
+    _ nearAxisAlignedValue: Float,
+    _ nearMisalignedValue: Float,
+    _ farAxisAlignedValue: Float,
+    _ farMisalignedValue: Float
+  ) -> InteractionFunction {
+    InteractionFunction(
+      id: 2,
+      itemId: itemId,
+      arguments: [
+        nearCutoff, farCutoff,
+        nearAxisAlignedValue, nearMisalignedValue, 
+        farAxisAlignedValue, farMisalignedValue])
   }
 }
