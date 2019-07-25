@@ -387,10 +387,10 @@ enum class action_policy : action_policy_type {
  */
 template<typename Stream>
 inline bool read(action_policy& type, Stream& in) {
-	action_policy_type v;
-	if (!read(v, in)) return false;
-	type = (action_policy) v;
-	return true;
+    action_policy_type v;
+    if (!read(v, in)) return false;
+    type = (action_policy) v;
+    return true;
 }
 
 /**
@@ -398,7 +398,7 @@ inline bool read(action_policy& type, Stream& in) {
  */
 template<typename Stream>
 inline bool write(const action_policy& type, Stream& out) {
-	return write((action_policy_type) type, out);
+    return write((action_policy_type) type, out);
 }
 
 /**

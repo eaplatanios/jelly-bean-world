@@ -44,30 +44,30 @@ typedef struct Position {
 
 typedef struct IntensityFunction {
   unsigned int id;
-  const float* args;
+  float* args;
   unsigned int numArgs;
 } IntensityFunction;
 
 typedef struct InteractionFunction {
   unsigned int id;
   unsigned int itemId;
-  const float* args;
+  float* args;
   unsigned int numArgs;
 } InteractionFunction;
 
 typedef struct EnergyFunctions {
   IntensityFunction intensityFn;
-  const InteractionFunction* interactionFns;
+  InteractionFunction* interactionFns;
   unsigned int numInteractionFns;
 } EnergyFunctions;
 
 /** A structure containing the properties of an item type. */
 typedef struct ItemProperties {
-  const char* name;
-  const float* scent;
-  const float* color;
-  const unsigned int* requiredItemCounts;
-  const unsigned int* requiredItemCosts;
+  char* name;
+  float* scent;
+  float* color;
+  unsigned int* requiredItemCounts;
+  unsigned int* requiredItemCosts;
   bool blocksMovement;
   EnergyFunctions energyFunctions;
 } ItemProperties;
@@ -100,9 +100,9 @@ typedef struct SimulatorConfig {
   /* World Properties */
   unsigned int patchSize;
   unsigned int mcmcIterations;
-  const ItemProperties* itemTypes;
+  ItemProperties* itemTypes;
   unsigned int numItemTypes;
-  const float* agentColor;
+  float* agentColor;
   MovementConflictPolicy movementConflictPolicy;
 
   /* Scent Diffusion Parameters */

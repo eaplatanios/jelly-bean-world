@@ -330,6 +330,14 @@ void on_turn(client<client_data>& c, uint64_t agent_id, mpi_response response) {
 	conditions[id].notify_one();
 }
 
+void on_do_nothing(client<client_data>& c, uint64_t agent_id, mpi_response response) {
+	unsigned int id = c.data.index;
+	std::unique_lock<std::mutex> lck(locks[id]);
+	waiting_for_server[id] = false;
+	c.data.action_result = (response == mpi_response::SUCCESS);
+	conditions[id].notify_one();
+}
+
 void on_get_map(
 		client<client_data>& c, mpi_response response,
 		const hash_map<position, patch_state>* map)
@@ -548,9 +556,10 @@ int main(int argc, const char** argv)
 	config.color_dimension = 3;
 	config.vision_range = 5;
 	for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
-		config.allowed_movement_directions[i] = true;
+		config.allowed_movement_directions[i] = action_policy::ALLOWED;
 	for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
-		config.allowed_rotations[i] = true;
+		config.allowed_rotations[i] = action_policy::ALLOWED;
+	config.no_op_allowed = false;
 	config.patch_size = 32;
 	config.mcmc_iterations = 4000;
 	config.agent_color = (float*) calloc(config.color_dimension, sizeof(float));

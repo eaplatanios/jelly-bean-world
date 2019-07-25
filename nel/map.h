@@ -137,6 +137,7 @@ struct map {
 	unsigned int mcmc_iterations;
 
 	std::minstd_rand rng;
+	uint_fast32_t initial_seed;
 	gibbs_field_cache<ItemType> cache;
 
 	typedef patch<PerPatchData> patch_type;
@@ -144,7 +145,7 @@ struct map {
 
 public:
 	map(unsigned int n, unsigned int mcmc_iterations, const ItemType* item_types, unsigned int item_type_count, uint_fast32_t seed) :
-		patches(1024, alloc_position_keys), n(n), mcmc_iterations(mcmc_iterations), cache(item_types, item_type_count, n)
+		patches(1024, alloc_position_keys), n(n), mcmc_iterations(mcmc_iterations), initial_seed(seed), cache(item_types, item_type_count, n)
 	{
 		rng.seed(seed);
 #if !defined(NDEBUG)
@@ -163,10 +164,6 @@ public:
 #endif
 
 	~map() { free_helper(); }
-
-	inline void set_seed(uint_fast32_t new_seed) {
-		rng.seed(new_seed);
-	}
 
 	inline patch_type& get_existing_patch(const position& patch_position) {
 #if !defined(NDEBUG)
@@ -196,18 +193,27 @@ public:
 		if (!contains) {
 			/* uniformly sample an existing patch to initialize the new patch */
 			if (patches.table.size > 0) {
-				unsigned int sampled_index = patches.table.capacity;
-				for (unsigned int i = rng() % patches.table.capacity; i < patches.table.capacity; i++) {
-					if (!is_empty(patches.table.keys[i])) {
-						sampled_index = i; break;
-					}
-				} if (sampled_index == patches.table.capacity) {
-					sampled_index = 0;
-					while (is_empty(patches.table.keys[sampled_index])) { sampled_index++; }
+				position patch_positions[8];
+				patch_positions[0] = patch_position.up();
+				patch_positions[1] = patch_position.down();
+				patch_positions[2] = patch_position.left();
+				patch_positions[3] = patch_position.right();
+				patch_positions[4] = patch_position.up().left();
+				patch_positions[5] = patch_position.up().right();
+				patch_positions[6] = patch_position.down().left();
+				patch_positions[7] = patch_position.down().right();
+
+				patch_type* neighbors[8]; unsigned int neighbor_count = 0;
+				for (unsigned int i = 0; i < 8; i++) {
+					neighbors[neighbor_count] = get_patch_if_exists(patch_positions[i]);
+					if (neighbors[neighbor_count] != nullptr)
+						patch_positions[neighbor_count++] = patch_positions[i];
 				}
 
+				unsigned int sampled_index = rng() % neighbor_count;
+
 				/* copy the items from the existing patch into the new patch */
-				init(p, patches.values[sampled_index].items, (patch_position - patches.table.keys[sampled_index]) * n);
+				init(p, neighbors[sampled_index]->items, (patch_position - patch_positions[sampled_index]) * n);
 			} else {
 				/* there are no patches so initialize an empty patch */
 				init(p);
@@ -467,6 +473,7 @@ inline bool init(map<PerPatchData, ItemType>& world, unsigned int n,
 		return false;
 	world.n = n;
 	world.mcmc_iterations = mcmc_iterations;
+	world.initial_seed = seed;
 	if (!init(world.cache, item_types, item_type_count, n)) {
 		free(world.patches);
 		return false;
@@ -507,6 +514,7 @@ bool read(map<PerPatchData, ItemType>& world, Stream& in,
 	default_scribe scribe;
 	if (!read(world.n, in)
 	 || !read(world.mcmc_iterations, in)
+	 || !read(world.initial_seed, in)
 	 || !read(world.patches, in, alloc_position_keys, scribe, patch_reader))
 		return false;
 	if (!init(world.cache, item_types, item_type_count, world.n)) {
@@ -532,6 +540,7 @@ bool write(const map<PerPatchData, ItemType>& world, Stream& out,
 	default_scribe scribe;
 	return write(world.n, out)
 		&& write(world.mcmc_iterations, out)
+		&& write(world.initial_seed, out)
 		&& write(world.patches, out, scribe, patch_writer);
 }
 

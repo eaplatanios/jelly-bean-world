@@ -18,13 +18,13 @@ inline bool print(const item& item, Stream& out, const item_position_printer& pr
 
 template<typename FunctionType>
 struct energy_function {
-    FunctionType fn;
-    float* args;
-    unsigned int arg_count;
+	FunctionType fn;
+	float* args;
+	unsigned int arg_count;
 
-    static inline void free(energy_function<FunctionType>& info) {
-        core::free(info.args);
-    }
+	static inline void free(energy_function<FunctionType>& info) {
+		core::free(info.args);
+	}
 };
 
 struct item_properties {

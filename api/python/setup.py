@@ -38,7 +38,7 @@ simulator_c = Extension(
 setup(
   name = 'nel',
   version = '1.0',
-  description = 'Never-ending learning framework',
+  description = 'Jelly bean world',
   ext_modules = [simulator_c],
   packages = ['nel'], 
   install_requires = ['enum34'],

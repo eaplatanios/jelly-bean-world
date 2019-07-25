@@ -46,6 +46,17 @@ intensity_function get_intensity_fn(intensity_fns type, const float* args, unsig
 	return NULL;
 }
 
+intensity_fns get_intensity_fn(intensity_function function) {
+	if (function == zero_intensity_fn) {
+		return intensity_fns::ZERO;
+	} else if (function == constant_intensity_fn) {
+		return intensity_fns::CONSTANT;
+	} else {
+		fprintf(stderr, "get_intensity_fn ERROR: Unknown intensity_function.");
+		exit(EXIT_FAILURE);
+	}
+}
+
 float zero_interaction_fn(const position pos1, const position pos2, const float* args) {
 	return 0.0;
 }
@@ -106,6 +117,19 @@ interaction_function get_interaction_fn(interaction_fns type, const float* args,
 	}
 	fprintf(stderr, "get_interaction_fn ERROR: Unknown interaction function type.");
 	return NULL;
+}
+
+interaction_fns get_interaction_fn(interaction_function function) {
+	if (function == zero_interaction_fn) {
+		return interaction_fns::ZERO;
+	} else if (function == piecewise_box_interaction_fn) {
+		return interaction_fns::PIECEWISE_BOX;
+	} else if (function == cross_interaction_fn) {
+		return interaction_fns::CROSS;
+	} else {
+		fprintf(stderr, "get_interaction_fn ERROR: Unknown interaction_function.");
+		exit(EXIT_FAILURE);
+	}
 }
 
 template<typename Stream>
