@@ -24,6 +24,8 @@ namespace jbw {
 
 using namespace core;
 
+constexpr uint64_t NEW_CLIENT_REQUEST = 0;
+
 enum class message_type : uint64_t {
 	ADD_AGENT = 0,
 	ADD_AGENT_RESPONSE,
@@ -88,30 +90,95 @@ inline bool print(const message_type& type, Stream& out) {
 	return false;
 }
 
+struct client_info {
+	uint64_t id;
+
+	static inline void move(const client_info& src, client_info& dst) { dst.id = src.id; }
+	static inline void free(client_info& info) { }
+};
+
+inline bool init(client_info& info) {
+	info.id = 0;
+	return true;
+}
+
 /**
- * A structure that keeps track of additional state for each connection in
- * `async_server`. For now, it just keeps track of the agent IDs governed by
- * each connected client.
+ * A structure that keeps track of additional state for the MPI server.
  */
-struct connection_data {
-	array<uint64_t> agent_ids;
+struct server_state {
+	hash_map<uint64_t, array<uint64_t>> agent_ids;
 
-	connection_data() : agent_ids(8) { }
+	server_state() : agent_ids(16) { }
+	~server_state() { free_helper(); }
 
-	static inline void move(const connection_data& src, connection_data& dst) {
-		core::move(src.agent_ids, dst.agent_ids);
+	static inline void swap(server_state& first, server_state& second) {
+		core::swap(first.agent_ids, second.agent_ids);
 	}
 
-	static inline void free(connection_data& connection) {
-		core::free(connection.agent_ids);
+	static inline void free(server_state& state) {
+		state.free_helper();
+		core::free(state.agent_ids);
+	}
+
+private:
+	inline void free_helper() {
+		for (auto entry : agent_ids)
+			core::free(entry.value);
+	}
+};
+
+bool init(server_state& state) {
+	return hash_map_init(state.agent_ids, 16);
+}
+
+template<typename Stream>
+bool read(server_state& state, Stream& in) {
+	return read(state.agent_ids, in);
+}
+
+template<typename Stream>
+bool write(const server_state& state, Stream& out) {
+	return write(state.agent_ids, out);
+}
+
+/**
+ * A structure containing the state of a simulator server that runs
+ * synchronously on the current thread. The `init_server` function is
+ * responsible for setting up the TCP sockets and dispatching the server
+ * thread.
+ */
+struct sync_server {
+	server_state state;
+	hash_map<socket_type, client_info> client_connections;
+	std::mutex connection_set_lock;
+
+	sync_server() : client_connections(1024, alloc_socket_keys) { }
+	~sync_server() { free_helper(); }
+
+	static inline void free(sync_server& server) {
+		server.free_helper();
+		core::free(server.state);
+	}
+
+private:
+	inline void free_helper() {
+		for (auto connection : client_connections)
+			core::free(connection.value);
 	}
 };
 
 /**
- * Initializes a new empty connection_data structure in `connection`.
+ * Initializes the given sync_server `new_server`. The `init_server` function
+ * is responsible for setting up the TCP sockets and dispatching the server
+ * thread.
  */
-inline bool init(connection_data& connection) {
-	return array_init(connection.agent_ids, 8);
+inline bool init(sync_server& new_server) {
+	if (!init(new_server.state)) {
+		return false;
+	} else if (!hash_map_init(new_server.client_connections, 1024, alloc_socket_keys)) {
+		free(new_server.state); return false;
+	}
+	return true;
 }
 
 /**
@@ -121,10 +188,11 @@ inline bool init(connection_data& connection) {
  * thread.
  */
 struct async_server {
+	server_state state;
 	std::thread server_thread;
 	socket_type server_socket;
-	server_state state;
-	hash_map<socket_type, connection_data> client_connections;
+	server_status status;
+	hash_map<socket_type, client_info> client_connections;
 	std::mutex connection_set_lock;
 
 	async_server() : client_connections(1024, alloc_socket_keys) { }
@@ -133,6 +201,7 @@ struct async_server {
 	static inline void free(async_server& server) {
 		server.free_helper();
 		core::free(server.client_connections);
+		core::free(server.state);
 		server.server_thread.~thread();
 		server.connection_set_lock.~mutex();
 	}
@@ -150,8 +219,11 @@ private:
  * thread.
  */
 inline bool init(async_server& new_server) {
-	if (!hash_map_init(new_server.client_connections, 1024, alloc_socket_keys))
+	if (!init(new_server.state)) {
 		return false;
+	} else if (!hash_map_init(new_server.client_connections, 1024, alloc_socket_keys)) {
+		free(new_server.state); return false;
+	}
 	new (&new_server.server_thread) std::thread();
 	new (&new_server.connection_set_lock) std::mutex();
 	return true;
@@ -194,12 +266,12 @@ inline bool write(const mpi_response& response, Stream& out) {
 template<typename Stream, typename SimulatorData>
 inline bool receive_add_agent(
 		Stream& in, socket_type& connection,
-		connection_data& data,
+		array<uint64_t>& agent_ids,
 		simulator<SimulatorData>& sim)
 {
 	pair<uint64_t, agent_state*> new_agent = sim.add_agent();
 	if (new_agent.value != NULL)
-		data.agent_ids.add(new_agent.key);
+		agent_ids.add(new_agent.key);
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(new_agent.key) + sizeof(new_agent.value));
 	fixed_width_stream<memory_stream> out(mem_stream);
 	std::unique_lock<std::mutex> lock(new_agent.value->lock);
@@ -212,7 +284,7 @@ inline bool receive_add_agent(
 template<typename Stream, typename SimulatorData>
 inline bool receive_move(
 		Stream& in, socket_type& connection,
-		connection_data& data,
+		const array<uint64_t>& agent_ids,
 		simulator<SimulatorData>& sim)
 {
 	uint64_t agent_id = UINT64_MAX;
@@ -224,7 +296,7 @@ inline bool receive_move(
 		response = mpi_response::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		if (!data.agent_ids.contains(agent_id))
+		if (!agent_ids.contains(agent_id))
 			response = mpi_response::INVALID_AGENT_ID;
 		else if (sim.move(agent_id, dir, num_steps))
 			response = mpi_response::SUCCESS;
@@ -242,7 +314,7 @@ inline bool receive_move(
 template<typename Stream, typename SimulatorData>
 inline bool receive_turn(
 		Stream& in, socket_type& connection,
-		connection_data& data,
+		const array<uint64_t>& agent_ids,
 		simulator<SimulatorData>& sim)
 {
 	uint64_t agent_id = UINT64_MAX;
@@ -253,7 +325,7 @@ inline bool receive_turn(
 		response = mpi_response::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		if (!data.agent_ids.contains(agent_id))
+		if (!agent_ids.contains(agent_id))
 			response = mpi_response::INVALID_AGENT_ID;
 		else if (sim.turn(agent_id, dir))
 			response = mpi_response::SUCCESS;
@@ -271,7 +343,7 @@ inline bool receive_turn(
 template<typename Stream, typename SimulatorData>
 inline bool receive_do_nothing(
 		Stream& in, socket_type& connection,
-		connection_data& data,
+		const array<uint64_t>& agent_ids,
 		simulator<SimulatorData>& sim)
 {
 	uint64_t agent_id = UINT64_MAX;
@@ -281,7 +353,7 @@ inline bool receive_do_nothing(
 		response = mpi_response::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		if (!data.agent_ids.contains(agent_id))
+		if (!agent_ids.contains(agent_id))
 			response = mpi_response::INVALID_AGENT_ID;
 		else if (sim.do_nothing(agent_id))
 			response = mpi_response::SUCCESS;
@@ -333,7 +405,7 @@ inline bool receive_get_map(
 template<typename Stream, typename SimulatorData>
 inline bool receive_set_active(
 		Stream& in, socket_type& connection,
-		connection_data& data,
+		const array<uint64_t>& agent_ids,
 		simulator<SimulatorData>& sim)
 {
 	uint64_t agent_id = UINT64_MAX;
@@ -343,7 +415,7 @@ inline bool receive_set_active(
 		response = mpi_response::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		if (!data.agent_ids.contains(agent_id)) {
+		if (!agent_ids.contains(agent_id)) {
 			response = mpi_response::INVALID_AGENT_ID;
 		} else {
 			sim.set_agent_active(agent_id, active);
@@ -362,7 +434,7 @@ inline bool receive_set_active(
 template<typename Stream, typename SimulatorData>
 inline bool receive_is_active(
 		Stream& in, socket_type& connection,
-		connection_data& data,
+		const array<uint64_t>& agent_ids,
 		simulator<SimulatorData>& sim)
 {
 	uint64_t agent_id = UINT64_MAX;
@@ -372,7 +444,7 @@ inline bool receive_is_active(
 		response = mpi_response::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		if (!data.agent_ids.contains(agent_id)) {
+		if (!agent_ids.contains(agent_id)) {
 			response = mpi_response::INVALID_AGENT_ID;
 		} else if (sim.is_agent_active(agent_id)) {
 			response = mpi_response::SUCCESS;
@@ -391,27 +463,31 @@ inline bool receive_is_active(
 
 template<typename SimulatorData>
 void server_process_message(socket_type& connection,
-		hash_map<socket_type, connection_data>& connections,
-		simulator<SimulatorData>& sim)
+		hash_map<socket_type, client_info>& connections,
+		std::mutex& connection_set_lock,
+		simulator<SimulatorData>& sim, server_state& state)
 {
 	message_type type;
 	fixed_width_stream<socket_type> in(connection);
+	connection_set_lock.lock();
+	uint64_t client_id = connections.get(connection).id;
+	connection_set_lock.unlock();
 	if (!read(type, in)) return;
 	switch (type) {
 		case message_type::ADD_AGENT:
-			receive_add_agent(in, connection, connections.get(connection), sim); return;
+			receive_add_agent(in, connection, state.agent_ids.get(client_id), sim); return;
 		case message_type::MOVE:
-			receive_move(in, connection, connections.get(connection), sim); return;
+			receive_move(in, connection, state.agent_ids.get(client_id), sim); return;
 		case message_type::TURN:
-			receive_turn(in, connection, connections.get(connection), sim); return;
+			receive_turn(in, connection, state.agent_ids.get(client_id), sim); return;
 		case message_type::DO_NOTHING:
-			receive_do_nothing(in, connection, connections.get(connection), sim); return;
+			receive_do_nothing(in, connection, state.agent_ids.get(client_id), sim); return;
 		case message_type::GET_MAP:
 			receive_get_map(in, connection, sim); return;
 		case message_type::SET_ACTIVE:
-			receive_set_active(in, connection, connections.get(connection), sim); return;
+			receive_set_active(in, connection, state.agent_ids.get(client_id), sim); return;
 		case message_type::IS_ACTIVE:
-			receive_is_active(in, connection, connections.get(connection), sim); return;
+			receive_is_active(in, connection, state.agent_ids.get(client_id), sim); return;
 
 		case message_type::ADD_AGENT_RESPONSE:
 		case message_type::MOVE_RESPONSE:
@@ -427,52 +503,99 @@ void server_process_message(socket_type& connection,
 }
 
 template<typename SimulatorData>
-inline bool process_new_connection(socket_type& connection,
-		connection_data& data, simulator<SimulatorData>& sim)
+inline bool process_new_connection(
+		socket_type& connection, client_info& new_client,
+		simulator<SimulatorData>& sim, server_state& state)
 {
-	/* send the simulator time and configuration */
-	memory_stream mem_stream = memory_stream(sizeof(sim.time));
-	fixed_width_stream<memory_stream> out(mem_stream);
-	const simulator_config& config = sim.get_config();
-	if (!write(sim.time, out)
-	 || !write(config, out)) {
-		fprintf(stderr, "process_new_connection ERROR: Failed to send simulator time and configuration.\n");
-		return false;
-	}
-
-	/* read the agent IDs owned by the new client */
-	unsigned int agent_count = 0;
+	/* read the client ID or `NEW_CLIENT_REQUEST` */
+	uint64_t client_id;
 	fixed_width_stream<socket_type> in(connection);
-	if (!read(agent_count, in)) {
+	if (!read(client_id, in)) {
 		fprintf(stderr, "process_new_connection ERROR: Failed to read agent_count.\n");
+		memory_stream mem_stream = memory_stream(sizeof(mpi_response));
+		fixed_width_stream<memory_stream> out(mem_stream);
+		write(mpi_response::SERVER_PARSE_MESSAGE_ERROR, out);
+		send_message(connection, mem_stream.buffer, mem_stream.position);
 		return false;
 	}
 
-	if (agent_count > 0) {
-		uint64_t* agent_ids = (uint64_t*) malloc(sizeof(uint64_t) * agent_count);
-		agent_state** agent_states = (agent_state**) malloc(sizeof(agent_state*) * agent_count);
-		if (agent_ids == NULL || agent_states == NULL) {
-			if (agent_ids != NULL) free(agent_ids);
-			fprintf(stderr, "process_new_connection ERROR: Out of memory.\n");
+	if (client_id == NEW_CLIENT_REQUEST) {
+		if (!state.agent_ids.check_size()) {
+			memory_stream mem_stream = memory_stream(sizeof(mpi_response));
+			fixed_width_stream<memory_stream> out(mem_stream);
+			write(mpi_response::SERVER_PARSE_MESSAGE_ERROR, out);
+			send_message(connection, mem_stream.buffer, mem_stream.position);
 			return false;
-		} else if (!read(agent_ids, in, agent_count)) {
-			fprintf(stderr, "process_new_connection ERROR: Failed to read agent_ids.\n");
-			free(agent_ids); free(agent_states); return false;
 		}
-		data.agent_ids.append(agent_ids, agent_count);
-		sim.get_agent_states(agent_states, agent_ids, agent_count);
 
-		/* send the requested agent states to the client */
-		for (unsigned int i = 0; i < agent_count; i++) {
-			std::unique_lock<std::mutex> lock(agent_states[i]->lock);
-			if (!write(*agent_states[i], out, config)) {
-				free(agent_ids); free(agent_states);
-				return false;
-			}
+		bool contains; unsigned int bucket;
+		new_client.id = state.agent_ids.table.size + 1;
+		array<uint64_t>& agent_ids = state.agent_ids.get(new_client.id, contains, bucket);
+#if !defined(NDEBUG)
+		if (contains)
+			fprintf(stderr, "process_new_connection WARNING: `new_client.id` already exists in `state.agent_ids`.\n");
+#endif
+		if (!array_init(agent_ids, 8)) {
+			memory_stream mem_stream = memory_stream(sizeof(mpi_response));
+			fixed_width_stream<memory_stream> out(mem_stream);
+			write(mpi_response::SERVER_PARSE_MESSAGE_ERROR, out);
+			send_message(connection, mem_stream.buffer, mem_stream.position);
+			return false;
 		}
-		free(agent_ids); free(agent_states);
+		state.agent_ids.table.keys[bucket] = new_client.id;
+		state.agent_ids.table.size++;
+
+		/* respond to the client */
+		memory_stream mem_stream = memory_stream(sizeof(mpi_response) + sizeof(uint64_t) + sizeof(sim.time) + sizeof(simulator_config));
+		fixed_width_stream<memory_stream> out(mem_stream);
+		const simulator_config& config = sim.get_config();
+		return write(mpi_response::SUCCESS, out)
+			&& write(sim.time, out) && write(config, out)
+			&& write(new_client.id, out)
+			&& send_message(connection, mem_stream.buffer, mem_stream.position);
+
+	} else {
+		/* first check if the requested client ID exists */
+		bool contains;
+		const array<uint64_t>& agent_ids = state.agent_ids.get(client_id, contains);
+		if (!contains) {
+			memory_stream mem_stream = memory_stream(sizeof(mpi_response));
+			fixed_width_stream<memory_stream> out(mem_stream);
+			write(mpi_response::INVALID_AGENT_ID, out);
+			send_message(connection, mem_stream.buffer, mem_stream.position);
+			return false;
+		}
+		new_client.id = client_id;
+
+		/* respond to the client */
+		memory_stream mem_stream = memory_stream(sizeof(mpi_response) + sizeof(unsigned int) + sizeof(sim.time) + sizeof(simulator_config));
+		fixed_width_stream<memory_stream> out(mem_stream);
+		const simulator_config& config = sim.get_config();
+		if (!write(mpi_response::SUCCESS, out)
+		 || !write(sim.time, out) || !write(config, out)
+		 || !write((unsigned int) agent_ids.length, out))
+		{
+			fprintf(stderr, "process_new_connection ERROR: Error sending simulation time and configuration.\n");
+			return false;
+		}
+
+		if (agent_ids.length > 0) {
+			agent_state** agent_states = (agent_state**) malloc(sizeof(agent_state*) * agent_ids.length);
+			sim.get_agent_states(agent_states, agent_ids.data, agent_ids.length);
+
+			/* send the requested agent states to the client */
+			for (unsigned int i = 0; i < agent_ids.length; i++) {
+				std::unique_lock<std::mutex> lock(agent_states[i]->lock);
+				if (!write(*agent_states[i], out, config)) {
+					free(agent_states);
+					return false;
+				}
+			}
+			free(agent_states);
+		}
+
+		return send_message(connection, mem_stream.buffer, mem_stream.position);
 	}
-	return send_message(connection, mem_stream.buffer, mem_stream.position);
 }
 
 template<typename Stream>
@@ -507,7 +630,7 @@ inline bool send_step_response(
 	std::unique_lock<std::mutex> lock(server.connection_set_lock);
 	bool success = true;
 	for (const auto& client_connection : server.client_connections) {
-		const array<uint64_t>& agent_ids = client_connection.value.agent_ids;
+		const array<uint64_t>& agent_ids = server.state.agent_ids.get(client_connection.value.id);
 		memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(unsigned int) +
 				(unsigned int) agent_ids.length * (sizeof(uint64_t) + sizeof(agent_state)));
 		fixed_width_stream<memory_stream> out(mem_stream);
@@ -548,25 +671,24 @@ inline bool send_step_response(
  * \returns `true` if successful; `false` otherwise.
  */
 template<typename SimulatorData>
-bool init_server(
-		async_server& new_server, simulator<SimulatorData>& sim, uint16_t server_port,
-		unsigned int connection_queue_capacity, unsigned int worker_count)
+bool init_server(async_server& new_server, simulator<SimulatorData>& sim,
+		uint16_t server_port, unsigned int connection_queue_capacity, unsigned int worker_count)
 {
 	std::condition_variable cv; std::mutex lock;
 	auto dispatch = [&]() {
 		run_server(new_server.server_socket, server_port,
-				connection_queue_capacity, worker_count, new_server.state, cv, lock,
+				connection_queue_capacity, worker_count, new_server.status, cv, lock,
 				new_server.client_connections, new_server.connection_set_lock,
-				server_process_message<SimulatorData>, process_new_connection<SimulatorData>, sim);
+				server_process_message<SimulatorData>, process_new_connection<SimulatorData>, sim, new_server.state);
 	};
-	new_server.state = server_state::STARTING;
+	new_server.status = server_status::STARTING;
 	new_server.server_thread = std::thread(dispatch);
 
 	std::unique_lock<std::mutex> lck(lock);
-	while (new_server.state == server_state::STARTING)
+	while (new_server.status == server_status::STARTING)
 		cv.wait(lck);
 	lck.unlock();
-	if (new_server.state == server_state::STOPPING && new_server.server_thread.joinable()) {
+	if (new_server.status == server_status::STOPPING && new_server.server_thread.joinable()) {
 		try {
 			new_server.server_thread.join();
 		} catch (...) { }
@@ -580,6 +702,8 @@ bool init_server(
  * thread**. That is, the function will not return unless the server shuts
  * down.
  *
+ * \param new_server The sync_server structure containing the state of the new
+ * 		server.
  * \param sim The simulator governed by the new server.
  * \param server_port The port to listen for new connections.
  * \param connection_queue_capacity The maximum number of simultaneous new
@@ -589,23 +713,23 @@ bool init_server(
  * \returns `true` if successful; `false` otherwise.
  */
 template<typename SimulatorData>
-inline bool init_server(simulator<SimulatorData>& sim, uint16_t server_port,
-		unsigned int connection_queue_capacity, unsigned int worker_count)
+inline bool init_server(sync_server& new_server, simulator<SimulatorData>& sim,
+		uint16_t server_port, unsigned int connection_queue_capacity, unsigned int worker_count)
 {
 	socket_type server_socket;
-	server_state dummy = server_state::STARTING;
-	std::condition_variable cv; std::mutex lock, connection_set_lock;
-	hash_map<socket_type, connection_data> connections(1024, alloc_socket_keys);
-	return run_server(server_socket, server_port, connection_queue_capacity,
-			worker_count, dummy, cv, lock, connections, connection_set_lock,
-			server_process_message<SimulatorData>, process_new_connection<SimulatorData>, sim);
+	server_status dummy = server_status::STARTING;
+	std::condition_variable cv; std::mutex lock;
+	return run_server(
+			server_socket, server_port, connection_queue_capacity, worker_count, dummy, cv, lock,
+			new_server.client_connections, new_server.connection_set_lock,
+			server_process_message<SimulatorData>, process_new_connection<SimulatorData>, sim, new_server.state);
 }
 
 /**
  * Shuts down the asynchronous server given by `server`.
  */
 void stop_server(async_server& server) {
-	server.state = server_state::STOPPING;
+	server.status = server_status::STOPPING;
 	close(server.server_socket);
 	if (server.server_thread.joinable()) {
 		try {
@@ -999,57 +1123,47 @@ void run_response_listener(ClientType& c) {
  * \param server_address A null-terminated string containing the server
  * 		address.
  * \param server_port A null-terminated string containing the server port.
- * \param agent_ids An array of agent IDs governed by this client, of length
- * 		`agent_count`.
- * \param agent_states An array of length `agent_count` to which this function
- * 		will write the states of the agents whose IDs are given by the parallel
- * 		array `agent_ids`.
- * \param agent_count The lengths of `agent_ids` and `agent_states`.
  * \returns The simulator time if successful; `UINT64_MAX` otherwise.
  */
 template<typename ClientData>
-uint64_t init_client(client<ClientData>& new_client,
+uint64_t connect_client(client<ClientData>& new_client,
 		const char* server_address, const char* server_port,
-		const uint64_t* agent_ids, agent_state* agent_states,
-		unsigned int agent_count)
+		uint64_t& client_id)
 {
 	uint64_t simulator_time;
 	auto process_connection = [&](socket_type& connection)
 	{
 		new_client.connection = connection;
 
-		/* send the list of agent IDs owned by this client */
-		memory_stream mem_stream = memory_stream(sizeof(agent_count) + sizeof(uint64_t) * agent_count);
+		/* send the client ID */
+		memory_stream mem_stream = memory_stream(sizeof(uint64_t));
 		fixed_width_stream<memory_stream> out(mem_stream);
-		if (!write(agent_count, out)
-		 || !write(agent_ids, out, agent_count)
+		if (!write(NEW_CLIENT_REQUEST, out)
 		 || !send_message(connection, mem_stream.buffer, mem_stream.position))
 		{
-			fprintf(stderr, "init_client ERROR: Error requesting agent states.\n");
-			stop_client(new_client);
-			return false;
+			fprintf(stderr, "connect_client ERROR: Error connecting new client.\n");
+			stop_client(new_client); return false;
+		}
+
+		/* read the simulator response */
+		mpi_response response;
+		fixed_width_stream<socket_type> in(connection);
+		if (!read(response, in)) {
+			fprintf(stderr, "connect_client ERROR: Error receiving response from server.\n");
+			stop_client(new_client); return false;
 		}
 
 		/* read the simulator time and configuration */
-		fixed_width_stream<socket_type> in(connection);
 		simulator_config& config = *((simulator_config*) alloca(sizeof(simulator_config)));
 		if (!read(simulator_time, in)
-		 || !read(config, in))
+		 || !read(config, in)
+		 || !read(client_id, in))
 		{
-			fprintf(stderr, "init_client ERROR: Error receiving simulator time and configuration.\n");
-			stop_client(new_client);
-			return false;
+			fprintf(stderr, "connect_client ERROR: Error receiving simulator time and configuration.\n");
+			stop_client(new_client); return false;
 		}
 		swap(new_client.config, config);
 		free(config); /* free the old configuration */
-
-		/* read the agent states for the requested agent IDs */
-		for (unsigned int i = 0; i < agent_count; i++) {
-			if (!read(agent_states[i], in, new_client.config)) {
-				for (unsigned int j = 0; j < i; j++) free(agent_states[j]);
-				return false;
-			}
-		}
 
 		auto dispatch = [&]() {
 			run_response_listener(new_client);
@@ -1059,6 +1173,105 @@ uint64_t init_client(client<ClientData>& new_client,
 	};
 
 	new_client.client_running = true;
+	if (!run_client(server_address, server_port, process_connection))
+		return UINT64_MAX;
+	else return simulator_time;
+}
+
+/**
+ * Attempts to connect the given client `existing_client` with ID given by
+ * `client_id` to the server at `server_address:server_port`. A separate thread
+ * will be dispatched to listen for responses from the server. `stop_client`
+ * should be used to disconnect from the server and stop the listener thread.
+ *
+ * \param existing_client The client with which to attempt the connection.
+ * \param client_id The ID of the client.
+ * \param server_address A null-terminated string containing the server
+ * 		address.
+ * \param server_port A null-terminated string containing the server port.
+ * \param agent_ids An array of agent IDs governed by this client, of length
+ * 		`agent_count`.
+ * \param agent_states An array of length `agent_count` to which this function
+ * 		will write the states of the agents whose IDs are given by the parallel
+ * 		array `agent_ids`.
+ * \param agent_count The lengths of `agent_ids` and `agent_states`.
+ * \returns The simulator time if successful; `UINT64_MAX` otherwise.
+ */
+template<typename ClientData>
+uint64_t reconnect_client(
+		client<ClientData>& existing_client, uint64_t client_id,
+		const char* server_address, const char* server_port,
+		uint64_t*& agent_ids, agent_state*& agent_states,
+		unsigned int& agent_count)
+{
+	uint64_t simulator_time;
+	auto process_connection = [&](socket_type& connection)
+	{
+		existing_client.connection = connection;
+
+		/* send the client ID */
+		memory_stream mem_stream = memory_stream(sizeof(uint64_t));
+		fixed_width_stream<memory_stream> out(mem_stream);
+		if (!write(client_id, out)
+		 || !send_message(connection, mem_stream.buffer, mem_stream.position))
+		{
+			fprintf(stderr, "reconnect_client ERROR: Error requesting agent states.\n");
+			stop_client(existing_client); return false;
+		}
+
+		/* read the simulator response */
+		mpi_response response;
+		fixed_width_stream<socket_type> in(connection);
+		if (!read(response, in)) {
+			fprintf(stderr, "reconnect_client ERROR: Error receiving response from server.\n");
+			stop_client(existing_client); return false;
+		}
+
+		/* read the simulator time and configuration */
+		simulator_config& config = *((simulator_config*) alloca(sizeof(simulator_config)));
+		if (!read(simulator_time, in)
+		 || !read(config, in)
+		 || !read(agent_count, in))
+		{
+			fprintf(stderr, "reconnect_client ERROR: Error receiving simulator time and configuration.\n");
+			stop_client(existing_client); return false;
+		}
+		swap(existing_client.config, config);
+		free(config); /* free the old configuration */
+
+		agent_ids = NULL;
+		agent_ids = (uint64_t*) malloc(max((size_t) 1, sizeof(uint64_t) * agent_count));
+		agent_states = (agent_state*) malloc(max((size_t) 1, sizeof(agent_state) * agent_count));
+		if (agent_ids == NULL || agent_states == NULL) {
+			if (agent_ids != NULL) free(agent_ids);
+			fprintf(stderr, "reconnect_client ERROR: Out of memory.\n");
+			stop_client(existing_client); return false;
+		}
+
+		/* read the agent IDs associated with this client */
+		if (!read(agent_ids, in, agent_count)) {
+			fprintf(stderr, "reconnect_client ERROR: Error reading agent IDs.\n");
+			free(agent_ids); free(agent_states);
+			stop_client(existing_client); return false;
+		}
+
+		/* read the agent states for the requested agent IDs */
+		for (unsigned int i = 0; i < agent_count; i++) {
+			if (!read(agent_states[i], in, existing_client.config)) {
+				for (unsigned int j = 0; j < i; j++) free(agent_states[j]);
+				free(agent_ids); free(agent_states);
+				stop_client(existing_client); return false;
+			}
+		}
+
+		auto dispatch = [&]() {
+			run_response_listener(existing_client);
+		};
+		existing_client.response_listener = std::thread(dispatch);
+		return true;
+	};
+
+	existing_client.client_running = true;
 	if (!run_client(server_address, server_port, process_connection))
 		return UINT64_MAX;
 	else return simulator_time;
@@ -1083,17 +1296,49 @@ uint64_t init_client(client<ClientData>& new_client,
  * \returns The simulator time if successful; `UINT64_MAX` otherwise.
  */
 template<typename ClientData>
-inline uint64_t init_client(client<ClientData>& new_client,
+uint64_t connect_client(client<ClientData>& new_client,
 		const char* server_address, uint16_t server_port,
-		const uint64_t* agent_ids, agent_state* agent_states,
-		unsigned int agent_count)
+		uint64_t& client_id)
 {
 	constexpr static unsigned int BUFFER_SIZE = 8;
 	char port_str[BUFFER_SIZE];
 	if (snprintf(port_str, BUFFER_SIZE, "%u", server_port) > (int) BUFFER_SIZE - 1)
 		return false;
 
-	return init_client(new_client, server_address, port_str, agent_ids, agent_states, agent_count);
+	return connect_client(new_client, server_address, port_str, client_id);
+}
+
+/**
+ * Attempts to connect the given client `existing_client` with ID given by
+ * `client_id` to the server at `server_address:server_port`. A separate thread
+ * will be dispatched to listen for responses from the server. `stop_client`
+ * should be used to disconnect from the server and stop the listener thread.
+ *
+ * \param new_client The client with which to attempt the connection.
+ * \param server_address A null-terminated string containing the server
+ * 		address.
+ * \param server_port The server port.
+ * \param agent_ids An array of agent IDs governed by this client, of length
+ * 		`agent_count`.
+ * \param agent_states An array of length `agent_count` to which this function
+ * 		will write the states of the agents whose IDs are given by the parallel
+ * 		array `agent_ids`.
+ * \param agent_count The lengths of `agent_ids` and `agent_states`.
+ * \returns The simulator time if successful; `UINT64_MAX` otherwise.
+ */
+template<typename ClientData>
+uint64_t reconnect_client(
+		client<ClientData>& existing_client, uint64_t client_id,
+		const char* server_address, uint16_t server_port,
+		uint64_t*& agent_ids, agent_state*& agent_states,
+		unsigned int& agent_count)
+{
+	constexpr static unsigned int BUFFER_SIZE = 8;
+	char port_str[BUFFER_SIZE];
+	if (snprintf(port_str, BUFFER_SIZE, "%u", server_port) > (int) BUFFER_SIZE - 1)
+		return false;
+
+	return reconnect_client(existing_client, client_id, server_address, port_str, agent_ids, agent_states, agent_count);
 }
 
 /**

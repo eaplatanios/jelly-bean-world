@@ -28,7 +28,7 @@ FILE* out = stderr;
 struct test_server {
 	std::thread server_thread;
 	socket_type server_socket;
-	server_state state;
+	server_status status;
 	hash_map<socket_type, empty_data> client_connections;
 	std::mutex connection_set_lock;
 
@@ -36,7 +36,8 @@ struct test_server {
 };
 
 void process_test_server_message(socket_type& server,
-		const hash_map<socket_type, empty_data>& connections)
+		const hash_map<socket_type, empty_data>& connections,
+		std::mutex& connection_set_lock)
 {
 	bool is_string;
 	lock.lock();
@@ -71,18 +72,18 @@ bool init_server(test_server& new_server, uint16_t server_port,
 	std::condition_variable cv; std::mutex lock;
 	auto dispatch = [&]() {
 		run_server(new_server.server_socket, server_port,
-			connection_queue_capacity, worker_count, new_server.state, cv, lock,
+			connection_queue_capacity, worker_count, new_server.status, cv, lock,
 			new_server.client_connections, new_server.connection_set_lock,
 			process_test_server_message, new_connection_callback);
 	};
-	new_server.state = server_state::STARTING;
+	new_server.status = server_status::STARTING;
 	new_server.server_thread = std::thread(dispatch);
 
 	std::unique_lock<std::mutex> lck(lock);
-	while (new_server.state == server_state::STARTING)
+	while (new_server.status == server_status::STARTING)
 		cv.wait(lck);
 	lck.unlock();
-	if (new_server.state == server_state::STOPPING && new_server.server_thread.joinable()) {
+	if (new_server.status == server_status::STOPPING && new_server.server_thread.joinable()) {
 		try {
 			new_server.server_thread.join();
 		} catch (...) { }
@@ -92,7 +93,7 @@ bool init_server(test_server& new_server, uint16_t server_port,
 }
 
 void stop_server(test_server& server) {
-	server.state = server_state::STOPPING;
+	server.status = server_status::STOPPING;
 	close(server.server_socket);
 	if (server.server_thread.joinable()) {
 		try {

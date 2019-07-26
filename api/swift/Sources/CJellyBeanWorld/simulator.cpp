@@ -27,6 +27,7 @@ using namespace jbw;
 
 constexpr AgentSimulationState EMPTY_AGENT_SIM_STATE = { 0 };
 constexpr SimulatorInfo EMPTY_SIM_INFO = { 0 };
+constexpr SimulationNewClientInfo EMPTY_NEW_CLIENT_INFO = { 0 };
 constexpr SimulationClientInfo EMPTY_CLIENT_INFO = { 0 };
 constexpr SimulationMap EMPTY_SIM_MAP = { 0 };
 
@@ -563,7 +564,7 @@ bool init(SimulationMap& map,
  */
 struct simulator_data
 {
-  async_server* server;
+  async_server server;
   OnStepCallback callback;
   const void* callback_data;
 
@@ -571,13 +572,13 @@ struct simulator_data
   array<uint64_t> agent_ids;
 
   simulator_data(
-      async_server* server,
       OnStepCallback callback,
       const void* callback_data) :
-    server(server), callback(callback), callback_data(callback_data), agent_ids(16) { }
+    callback(callback), callback_data(callback_data), agent_ids(16) { }
 
   static inline void free(simulator_data& data) {
     core::free(data.agent_ids);
+    core::free(data.server);
   }
 };
 
@@ -595,7 +596,10 @@ inline bool init(simulator_data& data, const simulator_data& src)
   if (!array_init(data.agent_ids, src.agent_ids.capacity))
     return false;
   data.agent_ids.append(src.agent_ids.data, src.agent_ids.length);
-  data.server = src.server;
+  if (!init(data.server)) { /* async_server is not copyable */
+    free(data.agent_ids);
+    return false;
+  }
   data.callback = src.callback;
   data.callback_data = src.callback_data;
   return true;
@@ -652,13 +656,13 @@ inline bool init(client_data& data) {
  * \param   agents  The underlying array of all agents in `sim`.
  * \param   time    The new simulation time of `sim`.
  */
-void on_step(const simulator<simulator_data>* sim,
+void on_step(simulator<simulator_data>* sim,
     const array<agent_state*>& agents, uint64_t time)
 {
-  const simulator_data& data = sim->get_data();
-  if (data.server != nullptr) {
+  simulator_data& data = sim->get_data();
+  if (data.server.status != server_status::STOPPING) {
     /* this simulator is a server, so send a step response to every client */
-    if (!send_step_response(*data.server, agents, sim->get_config()))
+    if (!send_step_response(data.server, agents, sim->get_config()))
       fprintf(stderr, "on_step ERROR: send_step_response failed.\n");
   }
 
@@ -905,7 +909,7 @@ void on_step(client<client_data>& c,
   for (size_t i = 0; i < agent_ids.length; i++) {
     if (!init(agents[i], agent_states[i], c.config, agent_ids[i])) {
       fprintf(stderr, "on_step ERROR: Insufficient memory for agent.\n");
-      for (size_t j = 0; j < i; j++) free(agents[i]);
+      for (size_t j = 0; j < i; j++) free(agents[j]);
       free(agents); return;
     }
   }
@@ -949,7 +953,7 @@ void* simulatorCreate(const SimulatorConfig* config, OnStepCallback onStepCallba
   simulator_config sim_config;
   if (!init(sim_config, *config)) return nullptr;
 
-  simulator_data data(nullptr, onStepCallback, nullptr);
+  simulator_data data(onStepCallback, nullptr);
 
   simulator<simulator_data>* sim =
       (simulator<simulator_data>*) malloc(sizeof(simulator<simulator_data>));
@@ -976,7 +980,8 @@ bool simulatorSave(void* simulatorHandle, const char* filePath) {
   fixed_width_stream<FILE*> out(file);
   bool result = write(*sim, out)
     && write(data.agent_ids.length, out)
-    && write(data.agent_ids.data, out, data.agent_ids.length);
+    && write(data.agent_ids.data, out, data.agent_ids.length)
+    && write(data.server.state, out);
   fclose(file);
 
   return result;
@@ -991,7 +996,7 @@ SimulatorInfo simulatorLoad(const char* filePath, OnStepCallback onStepCallback)
     return EMPTY_SIM_INFO;
   }
 
-  simulator_data data(nullptr, onStepCallback, nullptr);
+  simulator_data data(onStepCallback, nullptr);
 
   FILE* file = open_file(filePath, "rb");
   if (file == nullptr) {
@@ -1007,7 +1012,8 @@ SimulatorInfo simulatorLoad(const char* filePath, OnStepCallback onStepCallback)
   simulator_data& sim_data = sim->get_data();
   if (!read(agent_id_count, in)
    || !sim_data.agent_ids.ensure_capacity(agent_id_count)
-   || !read(sim_data.agent_ids.data, in, agent_id_count))
+   || !read(sim_data.agent_ids.data, in, agent_id_count)
+   || !read(sim_data.server.state, in))
   {
     /* TODO: communicate "Failed to load agent IDs." error */
     free(*sim); free(sim); fclose(file); return EMPTY_SIM_INFO;
@@ -1332,68 +1338,88 @@ void* simulationServerStart(
   unsigned int numWorkers)
 {
   simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
-  async_server* server = (async_server*) malloc(sizeof(async_server));
-  if (server == nullptr || !init(*server)) {
-    /* TODO: communicate out of memory errors to swift */
-    if (server != nullptr) free(server);
-    return nullptr;
-  } else if (!init_server(*server, *sim_handle, (uint16_t) port, connectionQueueCapacity, numWorkers)) {
+  async_server& server = sim_handle->get_data().server;
+  if (!init_server(server, *sim_handle, (uint16_t) port, connectionQueueCapacity, numWorkers)) {
     /* TODO: communicate "Unable to initialize MPI server." error to swift */
-    free(*server); free(server); return nullptr;
+    return nullptr;
   }
-  sim_handle->get_data().server = server;
-  return (void*) server;
+  return (void*) &server;
 }
 
 
 void simulationServerStop(void* serverHandle) {
   async_server* server = (async_server*) serverHandle;
   stop_server(*server);
-  free(*server); free(server);
 }
 
 
-SimulationClientInfo simulationClientStart(
+SimulationNewClientInfo simulationClientConnect(
   const char* serverAddress,
   unsigned int serverPort,
   OnStepCallback onStepCallback,
-  LostConnectionCallback lostConnectionCallback,
-  void* callbackData,
-  const uint64_t* agents,
-  unsigned int numAgents)
+  LostConnectionCallback lostConnectionCallback)
 {
-  agent_state* agent_states = (agent_state*) malloc(sizeof(agent_state) * numAgents);
-  if (agent_states == nullptr) {
-    /* TODO: communicate out of memory errors to swift */
-    return EMPTY_CLIENT_INFO;
-  }
-
   client<client_data>* new_client = (client<client_data>*) malloc(sizeof(client<client_data>));
   if (new_client == nullptr || !init(*new_client)) {
     /* TODO: communicate out of memory errors to swift */
     if (new_client != nullptr) free(new_client);
-    free(agent_states); return EMPTY_CLIENT_INFO;
+    return EMPTY_NEW_CLIENT_INFO;
   }
 
-  uint64_t simulator_time = init_client(*new_client, serverAddress,
-      (uint16_t) serverPort, agents, agent_states, numAgents);
+  uint64_t client_id;
+  uint64_t simulator_time = connect_client(*new_client, serverAddress, (uint16_t) serverPort, client_id);
+  if (simulator_time == UINT64_MAX) {
+    /* TODO: communicate "Unable to initialize MPI client." error to swift */
+    free(*new_client); free(new_client); return EMPTY_NEW_CLIENT_INFO;
+  }
+
+  new_client->data.step_callback = onStepCallback;
+  new_client->data.lost_connection_callback = lostConnectionCallback;
+  new_client->data.callback_data = nullptr;
+
+  SimulationNewClientInfo client_info;
+  client_info.handle = (void*) new_client;
+  client_info.simulationTime = simulator_time;
+  client_info.clientId = client_id;
+  return client_info;
+}
+
+
+SimulationClientInfo simulationClientReconnect(
+  const char* serverAddress,
+  unsigned int serverPort,
+  OnStepCallback onStepCallback,
+  LostConnectionCallback lostConnectionCallback,
+  uint64_t clientId)
+{
+  client<client_data>* new_client = (client<client_data>*) malloc(sizeof(client<client_data>));
+  if (new_client == nullptr || !init(*new_client)) {
+    /* TODO: communicate out of memory errors to swift */
+    if (new_client != nullptr) free(new_client);
+    return EMPTY_CLIENT_INFO;
+  }
+
+  uint64_t* agent_ids; agent_state* agent_states;
+  unsigned int agent_count;
+  uint64_t simulator_time = reconnect_client(*new_client, clientId,
+      serverAddress, (uint16_t) serverPort, agent_ids, agent_states, agent_count);
   if (simulator_time == UINT64_MAX) {
     /* TODO: communicate "Unable to initialize MPI client." error to swift */
     free(*new_client); free(new_client); return EMPTY_CLIENT_INFO;
   }
 
-  AgentSimulationState* agentStates = (AgentSimulationState*) malloc(sizeof(AgentSimulationState) * numAgents);
+  AgentSimulationState* agentStates = (AgentSimulationState*) malloc(sizeof(AgentSimulationState) * agent_count);
   if (agentStates == nullptr) {
     /* TODO: how to communicate out of memory errors to swift? */
-    for (unsigned int i = 0; i < numAgents; i++) free(agent_states[i]);
-    free(agent_states); stop_client(*new_client);
+    for (unsigned int i = 0; i < agent_count; i++) free(agent_states[i]);
+    free(agent_states); free(agent_ids); stop_client(*new_client);
     free(*new_client); free(new_client); return EMPTY_CLIENT_INFO;
   }
-  for (size_t i = 0; i < numAgents; i++) {
-    if (!init(agentStates[i], agent_states[i], new_client->config, agents[i])) {
-      for (size_t j = 0; j < i; j++) free(agentStates[i]);
-      for (unsigned int j = i; j < numAgents; j++) free(agent_states[j]);
-      free(agentStates); free(agent_states); stop_client(*new_client);
+  for (size_t i = 0; i < agent_count; i++) {
+    if (!init(agentStates[i], agent_states[i], new_client->config, agent_ids[i])) {
+      for (size_t j = 0; j < i; j++) free(agentStates[j]);
+      for (unsigned int j = i; j < agent_count; j++) free(agent_states[j]);
+      free(agentStates); free(agent_states); free(agent_ids); stop_client(*new_client);
       free(*new_client); free(new_client); return EMPTY_CLIENT_INFO;
     }
     free(agent_states[i]);
@@ -1402,12 +1428,14 @@ SimulationClientInfo simulationClientStart(
 
   new_client->data.step_callback = onStepCallback;
   new_client->data.lost_connection_callback = lostConnectionCallback;
-  new_client->data.callback_data = callbackData;
+  new_client->data.callback_data = nullptr;
 
   SimulationClientInfo client_info;
   client_info.handle = (void*) new_client;
   client_info.simulationTime = simulator_time;
+  client_info.agentIds = agent_ids;
   client_info.agentStates = agentStates;
+  client_info.numAgents = agent_count;
   return client_info;
 }
 

@@ -185,6 +185,7 @@ class Simulator(object):
     self._client_handle = None
     self._save_filepath = save_filepath
     self._save_frequency = save_frequency
+    self._client_id = 0
     self.agents = dict()
     if on_step_callback == None:
       self._on_step = lambda *args: None
@@ -231,15 +232,17 @@ class Simulator(object):
       if load_filepath != None:
         # load agents from file
         self._load_agents(load_filepath, load_time)
-      # connect to a remote server
-      agent_ids = list(self.agents.keys())
-      agent_values = list(self.agents.values())
-      (self._time, self._client_handle, agent_states) = simulator_c.start_client(
-          server_address, port, self._step_callback, on_lost_connection_callback, agent_ids)
-      for i in range(len(agent_ids)):
-        (position, direction, scent, vision, items) = agent_states[i]
-        agent = agent_values[i]
-        (agent._position, agent._direction, agent._scent, agent._vision, agent._items) = (position, Direction(direction), scent, vision, items)
+      if self._client_id == 0:
+        (self._time, self._client_handle, self._client_id) = simulator_c.connect_client(
+            server_address, port, self._step_callback, on_lost_connection_callback)
+      else:
+        # connect to a remote server
+        (self._time, self._client_handle, agent_states) = simulator_c.reconnect_client(
+            server_address, port, self._step_callback, on_lost_connection_callback, self._client_id)
+        for i in range(len(agent_ids)):
+          (position, direction, scent, vision, items, id) = agent_states[i]
+          agent = agent_values[i]
+          (agent._position, agent._direction, agent._scent, agent._vision, agent._items, agent._id) = (position, Direction(direction), scent, vision, items, id)
     else:
       # load local server or simulator from file
       if load_filepath == None:
@@ -394,6 +397,7 @@ class Simulator(object):
 
   def _load_agents(self, load_filepath, load_time):
     with open(load_filepath + str(load_time) + '.agent_info', 'rb') as fin:
+      self._client_id = int(fin.readline().decode('utf-8'))
       for line_bytes in fin:
         line = line_bytes.decode('utf-8')
         tokens = line.split()
@@ -405,6 +409,7 @@ class Simulator(object):
 
   def _save_agents(self):
     with open(self._save_filepath + str(self._time) + '.agent_info', 'wb') as fout:
+      fout.write((str(self._client_id) + '\n').encode('utf-8'))
       for agent_id, agent in self.agents.items():
         agent.save(self._save_filepath + str(self._time) + '.agent' + str(agent_id))
         agent_type = type(agent)

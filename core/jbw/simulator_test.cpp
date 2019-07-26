@@ -48,7 +48,7 @@ enum class movement_pattern {
 };
 
 constexpr unsigned int agent_count = 1;
-constexpr unsigned int max_time = 10000000;
+constexpr unsigned int max_time = 1000;
 constexpr movement_conflict_policy collision_policy = movement_conflict_policy::FIRST_COME_FIRST_SERVED;
 constexpr movement_pattern move_pattern = movement_pattern::TURNING;
 unsigned int sim_time = 0;
@@ -62,7 +62,7 @@ FILE* out = stderr;
 async_server server;
 
 //#define MULTITHREADED
-//#define USE_MPI
+#define USE_MPI
 //#define TEST_SERIALIZATION
 //#define TEST_SERVER_CONNECTION_LOSS
 //#define TEST_CLIENT_CONNECTION_LOSS
@@ -485,9 +485,10 @@ bool test_mpi(const simulator_config& config)
 
 	/* below is client-side code */
 	client<client_data> clients[agent_count];
+	uint64_t client_ids[agent_count];
 	for (unsigned int i = 0; i < agent_count; i++) {
 		clients[i].data.index = i;
-		uint64_t simulator_time = init_client(clients[i], "localhost", "54353", NULL, NULL, 0);
+		uint64_t simulator_time = connect_client(clients[i], "localhost", "54353", client_ids[i]);
 		if (simulator_time == UINT64_MAX) {
 			fprintf(out, "ERROR: Unable to initialize client %u.\n", i);
 			cleanup_mpi(clients, i); return false;
@@ -525,7 +526,7 @@ bool test_mpi(const simulator_config& config)
 
 	timer stopwatch;
 	unsigned long long elapsed = 0;
-	while (server.state != server_state::STOPPING && sim_time < max_time)
+	while (server.status != server_status::STOPPING && sim_time < max_time)
 	{
 		if (sim_time > max_time / 2) {
 #if defined(TEST_SERVER_CONNECTION_LOSS)

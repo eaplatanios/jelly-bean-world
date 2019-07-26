@@ -35,6 +35,7 @@ def on_lost_connection():
 
 # connect to server
 sim = jbw.Simulator(server_address="localhost", on_step_callback=on_step, on_lost_connection_callback=on_lost_connection)
+print("client ID: " + str(sim._client_id))
 
 # add agents to simulator
 agents = []

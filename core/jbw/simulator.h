@@ -1750,7 +1750,7 @@ private:
         update_agent_scent_and_vision();
 
         /* Invoke the step callback function for each agent. */
-        on_step((const simulator<SimulatorData>*) this, (const array<agent_state*>&) agents, time);
+        on_step((simulator<SimulatorData>*) this, (const array<agent_state*>&) agents, time);
     }
 
     inline void update_agent_scent_and_vision() {

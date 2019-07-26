@@ -161,10 +161,18 @@ typedef struct SimulationMap {
   unsigned int numPatches;
 } SimulationMap;
 
+typedef struct SimulationNewClientInfo {
+  void* handle;
+  uint64_t simulationTime;
+  uint64_t clientId;
+} SimulationClientInfo;
+
 typedef struct SimulationClientInfo {
   void* handle;
   uint64_t simulationTime;
+  uint64_t* agentIds;
   AgentSimulationState* agentStates;
+  unsigned int numAgents;
 } SimulationClientInfo;
 
 void* simulatorCreate(
@@ -234,14 +242,18 @@ void* simulationServerStart(
 void simulationServerStop(
   void* serverHandle);
 
-SimulationClientInfo simulationClientStart(
+SimulationNewClientInfo simulationClientConnect(
+  const char* serverAddress,
+  unsigned int serverPort,
+  OnStepCallback onStepCallback,
+  LostConnectionCallback lostConnectionCallback);
+
+SimulationClientInfo simulationClientReconnect(
   const char* serverAddress,
   unsigned int serverPort,
   OnStepCallback onStepCallback,
   LostConnectionCallback lostConnectionCallback,
-  const void* callbackData,
-  const uint64_t* agents,
-  unsigned int numAgents);
+  uint64_t clientId);
 
 void simulationClientStop(
   void* clientHandle);

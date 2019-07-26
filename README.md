@@ -271,7 +271,8 @@ To setup an MPI server for a simulator `sim`, the `init_server` function in
 [core/jbw/mpi.h](jbw/mpi.h) may be used:
 ```c++
   /* NOTE: this blocks during the lifetime of the server */
-  if (!init_server(sim, 54353, 256, 8)) { /* process error */ }
+  sync_server new_server;
+  if (!init_server(new_server, sim, 54353, 256, 8)) { /* process error */ }
 ```
 
 To set up an asynchronous MPI server (where `init_server` will not block), the
@@ -285,7 +286,8 @@ To connect to an existing server, for example at `localhost:54353`, we use the
 `client` class defined in [core/jbw/mpi.h](core/jbw/mpi.h):
 ```c++
   client<empty_data> new_client;
-  if (!init_client(new_client, "localhost", 54353, NULL, NULL, 0)) { /* process error */ }
+  uint64_t client_id;
+  if (!connect_client(new_client, "localhost", 54353, client_id)) { /* process error */ }
 ```
 The commands may be sent to the server using the functions `send_add_agent`,
 `send_move`, `send_turn`, etc. When the client receives responses from the

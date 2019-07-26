@@ -493,7 +493,7 @@ inline void network_error(const char* message) {
 	perror(message);
 }
 
-enum class server_state {
+enum class server_status {
 	STOPPING = 0,
 	STARTING = 1,
 	STARTED = 2
@@ -501,14 +501,14 @@ enum class server_state {
 
 template<typename ConnectionData, typename ProcessMessageCallback, typename... CallbackArgs>
 void run_worker(socket_listener& listener, hash_map<socket_type, ConnectionData>& connections,
-		std::mutex& connection_set_lock, server_state& state,
+		std::mutex& connection_set_lock, server_status& status,
 		ProcessMessageCallback process_message, CallbackArgs&&... callback_args)
 {
-	while (state != server_state::STOPPING) {
+	while (status != server_status::STOPPING) {
 		socket_type connection;
-		if (!listener.listen(connection, [&]() { return state != server_state::STOPPING; }))
+		if (!listener.listen(connection, [&]() { return status != server_status::STOPPING; }))
 			continue;
-		if (state == server_state::STOPPING) return;
+		if (status == server_status::STOPPING) return;
 
 		uint8_t next;
 		if (recv(connection.handle, (char*)&next, sizeof(next), MSG_PEEK) <= 0) {
@@ -522,7 +522,7 @@ void run_worker(socket_listener& listener, hash_map<socket_type, ConnectionData>
 			shutdown(connection.handle, 2);
 		} else {
 			/* there is a data waiting to be read, so read it */
-			process_message(connection, connections, std::forward<CallbackArgs>(callback_args)...);
+			process_message(connection, connections, connection_set_lock, std::forward<CallbackArgs>(callback_args)...);
 
 			/* continue listening on this socket */
 			if (!listener.update_socket(connection)) {
@@ -540,23 +540,23 @@ void run_worker(socket_listener& listener, hash_map<socket_type, ConnectionData>
 template<typename ConnectionData, typename ProcessMessageCallback>
 inline std::thread start_worker(socket_listener& listener,
 		hash_map<socket_type, ConnectionData>& connections,
-		std::mutex& connection_set_lock, server_state& state,
+		std::mutex& connection_set_lock, server_status& status,
 		ProcessMessageCallback process_message)
 {
 	return std::thread(run_worker<ConnectionData, ProcessMessageCallback>,
 			std::ref(listener), std::ref(connections), std::ref(connection_set_lock),
-			std::ref(state), process_message);
+			std::ref(status), process_message);
 }
 
 template<typename ConnectionData, typename ProcessMessageCallback, typename... CallbackArgs>
 inline std::thread start_worker(socket_listener& listener,
 		hash_map<socket_type, ConnectionData>& connections,
-		std::mutex& connection_set_lock, server_state& state,
+		std::mutex& connection_set_lock, server_status& status,
 		ProcessMessageCallback process_message, CallbackArgs&&... callback_args)
 {
 	return std::thread(run_worker<ConnectionData, ProcessMessageCallback, CallbackArgs...>,
 			std::ref(listener), std::ref(connections), std::ref(connection_set_lock),
-			std::ref(state), process_message, std::ref(std::forward<CallbackArgs>(callback_args)...));
+			std::ref(status), process_message, std::ref(std::forward<CallbackArgs>(callback_args))...);
 }
 
 template<typename ConnectionData, typename NewConnectionCallback, typename... CallbackArgs>
@@ -568,7 +568,7 @@ inline void accept_connection(socket_type& connection,
 {
 	connection_set_lock.lock();
 	bool contains; unsigned int index;
-	connections.check_size();
+	connections.check_size(alloc_socket_keys);
 	ConnectionData& data = connections.get(connection, contains, index);
 	connections.table.keys[index] = connection;
 	connections.table.size++;
@@ -578,7 +578,7 @@ inline void accept_connection(socket_type& connection,
 }
 
 template<bool Success>
-inline void cleanup_server(server_state& state,
+inline void cleanup_server(server_status& status,
 		std::condition_variable& init_cv, std::mutex& init_lock)
 {
 #if defined(_WIN32)
@@ -586,25 +586,25 @@ inline void cleanup_server(server_state& state,
 #endif
 	if (!Success) {
 		std::unique_lock<std::mutex> lock(init_lock);
-		state = server_state::STOPPING;
+		status = server_status::STOPPING;
 		init_cv.notify_all();
 	}
 }
 
 template<bool Success>
-inline void cleanup_server(server_state& state,
+inline void cleanup_server(server_status& status,
 		std::condition_variable& init_cv,
 		std::mutex& init_lock, socket_type& sock)
 {
 	shutdown(sock.handle, 2);
-	cleanup_server<Success>(state, init_cv, init_lock);
+	cleanup_server<Success>(status, init_cv, init_lock);
 }
 
 template<typename ConnectionData = empty_data, typename ProcessMessageCallback,
 	typename NewConnectionCallback, typename... CallbackArgs>
 bool run_server(socket_type& sock, uint16_t server_port,
 		unsigned int connection_queue_capacity, unsigned int worker_count,
-		server_state& state, std::condition_variable& init_cv, std::mutex& init_lock,
+		server_status& status, std::condition_variable& init_cv, std::mutex& init_lock,
 		hash_map<socket_type, ConnectionData>& connections, std::mutex& connection_set_lock,
 		ProcessMessageCallback process_message, NewConnectionCallback new_connection_callback,
 		CallbackArgs&&... callback_args)
@@ -614,7 +614,7 @@ bool run_server(socket_type& sock, uint16_t server_port,
 	if (WSAStartup(MAKEWORD(2,2), &wsa_state) != NO_ERROR) {
 		fprintf(stderr, "run_server ERROR: Unable to initialize WinSock.\n");
 		std::unique_lock<std::mutex> lock(init_lock);
-		state = server_state::STOPPING; init_cv.notify_all(); return false;
+		status = server_status::STOPPING; init_cv.notify_all(); return false;
 	}
 	sock = WSASocket(AF_INET6, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
 #else
@@ -623,14 +623,14 @@ bool run_server(socket_type& sock, uint16_t server_port,
 
 	if (!sock.is_valid()) {
 		network_error("run_server ERROR: Unable to open socket");
-		cleanup_server<false>(state, init_cv, init_lock); return false;
+		cleanup_server<false>(status, init_cv, init_lock); return false;
 	}
 
 	int yes = 1;
 	if (setsockopt(sock.handle, SOL_SOCKET, SO_REUSEADDR, (const char*) &yes, sizeof(yes)) != 0
 	 || setsockopt(sock.handle, IPPROTO_TCP, TCP_NODELAY, (const char*) &yes, sizeof(yes)) != 0) {
 		network_error("run_server ERROR: Unable to set socket options");
-		cleanup_server<false>(state, init_cv, init_lock, sock); return false;
+		cleanup_server<false>(status, init_cv, init_lock, sock); return false;
 	}
 
 	sockaddr_in6 server_addr;
@@ -640,39 +640,39 @@ bool run_server(socket_type& sock, uint16_t server_port,
 	server_addr.sin6_addr = in6addr_any;
 	if (bind(sock.handle, (sockaddr*) &server_addr, sizeof(server_addr)) != 0) {
 		network_error("run_server ERROR: Unable to bind to socket");
-		cleanup_server<false>(state, init_cv, init_lock, sock); return false;
+		cleanup_server<false>(status, init_cv, init_lock, sock); return false;
 	}
 
 	if (listen(sock.handle, connection_queue_capacity) != 0) {
 		network_error("run_server ERROR: Unable to listen to socket");
-		cleanup_server<false>(state, init_cv, init_lock, sock); return false;
+		cleanup_server<false>(status, init_cv, init_lock, sock); return false;
 	}
 
 	socket_listener listener;
 	if (!init(listener)) {
 		network_error("run_server ERROR: Failed to initialize socket listener");
-		cleanup_server<false>(state, init_cv, init_lock, sock); return false;
+		cleanup_server<false>(status, init_cv, init_lock, sock); return false;
 	}
 
 	if (!listener.add_server_socket(sock)) {
 		core::free(listener, worker_count);
-		cleanup_server<false>(state, init_cv, init_lock, sock);
+		cleanup_server<false>(status, init_cv, init_lock, sock);
 		return false;
 	}
 
 	/* make the thread pool */
 	std::thread* workers = new std::thread[worker_count];
 	for (unsigned int i = 0; i < worker_count; i++)
-		workers[i] = start_worker(listener, connections, connection_set_lock, state, process_message, std::forward<CallbackArgs>(callback_args)...);
+		workers[i] = start_worker(listener, connections, connection_set_lock, status, process_message, std::forward<CallbackArgs>(callback_args)...);
 
 	/* notify that the server has successfully started */
 	std::unique_lock<std::mutex> lock(init_lock);
-	state = server_state::STARTED;
+	status = server_status::STARTED;
 	init_cv.notify_all();
 	lock.unlock();
 
 	/* the main loop */
-	while (state != server_state::STOPPING) {
+	while (status != server_status::STOPPING) {
 		listener.accept(sock, accept_connection<ConnectionData, NewConnectionCallback, CallbackArgs...>,
 				connections, connection_set_lock, new_connection_callback, std::forward<CallbackArgs>(callback_args)...);
 	}
@@ -686,7 +686,7 @@ bool run_server(socket_type& sock, uint16_t server_port,
 	}
 	for (auto connection : connections)
 		shutdown(connection.key.handle, 2);
-	cleanup_server<true>(state, init_cv, init_lock, sock);
+	cleanup_server<true>(status, init_cv, init_lock, sock);
 	delete[] workers;
 	return true;
 }

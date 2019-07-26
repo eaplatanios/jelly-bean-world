@@ -49,18 +49,17 @@ static PyObject* mpi_error;
  */
 struct py_simulator_data
 {
-    async_server* server;
+    async_server server;
     PyObject* callback;
 
     /* agents owned by the simulator */
     array<uint64_t> agent_ids;
 
-    py_simulator_data(
-            async_server* server,
-            PyObject* callback) :
-        server(server), callback(callback), agent_ids(16)
+    py_simulator_data(PyObject* callback) :
+        callback(callback), agent_ids(16)
     {
         Py_INCREF(callback);
+        server.status = server_status::STOPPING;
     }
 
     ~py_simulator_data() { free_helper(); }
@@ -68,6 +67,7 @@ struct py_simulator_data
     static inline void free(py_simulator_data& data) {
         data.free_helper();
         core::free(data.agent_ids);
+        core::free(data.server);
     }
 
 private:
@@ -91,9 +91,14 @@ inline bool init(py_simulator_data& data, const py_simulator_data& src)
         return false;
     data.agent_ids.append(src.agent_ids.data, src.agent_ids.length);
 
-    data.server = src.server;
+    /* async_server is not copyable */
+    if (!init(data.server)) {
+        free(data.agent_ids);
+        return false;
+    }
     data.callback = src.callback;
     Py_INCREF(data.callback);
+    data.server.status = server_status::STOPPING;
     return true;
 }
 
@@ -270,31 +275,6 @@ static PyObject* build_py_agent(
 }
 
 /**
- * Constructs a Python tuple containing the position, current scent perception,
- * current visual perception, and the collected item counts of the given
- * `agent`.
- *
- * \param   agent    The agent whose state to copy into the Python objects.
- * \param   config   The configuration of the simulator containing `agent`.
- * \returns A pointer to the constructed Python tuple, if successful; `NULL`
- *          otherwise.
- */
-static PyObject* build_py_agent(
-        const agent_state& agent,
-        const simulator_config& config)
-{
-    PyObject* py_position; PyObject* py_direction;
-    PyObject* py_scent; PyObject* py_vision; PyObject* py_items;
-    if (!build_py_agent(agent, config, py_position, py_direction, py_scent, py_vision, py_items))
-        return NULL;
-    PyObject* py_agent = Py_BuildValue("(OOOOO)", py_position, py_direction, py_scent, py_vision, py_items);
-    Py_DECREF(py_position); Py_DECREF(py_direction);
-    Py_DECREF(py_scent); Py_DECREF(py_vision);
-    Py_DECREF(py_items);
-    return py_agent;
-}
-
-/**
  * The callback function invoked by the simulator when time is advanced. This
  * function is only called if the simulator is run locally or as a server. In
  * server mode, the simulator sends a step response message to all connected
@@ -305,13 +285,13 @@ static PyObject* build_py_agent(
  * \param   agents  The underlying array of all agents in `sim`.
  * \param   time    The new simulation time of `sim`.
  */
-void on_step(const simulator<py_simulator_data>* sim,
+void on_step(simulator<py_simulator_data>* sim,
         const array<agent_state*>& agents, uint64_t time)
 {
-    const py_simulator_data& data = sim->get_data();
-    if (data.server != NULL) {
+    py_simulator_data& data = sim->get_data();
+    if (data.server.status != server_status::STOPPING) {
         /* this simulator is a server, so send a step response to every client */
-        if (!send_step_response(*data.server, agents, sim->get_config()))
+        if (!send_step_response(data.server, agents, sim->get_config()))
             fprintf(stderr, "on_step ERROR: send_step_response failed.\n");
     }
 
@@ -799,7 +779,7 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
     config.agent_color = PyArg_ParseFloatList(py_agent_color).key;
     config.collision_policy = (movement_conflict_policy) collision_policy;
 
-    py_simulator_data data(NULL, py_callback);
+    py_simulator_data data(py_callback);
 
     simulator<py_simulator_data>* sim =
             (simulator<py_simulator_data>*) malloc(sizeof(simulator<py_simulator_data>));
@@ -845,7 +825,8 @@ static PyObject* simulator_save(PyObject *self, PyObject *args)
     fixed_width_stream<FILE*> out(file);
     bool result = write(*sim_handle, out)
                && write(data.agent_ids.length, out)
-               && write(data.agent_ids.data, out, data.agent_ids.length);
+               && write(data.agent_ids.data, out, data.agent_ids.length)
+               && write(data.server.state, out);
     fclose(file);
 
     PyObject* py_result = (result ? Py_True : Py_False);
@@ -888,7 +869,7 @@ static PyObject* simulator_load(PyObject *self, PyObject *args)
         PyErr_NoMemory(); return NULL;
     }
 
-    py_simulator_data data(NULL, py_callback);
+    py_simulator_data data(py_callback);
 
     FILE* file = open_file(load_filepath, "rb");
     if (file == NULL) {
@@ -901,15 +882,18 @@ static PyObject* simulator_load(PyObject *self, PyObject *args)
         PyErr_SetString(PyExc_RuntimeError, "Failed to load simulator.");
         free(sim); fclose(file); return NULL;
     }
+    server_state& state = *((server_state*) alloca(sizeof(server_state)));
     py_simulator_data& sim_data = sim->get_data();
     if (!read(agent_id_count, in)
-            || !sim_data.agent_ids.ensure_capacity(agent_id_count)
-            || !read(sim_data.agent_ids.data, in, agent_id_count))
+     || !sim_data.agent_ids.ensure_capacity(agent_id_count)
+     || !read(sim_data.agent_ids.data, in, agent_id_count)
+     || !read(state, in))
     {
-        PyErr_SetString(PyExc_RuntimeError, "Failed to load agent IDs.");
+        PyErr_SetString(PyExc_RuntimeError, "Failed to load agent IDs and server state.");
         free(*sim); free(sim); fclose(file); return NULL;
     }
     sim_data.agent_ids.length = agent_id_count;
+    swap(state, sim_data.server.state);
     fclose(file);
 
     /* parse the list of agent IDs from Python */
@@ -933,7 +917,7 @@ static PyObject* simulator_load(PyObject *self, PyObject *args)
 
     import_errors();
     PyObject* py_sim = PyLong_FromVoidPtr(sim);
-    PyObject* to_return = Py_BuildValue("(LOO)", sim->time, py_sim, py_states);
+    PyObject* to_return = Py_BuildValue("(KOO)", sim->time, py_sim, py_states);
     Py_DECREF(py_sim); Py_DECREF(py_states);
     return to_return;
 }
@@ -983,19 +967,12 @@ static PyObject* simulator_start_server(PyObject *self, PyObject *args)
 
     simulator<py_simulator_data>* sim_handle =
             (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
-    async_server* server = (async_server*) malloc(sizeof(async_server));
-    if (server == NULL) {
-        PyErr_NoMemory();
-        return NULL;
-    } else if (!init(*server)) {
-        PyErr_NoMemory();
-        free(server); return NULL;
-    } else if (!init_server(*server, *sim_handle, (uint16_t) port, connection_queue_capacity, num_workers)) {
+    async_server& server = sim_handle->get_data().server;
+    if (!init_server(server, *sim_handle, (uint16_t) port, connection_queue_capacity, num_workers)) {
         PyErr_SetString(PyExc_RuntimeError, "Unable to initialize MPI server.");
-        free(*server); free(server); return NULL;
+        return NULL;
     }
-    sim_handle->get_data().server = server;
-    return PyLong_FromVoidPtr(server);
+    return PyLong_FromVoidPtr(&server);
 }
 
 /**
@@ -1015,7 +992,6 @@ static PyObject* simulator_stop_server(PyObject *self, PyObject *args)
     }
     async_server* server = (async_server*) PyLong_AsVoidPtr(py_server_handle);
     stop_server(*server);
-    free(*server); free(server);
     Py_INCREF(Py_None);
     return Py_None;
 }
@@ -1031,24 +1007,18 @@ static PyObject* simulator_stop_server(PyObject *self, PyObject *args)
  *                    simulator advances time.
  *                  - (function) The Python function to invoke if the client
  *                    loses its connection to the server.
- *                  - (list of ints) The IDs of the agents governed by this
- *                    client (this should be an empty list if the client
- *                    hasn't added agents yet).
  * \returns A Python tuple containing:
  *          - The simulation time.
  *          - A handle to the client.
- *          - A list of tuples containing the states of the agents governed by
- *            this simulator (not including agents governed by other clients).
- *            See `build_py_agent` for details on the contents of each tuple.
+ *          - The ID assigned to the client by the server.
  */
-static PyObject* simulator_start_client(PyObject *self, PyObject *args)
+static PyObject* simulator_connect_client(PyObject *self, PyObject *args)
 {
     char* server_address;
     unsigned int port;
     PyObject* py_step_callback;
     PyObject* py_lost_connection_callback;
-    PyObject* py_agent_ids;
-    if (!PyArg_ParseTuple(args, "sIOOO", &server_address, &port, &py_step_callback, &py_lost_connection_callback, &py_agent_ids)) {
+    if (!PyArg_ParseTuple(args, "sIOO", &server_address, &port, &py_step_callback, &py_lost_connection_callback)) {
         fprintf(stderr, "Invalid argument types in the call to 'simulator_c.start_client'.\n");
         return NULL;
     }
@@ -1058,31 +1028,85 @@ static PyObject* simulator_start_client(PyObject *self, PyObject *args)
         return NULL;
     }
 
-    /* parse the list of agent IDs from Python */
-    Py_ssize_t agent_count = PyList_Size(py_agent_ids);
-    uint64_t* agent_ids = (uint64_t*) malloc(sizeof(uint64_t) * agent_count);
-    agent_state* agent_states = (agent_state*) malloc(sizeof(agent_state) * agent_count);
-    if (agent_ids == NULL || agent_states == NULL) {
-        if (agent_ids != NULL) free(agent_ids);
-        PyErr_NoMemory(); return NULL;
+    client<py_client_data>* new_client =
+            (client<py_client_data>*) malloc(sizeof(client<py_client_data>));
+    if (new_client == NULL) {
+        PyErr_NoMemory();
+        return NULL;
+    } else if (!init(*new_client)) {
+        PyErr_NoMemory();
+        free(new_client); return NULL;
     }
-    for (Py_ssize_t i = 0; i < agent_count; i++)
-        agent_ids[i] = PyLong_AsUnsignedLongLong(PyList_GetItem(py_agent_ids, i));
+
+    uint64_t client_id;
+    uint64_t simulator_time = connect_client(*new_client, server_address, (uint16_t) port, client_id);
+    if (simulator_time == UINT64_MAX) {
+        PyErr_SetString(PyExc_RuntimeError, "Unable to initialize MPI client.");
+        free(*new_client); free(new_client); return NULL;
+    }
+
+    new_client->data.step_callback = py_step_callback;
+    new_client->data.lost_connection_callback = py_lost_connection_callback;
+    Py_INCREF(py_step_callback);
+    Py_INCREF(py_lost_connection_callback);
+    import_errors();
+    PyObject* py_new_client = PyLong_FromVoidPtr(new_client);
+    PyObject* to_return = Py_BuildValue("(KOK)", simulator_time, py_new_client, client_id);
+    Py_DECREF(py_new_client);
+    return to_return;
+}
+
+/**
+ * Reconnects a client to the specified simulator server.
+ *
+ * \param   self    Pointer to the Python object calling this method.
+ * \param   args    Arguments:
+ *                  - (string) The server address.
+ *                  - (int) The server port.
+ *                  - (function) The Python function to invoke whenever the
+ *                    simulator advances time.
+ *                  - (function) The Python function to invoke if the client
+ *                    loses its connection to the server.
+ *                  - (int) The ID of the client assigned by the server.
+ * \returns A Python tuple containing:
+ *          - The simulation time.
+ *          - A handle to the client.
+ *          - A list of tuples containing the states of the agents governed by
+ *            this simulator (not including agents governed by other clients).
+ *            See `build_py_agent` for details on the contents of each tuple.
+ */
+static PyObject* simulator_reconnect_client(PyObject *self, PyObject *args)
+{
+    char* server_address;
+    unsigned int port;
+    PyObject* py_step_callback;
+    PyObject* py_lost_connection_callback;
+    unsigned long long client_id;
+    if (!PyArg_ParseTuple(args, "sIOOK", &server_address, &port, &py_step_callback, &py_lost_connection_callback, &client_id)) {
+        fprintf(stderr, "Invalid argument types in the call to 'simulator_c.start_client'.\n");
+        return NULL;
+    }
+
+    if (!PyCallable_Check(py_step_callback) || !PyCallable_Check(py_lost_connection_callback)) {
+        PyErr_SetString(PyExc_TypeError, "Callbacks must be callable.\n");
+        return NULL;
+    }
 
     client<py_client_data>* new_client =
             (client<py_client_data>*) malloc(sizeof(client<py_client_data>));
     if (new_client == NULL) {
         PyErr_NoMemory();
-        free(agent_ids); free(agent_states);
         return NULL;
     } else if (!init(*new_client)) {
         PyErr_NoMemory();
-        free(agent_ids); free(agent_states);
         free(new_client); return NULL;
     }
 
-    uint64_t simulator_time = init_client(*new_client, server_address,
-            (uint16_t) port, agent_ids, agent_states, (unsigned int) agent_count);
+    uint64_t* agent_ids;
+    agent_state* agent_states;
+    unsigned int agent_count;
+    uint64_t simulator_time = reconnect_client(*new_client, (uint64_t) client_id,
+            server_address, (uint16_t) port, agent_ids, agent_states, agent_count);
     if (simulator_time == UINT64_MAX) {
         PyErr_SetString(PyExc_RuntimeError, "Unable to initialize MPI client.");
         free(*new_client); free(new_client); return NULL;
@@ -1091,7 +1115,7 @@ static PyObject* simulator_start_client(PyObject *self, PyObject *args)
     PyObject* py_states = PyList_New(agent_count);
     if (py_states == NULL) return NULL;
     for (Py_ssize_t i = 0; i < agent_count; i++) {
-        PyList_SetItem(py_states, i, build_py_agent(agent_states[i], new_client->config));
+        PyList_SetItem(py_states, i, build_py_agent(agent_states[i], new_client->config, agent_ids[i]));
         free(agent_states[i]);
     }
     free(agent_states); free(agent_ids);
@@ -1102,7 +1126,7 @@ static PyObject* simulator_start_client(PyObject *self, PyObject *args)
     Py_INCREF(py_lost_connection_callback);
     import_errors();
     PyObject* py_new_client = PyLong_FromVoidPtr(new_client);
-    PyObject* to_return = Py_BuildValue("(LOO)", simulator_time, py_new_client, py_states);
+    PyObject* to_return = Py_BuildValue("(KOO)", simulator_time, py_new_client, py_states);
     Py_DECREF(py_new_client); Py_DECREF(py_states);
     return to_return;
 }
@@ -1654,7 +1678,8 @@ static PyMethodDef SimulatorMethods[] = {
     {"delete",  jbw::simulator_delete, METH_VARARGS, "Deletes an existing simulator."},
     {"start_server",  jbw::simulator_start_server, METH_VARARGS, "Starts the simulator server."},
     {"stop_server",  jbw::simulator_stop_server, METH_VARARGS, "Stops the simulator server."},
-    {"start_client",  jbw::simulator_start_client, METH_VARARGS, "Starts the simulator client."},
+    {"connect_client",  jbw::simulator_connect_client, METH_VARARGS, "Connects a new simulator client to a server."},
+    {"reconnect_client",  jbw::simulator_reconnect_client, METH_VARARGS, "Reconnects an existing client to a server."},
     {"stop_client",  jbw::simulator_stop_client, METH_VARARGS, "Stops the simulator client."},
     {"add_agent",  jbw::simulator_add_agent, METH_VARARGS, "Adds an agent to the simulator and returns its ID."},
     {"move",  jbw::simulator_move, METH_VARARGS, "Attempts to move the agent in the simulation environment."},
