@@ -165,7 +165,7 @@ typedef struct SimulationNewClientInfo {
   void* handle;
   uint64_t simulationTime;
   uint64_t clientId;
-} SimulationClientInfo;
+} SimulationNewClientInfo;
 
 typedef struct SimulationClientInfo {
   void* handle;
