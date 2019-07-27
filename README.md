@@ -195,7 +195,7 @@ inline void set_interaction_args(
     item_types[first_item_type].interaction_fns[second_item_type].args[counter++] = *i;
 }
 
-void on_step(const simulator<empty_data>* sim, const array<agent_state*>& agents, uint64_t time) { }
+void on_step(simulator<empty_data>* sim, const array<agent_state*>& agents, uint64_t time) { }
 
 int main(int argc, const char** argv) {
   /* construct the simulator configuration */
