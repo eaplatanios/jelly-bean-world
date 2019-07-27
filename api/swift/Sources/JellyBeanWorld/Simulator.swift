@@ -65,11 +65,27 @@ public final class Simulator {
   /// Simulator configuration.
   public let configuration: Configuration
 
+  /// Simulation server configuration. This is `nil` when this simulator instance is not a
+  /// simulation server.
+  public let serverConfiguration: ServerConfiguration?
+
+  /// Simulation client configuration. This is `nil` when this simulator instance is not a
+  /// simulation client.
+  public let clientConfiguration: ClientConfiguration?
+
   /// Number of simulation steps that have been executed so far.
   public private(set) var time: UInt64 = 0
 
   /// Pointer to the underlying C API simulator instance.
   @usableFromInline internal var handle: UnsafeMutableRawPointer?
+
+  /// Pointer to the underlying C API simulation server instance. This is `nil` when this simulator
+  /// instance is not a simulation server.
+  @usableFromInline internal var serverHandle: UnsafeMutableRawPointer?
+
+  /// Pointer to the underlying C API simulation client instance. This is `nil` when this simulator
+  /// instance is not a simulation client.
+  @usableFromInline internal var clientHandle: UnsafeMutableRawPointer?
 
   /// States of the agents managed by this simulator (keyed by the agents' unique identifiers).
   @usableFromInline internal var agentStates: [UInt64: AgentState] = [:]
@@ -89,12 +105,26 @@ public final class Simulator {
   ///
   /// - Parameters:
   ///   - configuration: Configuration for the new simulator.
-  public init(using configuration: Configuration) {
+  ///   - serverConfiguration: Server configuration. If `nil` the created simulator will not act
+  ///     as a server, but rather as isolated simulator instance.
+  public init(
+    using configuration: Configuration,
+    serverConfiguration: ServerConfiguration? = nil
+  ) {
     self.configuration = configuration
+    self.serverConfiguration = serverConfiguration
+    self.clientConfiguration = nil
     var cConfig = configuration.toC()
     defer { cConfig.deallocate() }
     self.handle = simulatorCreate(&cConfig.configuration, nativeOnStepCallback)
     simulatorSetStepCallbackData(handle, Unmanaged.passUnretained(self).toOpaque())
+    if let config = serverConfiguration {
+      self.serverHandle = simulationServerStart(
+        handle,
+        config.port,
+        config.connectionQueueCapacity,
+        config.workerCount)
+    }
   }
 
   /// Loads a simulator from the provided file.
@@ -102,19 +132,27 @@ public final class Simulator {
   /// - Parameters:
   ///   - file: File in which the simulator is saved.
   ///   - agents: Agents that this simulator manages.
+  ///   - serverConfiguration: Server configuration. If `nil` the created simulator will not act
+  ///     as a server, but rather as isolated simulator instance.
   /// - Precondition: The number of agents provided must match the number of agents the simulator
   ///   managed before its state was saved.
-  public init(fromFile file: URL, agents: [Agent]) {
+  public init(
+    fromFile file: URL,
+    agents: [Agent],
+    serverConfiguration: ServerConfiguration? = nil
+  ) {
     let cSimulatorInfo = simulatorLoad(file.absoluteString, nativeOnStepCallback)
     defer { simulatorDeleteSimulatorInfo(cSimulatorInfo) }
     self.handle = cSimulatorInfo.handle
     self.configuration = Configuration(fromC: cSimulatorInfo.config)
+    self.serverConfiguration = serverConfiguration
+    self.clientConfiguration = nil
     self.time = cSimulatorInfo.time
     self.agentStates = [UInt64: AgentState](
       uniqueKeysWithValues: UnsafeBufferPointer(
         start: cSimulatorInfo.agents!,
         count: Int(cSimulatorInfo.numAgents)
-      ).map { ($0.id, AgentState(fromC: $0, for: self)) })
+      ).map { ($0.id, AgentState(fromC: $0, using: configuration)) })
     precondition(
       agents.count == agentStates.count,
       """
@@ -123,9 +161,41 @@ public final class Simulator {
       """)
     self.agents = [UInt64: Agent](uniqueKeysWithValues: zip(agentStates.keys, agents))
     simulatorSetStepCallbackData(handle, Unmanaged.passUnretained(self).toOpaque())
+    if let config = serverConfiguration {
+      self.serverHandle = simulationServerStart(
+        handle,
+        config.port,
+        config.connectionQueueCapacity,
+        config.workerCount)
+    }
   }
 
+  // /// Creates a new simulation client.
+  // ///
+  // /// - Parameters:
+  // ///   - configuration: Configuration for the new simulation client.
+  // public init(
+  //   using configuration: Configuration,
+  //   clientConfiguration: ClientConfiguration,
+  //   agents: [Agent]
+  // ) {
+  //   self.configuration = configuration
+  //   self.serverConfiguration = nil
+  //   self.clientConfiguration = clientConfiguration
+  //   let clientInformation = simulationClientStart(
+  //     configuration.serverAddress,
+  //     configuration.serverPort,
+  //     nativeOnStepCallback,
+  //     nativeLostConnectionCallback)
+  //   defer { simulatorDeleteSimulationClientInfo(clientInformation, ) }
+  //   self.handle = clientInformation.handle
+  //   self.time = clientInformation.simulationTime
+  //   simulationClientSetStepCallbackData(handle, Unmanaged.passUnretained(self).toOpaque())
+  // }
+
   deinit {
+    if let h = serverHandle { simulationServerStop(h) }
+    if let h = clientHandle { simulationClientStop(h) }
     if let h = handle { simulatorDelete(h) }
   }
 
@@ -138,7 +208,7 @@ public final class Simulator {
   public func add(agent: Agent) {
     let state = simulatorAddAgent(handle, nil)
     agents[state.id] = agent
-    agentStates[state.id] = AgentState(fromC: state, for: self)
+    agentStates[state.id] = AgentState(fromC: state, using: configuration)
     simulatorDeleteAgentSimulationState(state)
   }
 
@@ -151,7 +221,7 @@ public final class Simulator {
       let id = agents.first!.key
       agents[id]!.act(using: agentStates[id]!).invoke(
         simulatorHandle: handle,
-        clientHandle: nil,
+        clientHandle: clientHandle,
         agentID: id)
     } else {
       if dispatchQueue == nil {
@@ -166,7 +236,7 @@ public final class Simulator {
         dispatchQueue!.async {
           self.agents[id]!.act(using: state).invoke(
             simulatorHandle: self.handle,
-            clientHandle: nil,
+            clientHandle: self.clientHandle,
             agentID: id)
         }
       }
@@ -195,9 +265,23 @@ public final class Simulator {
     bottomLeft: Position = Position(x: Int64.min, y: Int64.min),
     topRight: Position = Position(x: Int64.max, y: Int64.max)
   ) -> SimulationMap {
-    let cSimulationMap = simulatorMap(handle, nil, bottomLeft.toC(), topRight.toC())
+    let cSimulationMap = simulatorMap(handle, clientHandle, bottomLeft.toC(), topRight.toC())
     defer { simulatorDeleteSimulationMap(cSimulationMap) }
-    return SimulationMap(fromC: cSimulationMap, for: self)
+    return SimulationMap(fromC: cSimulationMap, using: configuration)
+  }
+
+  /// Stops the simulation server, if one was started when creating this simulator.
+  @inlinable
+  public func stopServer() {
+    if let h = serverHandle { simulationServerStop(h) }
+    serverHandle = nil
+  }
+
+  /// Stops the simulation client, if one was started when creating this simulator.
+  @inlinable
+  public func stopClient() {
+    if let h = clientHandle { simulationClientStop(h) }
+    clientHandle = nil
   }
 
   /// Callback function that is invoked by the C API side simulator whenever a step is completed.
@@ -205,16 +289,26 @@ public final class Simulator {
     UnsafeRawPointer?,
     UnsafePointer<AgentSimulationState>?,
     UInt32
-  ) -> Void = { (simulatorPointer, states, numStates) in
+  ) -> Void = { (simulatorPointer, states, stateCount) in
     let unmanagedSimulator = Unmanaged<Simulator>.fromOpaque(simulatorPointer!)
     let simulator = unmanagedSimulator.takeUnretainedValue()
     simulator.time += 1
-    let buffer = UnsafeBufferPointer(start: states!, count: Int(numStates))
+    let buffer = UnsafeBufferPointer(start: states!, count: Int(stateCount))
     for state in buffer {
-      simulator.agentStates[state.id] = AgentState(fromC: state, for: simulator)
+      simulator.agentStates[state.id] = AgentState(fromC: state, using: simulator.configuration)
     }
     simulator.dispatchSemaphore?.signal()
   }
+
+  /// Callback function that is invoked by the C API side simulator client whenever the connection
+  /// to the simulation server is lost.
+  @usableFromInline internal let nativeLostConnectionCallback: @convention(c) (
+    UnsafeRawPointer?
+  ) -> Void = { (simulatorPointer) in
+    let unmanaged = Unmanaged<Simulator>.fromOpaque(simulatorPointer!)
+    let simulator = unmanaged.takeUnretainedValue()
+    simulator.clientConfiguration!.lostConnectionCallback(simulator)
+   }
 }
 
 extension Simulator {
@@ -309,46 +403,9 @@ extension Simulator {
   }
 }
 
-/// Jelly Bean World (JBW) simulation server.
-public final class SimulationServer {
-  /// Simulation server configuration. This is `nil` if this is not a simulation server.
-  public let configuration: Configuration
-
-  /// Simulator instance used by this server.
-  public let simulator: Simulator
-
-  /// Pointer to the underlying C API simulation server instance.
-  @usableFromInline internal var handle: UnsafeMutableRawPointer?
-
-  /// Creates a new simulation server.
-  ///
-  /// - Parameters:
-  ///   - configuration: Simulation server configuration.
-  ///   - simulator: Simulator instance used by the simulation server.
-  public init(using configuration: Configuration, simulator: Simulator) {
-    self.configuration = configuration
-    self.simulator = simulator
-    self.handle = simulationServerStart(
-      simulator.handle,
-      configuration.port,
-      configuration.connectionQueueCapacity,
-      configuration.workerCount)
-  }
-
-  deinit {
-    if let h = handle { simulationServerStop(h) }
-  }
-
-  /// Stops this simulations server.
-  @inlinable
-  public func stop() {
-    if let h = handle { simulationServerStop(h) }
-  }
-}
-
-extension SimulationServer {
+extension Simulator {
   /// Simulation server configuration.
-  public struct Configuration {
+  public struct ServerConfiguration {
     /// Port in which the simulation server will be listening.
     public let port: UInt32
 
@@ -363,6 +420,32 @@ extension SimulationServer {
       self.port = port
       self.connectionQueueCapacity = connectionQueueCapacity
       self.workerCount = workerCount
+    }
+  }
+}
+
+extension Simulator {
+  /// Simulation client configuration.
+  public struct ClientConfiguration {
+    /// Address in which the simulation server is listening.
+    public let serverAddress: String
+
+    /// Port in which the simulation server is listening.
+    public let serverPort: UInt32
+
+    /// Callback function that is invoked whenever the connection to the server is lost.
+    public let lostConnectionCallback: (Simulator) -> Void
+
+    public init(
+      serverAddress: String,
+      serverPort: UInt32,
+      lostConnectionCallback: @escaping (Simulator) -> Void = { _ in
+        fatalError("Lost connection to the Jelly Bean World simulation server.")
+      }
+    ) {
+      self.serverAddress = serverAddress
+      self.serverPort = serverPort
+      self.lostConnectionCallback = lostConnectionCallback
     }
   }
 }
@@ -607,9 +690,12 @@ public struct SimulationMap {
   /// Creates a new simulation map on the Swift API side, corresponding to an exising simulation
   /// map on the C API side.
   @inlinable
-  internal init(fromC value: CJellyBeanWorld.SimulationMap, for simulator: Simulator) {
+  internal init(
+    fromC value: CJellyBeanWorld.SimulationMap,
+    using configuration: Simulator.Configuration
+  ) {
     let cPatches = UnsafeBufferPointer(start: value.patches!, count: Int(value.numPatches))
-    self.patches = cPatches.map { Patch(fromC: $0, for: simulator) }
+    self.patches = cPatches.map { Patch(fromC: $0, using: configuration) }
   }
 }
 
@@ -661,10 +747,13 @@ extension SimulationMap {
     /// Creates a new simulation map patch on the Swift API side, corresponding to an exising
     /// simulation map patch on the C side.
     @inlinable
-    internal init(fromC value: CJellyBeanWorld.SimulationMapPatch, for simulator: Simulator) {
-      let n = Int(simulator.configuration.patchSize)
-      let s = Int(simulator.configuration.scentDimensionality)
-      let c = Int(simulator.configuration.colorDimensionality)
+    internal init(
+      fromC value: CJellyBeanWorld.SimulationMapPatch,
+      using configuration: Simulator.Configuration
+    ) {
+      let n = Int(configuration.patchSize)
+      let s = Int(configuration.scentDimensionality)
+      let c = Int(configuration.colorDimensionality)
       let scentBuffer = UnsafeBufferPointer(start: value.scent, count: n * n * s)
       let scent = ShapedArray(shape: [n, n, s], scalars: Array(scentBuffer))
       let visionBuffer = UnsafeBufferPointer(start: value.vision, count: n * n * c)
@@ -699,14 +788,6 @@ extension SimulationMap {
       self.itemType = itemType
       self.position = position
     }
-
-    /// Creates a new item information object on the Swift API side, corresponding to an exising
-    /// item information object on the C API side.
-    @inlinable
-    internal init(fromC value: CJellyBeanWorld.ItemInfo) {
-      self.itemType = Int(value.type)
-      self.position = Position(fromC: value.position)
-    }
   }
 
   /// Information about an agent located in the simulation map.
@@ -722,14 +803,6 @@ extension SimulationMap {
     public init(position: Position, direction: Direction) {
       self.position = position
       self.direction = direction
-    }
-
-    /// Creates a new agent information object on the Swift API side, corresponding to an exising
-    /// agent information object on the C API side.
-    @inlinable
-    internal init(fromC value: CJellyBeanWorld.AgentInfo) {
-      self.position = Position(fromC: value.position)
-      self.direction = Direction(fromC: value.direction)
     }
   }
 }

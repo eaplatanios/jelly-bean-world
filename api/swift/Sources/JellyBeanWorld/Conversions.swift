@@ -170,29 +170,29 @@ internal extension AgentState {
   /// Creates a new agent state on the Swift API side, corresponding to an exising agent state on
   /// the C API side.
   @inlinable
-  init(fromC value: AgentSimulationState, for simulator: Simulator) {
+  init(fromC value: AgentSimulationState, using configuration: Simulator.Configuration) {
     self.position = Position(fromC: value.position)
     self.direction = Direction(fromC: value.direction)
 
     // Construct the scent vector.
-    let scentShape = [Int(simulator.configuration.scentDimensionality)]
+    let scentShape = [Int(configuration.scentDimensionality)]
     let scentBuffer = UnsafeBufferPointer(start: value.scent!, count: scentShape[0])
     self.scent = ShapedArray(shape: scentShape, scalars: [Float](scentBuffer))
 
     // Construct the visual field.
     let visionShape = [
-      2 * Int(simulator.configuration.visionRange) + 1,
-      2 * Int(simulator.configuration.visionRange) + 1,
-      Int(simulator.configuration.colorDimensionality)]
+      2 * Int(configuration.visionRange) + 1,
+      2 * Int(configuration.visionRange) + 1,
+      Int(configuration.colorDimensionality)]
     let visionSize = Int(
-      (2 * simulator.configuration.visionRange + 1) *
-      (2 * simulator.configuration.visionRange + 1) *
-      simulator.configuration.colorDimensionality)
+      (2 * configuration.visionRange + 1) *
+      (2 * configuration.visionRange + 1) *
+      configuration.colorDimensionality)
     let visionBuffer = UnsafeBufferPointer(start: value.vision!, count: visionSize)
     self.vision = ShapedArray(shape: visionShape, scalars: [Float](visionBuffer))
 
     // Construcct the collected items dictionary.
-    let simulatorItems = simulator.configuration.items
+    let simulatorItems = configuration.items
     self.items = [Item: Int](uniqueKeysWithValues: zip(
       simulatorItems,
       UnsafeBufferPointer(
@@ -346,5 +346,25 @@ internal extension InteractionFunction {
         args: cArgs,
         numArgs: UInt32(arguments.count)),
       deallocate: { () in cArgs.deallocate() })
+  }
+}
+
+internal extension SimulationMap.ItemInformation {
+  /// Creates a new item information object on the Swift API side, corresponding to an exising
+  /// item information object on the C API side.
+  @inlinable
+  init(fromC value: CJellyBeanWorld.ItemInfo) {
+    self.itemType = Int(value.type)
+    self.position = Position(fromC: value.position)
+  }
+}
+
+internal extension SimulationMap.AgentInformation {
+  /// Creates a new agent information object on the Swift API side, corresponding to an exising
+  /// agent information object on the C API side.
+  @inlinable
+  init(fromC value: CJellyBeanWorld.AgentInfo) {
+    self.position = Position(fromC: value.position)
+    self.direction = Direction(fromC: value.direction)
   }
 }
