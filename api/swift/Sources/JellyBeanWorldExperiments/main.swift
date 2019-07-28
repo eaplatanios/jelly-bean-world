@@ -137,7 +137,8 @@ print("Starting simulation.")
 let painter = MapVisualizer(
   for: simulator, 
   bottomLeft: Position(x: -70, y: -70), 
-  topRight: Position(x: 70, y: 70))
+  topRight: Position(x: 70, y: 70),
+  agentPerspective: false)
 var startTime = Date().timeIntervalSince1970
 var elapsed = Float(0.0)
 var simulationStartTime = simulator.time
