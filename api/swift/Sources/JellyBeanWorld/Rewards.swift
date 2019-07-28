@@ -19,6 +19,12 @@ public struct AgentTransition {
 
   /// State of the agent after the simulation  step was performed.
   public let currentState: AgentState
+
+  @inlinable
+  public init(previousState: AgentState, currentState: AgentState) {
+    self.previousState = previousState
+    self.currentState = currentState
+  }
 }
 
 /// Reward function that scores agent transitions.
@@ -35,7 +41,7 @@ public struct Reward {
   /// - Parameter transition: Agent transition for which to compute a reward.
   /// - Returns: Reward value for the provided transition.
   @inlinable
-  public func reward(for transition: AgentTransition) -> Float {
+  public func callAsFunction(for transition: AgentTransition) -> Float {
     scoringFunction(transition)
   }
 }
@@ -43,7 +49,7 @@ public struct Reward {
 extension Reward {
   public init(summing rewards: [Reward]) {
     self.init(using: { transition in rewards.map {
-      $0.reward(for: transition)
+      $0(for: transition)
     }.reduce(0, +) })
   }
 
