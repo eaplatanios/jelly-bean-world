@@ -137,7 +137,7 @@ extension Environment {
 extension Environment {
   @usableFromInline internal struct State {
     @usableFromInline internal let simulator: Simulator
-    @usableFromInline internal let agent: Agent
+    @usableFromInline internal var agent: Agent
 
     @inlinable
     internal init(simulator: Simulator, agent: Agent) {
@@ -150,7 +150,6 @@ extension Environment {
 extension Environment {
   public class Agent: JellyBeanWorld.Agent {
     @usableFromInline internal var nextAction: Int? = nil
-    @usableFromInline internal var state: AgentState? = nil
 
     @inlinable
     internal init() {}
