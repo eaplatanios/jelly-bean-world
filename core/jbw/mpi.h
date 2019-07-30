@@ -581,7 +581,7 @@ inline bool process_new_connection(
 
 		if (agent_ids.length > 0) {
 			agent_state** agent_states = (agent_state**) malloc(sizeof(agent_state*) * agent_ids.length);
-			sim.get_agent_states(agent_states, agent_ids.data, agent_ids.length);
+			sim.get_agent_states(agent_states, agent_ids.data, (unsigned int) agent_ids.length);
 
 			/* send the requested agent states to the client */
 			for (unsigned int i = 0; i < agent_ids.length; i++) {
