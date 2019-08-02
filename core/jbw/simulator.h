@@ -1510,98 +1510,102 @@ public:
      *      which to retrieve the map patches.
      * \param top_right_corner The top-right corner of the bounding box in
      *      which to retrieve the map patches.
-     * \param patches The output map from patch position to patch_state
-     *      structures which will contain the state of the retrieved patches.
+     * \param patches The output array of array of patch_state structures which
+     *      will contain the state of the retrieved patches. Each inner array
+     *      represents a row of patches that all share the same `y` value in
+     *      their patch positions;
      * \returns `true` if successful; `false` otherwise.
      */
     bool get_map(
             position bottom_left_corner,
             position top_right_corner,
-            hash_map<position, patch_state>& patches)
+            array<array<patch_state>>& patches)
     {
-        auto process_patch = [&](const patch_type& patch, position patch_position)
-        {
-            bool contains; unsigned int bucket;
-            if (!patches.check_size(alloc_position_keys)) return false;
-            patch_state& state = patches.get(patch_position, contains, bucket);
-            if (!init(state, config.patch_size,
-                    config.scent_dimension, config.color_dimension,
-                    (unsigned int) patch.items.length,
-                    (unsigned int) patch.data.agents.length))
-                return false;
-            patches.table.keys[bucket] = patch_position;
-            patches.table.size++;
-
-            state.patch_position = patch_position;
-            state.item_count = 0;
-            state.fixed = patch.fixed;
-            for (unsigned int i = 0; i < patch.items.length; i++) {
-                if (patch.items[i].deletion_time == 0) {
-                    state.items[state.item_count] = patch.items[i];
-                    state.item_count++;
-                }
-            }
-
-            for (unsigned int i = 0; i < patch.data.agents.length; i++) {
-                state.agent_positions[i] = patch.data.agents[i]->current_position;
-                state.agent_directions[i] = patch.data.agents[i]->current_direction;
-            }
-            return true;
-        };
+        position bottom_left_patch_position, top_right_patch_position;
+        world.world_to_patch_coordinates(bottom_left_corner, bottom_left_patch_position);
+        world.world_to_patch_coordinates(top_right_corner, top_right_patch_position);
 
         std::unique_lock<std::mutex> lock(agent_states_lock);
-        position bottom_left_patch_position, top_right_patch_position;
-        if (!world.get_state(bottom_left_corner, top_right_corner,
-                process_patch, bottom_left_patch_position, top_right_patch_position))
-            return false;
+        for (int64_t y = bottom_left_patch_position.y - 1; y < top_right_patch_position.y + 1; y++)
+        {
+            if (!patches.ensure_capacity(patches.length + 1))
+                return false;
+            array<patch_state>& current_row = patches[patches.length];
+            if (!array_init(current_row, 16))
+                return false;
+            patches.length++;
 
-        for (int64_t x = bottom_left_patch_position.x - 1; x < top_right_patch_position.x + 1; x++) {
-            for (int64_t y = bottom_left_patch_position.y - 1; y < top_right_patch_position.y + 1; y++) {
+            for (int64_t x = bottom_left_patch_position.x - 1; x < top_right_patch_position.x + 1; x++)
+            {
                 const patch_type* patch = world.get_patch_if_exists({x, y});
                 if (patch == NULL) continue;
 
+                if (!current_row.ensure_capacity(current_row.length + 1))
+                    return false;
+                patch_state& state = current_row[current_row.length];
+                if (!init(state, config.patch_size,
+                    config.scent_dimension, config.color_dimension,
+                    (unsigned int) patch->items.length,
+                    (unsigned int) patch->data.agents.length)) return false;
+                current_row.length++;
+
+                state.patch_position = position(x, y);
+                state.item_count = 0;
+                state.fixed = patch->fixed;
+                for (unsigned int i = 0; i < patch->items.length; i++) {
+                    if (patch->items[i].deletion_time == 0) {
+                        state.items[state.item_count] = patch->items[i];
+                        state.item_count++;
+                    }
+                }
+
+                for (unsigned int i = 0; i < patch->data.agents.length; i++) {
+                    state.agent_positions[i] = patch->data.agents[i]->current_position;
+                    state.agent_directions[i] = patch->data.agents[i]->current_direction;
+                }
+
                 /* consider all patches in the neighborhood of 'patch' */
-                for (int diff_x = -1; diff_x <= 1; diff_x++) {
-                    for (int diff_y = -1; diff_y <= 1; diff_y++) {
-                        bool contains;
-                        patch_state& neighbor = patches.get({x + diff_x, y + diff_y}, contains);
-                        position world_position = neighbor.patch_position * config.patch_size;
-                        if (!contains) continue;
+                position patch_world_position = position(x, y) * config.patch_size;
+                for (unsigned int a = 0; a < config.patch_size; a++) {
+                    for (unsigned int b = 0; b < config.patch_size; b++) {
+                        position current_position = patch_world_position + position(a, b);
+                        patch_type* neighborhood[4]; position patch_positions[4];
+                        unsigned int patch_count = world.get_neighborhood(current_position, neighborhood, patch_positions);
+                        for (unsigned int i = 0; i < patch_count; i++) {
+                            /* iterate over neighboring items, and add their contributions to scent and vision */
+                            for (unsigned int j = 0; j < neighborhood[i]->items.length; j++) {
+                                const item& item = neighborhood[i]->items[j];
 
-                        /* for every item in 'patch', add its scent/vision contribution to 'neighbor' */
-                        for (unsigned int i = 0; i < patch->items.length; i++) {
-                            const item& item = patch->items[i];
+                                /* check if the item is too old; if so, ignore it */
+                                if (item.deletion_time > 0 && time >= item.deletion_time + config.deleted_item_lifetime)
+                                    continue;
 
-                            /* check if the item is too old; if so, ignore it */
-                            if (item.deletion_time > 0 && time >= item.deletion_time + config.deleted_item_lifetime)
-                                continue;
-
-                            for (unsigned int a = 0; a < config.patch_size; a++)
-                                for (unsigned int b = 0; b < config.patch_size; b++)
-                                    compute_scent_contribution(scent_model, item, world_position + position(a, b), time,
-                                            config, neighbor.scent + ((a*config.patch_size + b)*config.scent_dimension));
+                                compute_scent_contribution(scent_model, item, current_position, time,
+                                        config, state.scent + ((a*config.patch_size + b)*config.scent_dimension));
+                            }
                         }
                     }
                 }
 
-                /* add color contribution from the items and agents in the current patch */
-                bool contains;
-                patch_state& state = patches.get({x, y}, contains);
-                if (!contains) continue;
                 for (const item& item : patch->items) {
                     if (item.deletion_time != 0) continue;
-                    position relative_position = item.location - position(x, y) * config.patch_size;
+                    position relative_position = item.location - patch_world_position;
                     float* pixel = state.vision + ((relative_position.x*config.patch_size + relative_position.y)*config.color_dimension);
                     for (unsigned int i = 0; i < config.color_dimension; i++)
                         pixel[i] += config.item_types[item.item_type].color[i];
                 }
 
                 for (const agent_state* agent : patch->data.agents) {
-                    position relative_position = agent->current_position - position(x, y) * config.patch_size;
+                    position relative_position = agent->current_position - patch_world_position;
                     float* pixel = state.vision + ((relative_position.x*config.patch_size + relative_position.y)*config.color_dimension);
                     for (unsigned int i = 0; i < config.color_dimension; i++)
                         pixel[i] += config.agent_color[i];
                 }
+            }
+
+            if (current_row.length == 0) {
+                core::free(current_row);
+                patches.length--;
             }
         }
 

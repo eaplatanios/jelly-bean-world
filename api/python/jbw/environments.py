@@ -65,9 +65,9 @@ def make_config():
             ]))
   # construct the simulator configuration
   return SimulatorConfig(max_steps_per_movement=1, vision_range=5,
-    allowed_movement_directions=[RelativeDirection.FORWARD],
-    allowed_turn_directions=[RelativeDirection.LEFT, RelativeDirection.RIGHT],
-    patch_size=32, mcmc_num_iter=4000, items=items, agent_color=[0.0, 0.0, 1.0],
+		allowed_movement_directions=[jbw.ActionPolicy.ALLOWED, jbw.ActionPolicy.DISALLOWED, jbw.ActionPolicy.DISALLOWED, jbw.ActionPolicy.DISALLOWED],
+		allowed_turn_directions=[jbw.ActionPolicy.DISALLOWED, jbw.ActionPolicy.DISALLOWED, jbw.ActionPolicy.ALLOWED, jbw.ActionPolicy.ALLOWED],
+		no_op_allowed=False, patch_size=32, mcmc_num_iter=4000, items=items, agent_color=[0.0, 0.0, 1.0],
     collision_policy=MovementConflictPolicy.FIRST_COME_FIRST_SERVED,
     decay_param=0.4, diffusion_param=0.14, deleted_item_lifetime=2000)
 

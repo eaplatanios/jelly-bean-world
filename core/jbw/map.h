@@ -274,6 +274,30 @@ public:
 	unsigned int get_neighborhood(
 			position world_position,
 			patch_type* neighborhood[4],
+			position patch_positions[4])
+	{
+		get_neighborhood_positions(world_position, patch_positions);
+
+		unsigned int index = 0;
+		for (unsigned int i = 0; i < 4; i++) {
+			neighborhood[index] = get_patch_if_exists(patch_positions[i]);
+			if (neighborhood[index] != NULL) {
+				index++;
+			}
+		}
+
+		return index;
+	}
+
+	/**
+	 * Returns the patches in the world that intersect with a bounding box of
+	 * size n centered at `world_position`. This function will not create any
+	 * missing patches or fix any patches. The number intersecting patches is
+	 * returned.
+	 */
+	unsigned int get_neighborhood(
+			position world_position,
+			patch_type* neighborhood[4],
 			position patch_positions[4],
 			unsigned int& patch_index)
 	{
@@ -289,38 +313,6 @@ public:
 		}
 
 		return index;
-	}
-
-	template<typename ProcessPatchFunction>
-	bool get_state(
-			position bottom_left_corner,
-			position top_right_corner,
-			ProcessPatchFunction process_patch,
-			position& bottom_left_patch_position,
-			position& top_right_patch_position) const
-	{
-		world_to_patch_coordinates(bottom_left_corner, bottom_left_patch_position);
-		world_to_patch_coordinates(top_right_corner, top_right_patch_position);
-
-		for (int64_t x = bottom_left_patch_position.x; x <= top_right_patch_position.x; x++) {
-			for (int64_t y = bottom_left_patch_position.y; y <= top_right_patch_position.y; y++) {
-				patch_type* p = get_patch_if_exists({x, y});
-				if (p != NULL && !process_patch(*p, position(x, y)))
-					return false;
-			}
-		}
-		return true;
-	}
-
-	template<typename ProcessPatchFunction>
-	inline bool get_state(
-			position bottom_left_corner,
-			position top_right_corner,
-			ProcessPatchFunction process_patch) const
-	{
-		position bottom_left_patch_position, top_right_patch_position;
-		return get_state(bottom_left_corner, top_right_corner, process_patch,
-				bottom_left_patch_position, top_right_patch_position);
 	}
 
 	bool get_items(

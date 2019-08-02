@@ -312,7 +312,7 @@ bool test_multithreaded(const simulator_config& config)
 struct client_data {
 	unsigned int index;
 	uint64_t agent_id;
-	const hash_map<position, patch_state>* map;
+	const array<array<patch_state>>* map;
 
 	bool action_result, waiting_for_step;
 	position pos;
@@ -356,7 +356,7 @@ void on_do_nothing(client<client_data>& c, uint64_t agent_id, mpi_response respo
 
 void on_get_map(
 		client<client_data>& c, mpi_response response,
-		const hash_map<position, patch_state>* map)
+		const array<array<patch_state>>* map)
 {
 	unsigned int id = c.data.index;
 	std::unique_lock<std::mutex> lck(locks[id]);

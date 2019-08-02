@@ -375,7 +375,7 @@ inline bool receive_get_map(
 {
 	position bottom_left, top_right;
 	mpi_response response;
-	hash_map<position, patch_state> patches(32, alloc_position_keys);
+	array<array<patch_state>> patches(32);
 	bool success = true;
 	if (!read(bottom_left, in) || !read(top_right, in)) {
 		response = mpi_response::SERVER_PARSE_MESSAGE_ERROR;
@@ -384,21 +384,24 @@ inline bool receive_get_map(
 		if (sim.get_map(bottom_left, top_right, patches)) {
 			response = mpi_response::SUCCESS;
 		} else {
-			for (auto entry : patches)
-				free(entry.value);
+			for (array<patch_state>& row : patches) {
+				for (patch_state& patch : row) free(patch);
+				free(row);
+			}
 			patches.clear();
 			response = mpi_response::FAILURE;
 		}
 	}
 
-	default_scribe scribe;
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(response) + sizeof(hash_map<position, patch_state>));
 	fixed_width_stream<memory_stream> out(mem_stream);
 	success &= write(message_type::GET_MAP_RESPONSE, out) && write(response, out)
-			&& (response != mpi_response::SUCCESS || write(patches, out, scribe, sim.get_config()))
+			&& (response != mpi_response::SUCCESS || write(patches, out, sim.get_config()))
 			&& send_message(connection, mem_stream.buffer, mem_stream.position);
-	for (auto entry : patches)
-		free(entry.value);
+	for (array<patch_state>& row : patches) {
+		for (patch_state& patch : row) free(patch);
+		free(row);
+	}
 	return success;
 }
 
@@ -981,20 +984,19 @@ inline bool receive_do_nothing_response(ClientType& c) {
 template<typename ClientType>
 inline bool receive_get_map_response(ClientType& c) {
 	mpi_response response;
-	default_scribe scribe;
 	bool success = true;
-	hash_map<position, patch_state>* patches = NULL;
+	array<array<patch_state>>* patches = NULL;
 	fixed_width_stream<socket_type> in(c.connection);
 	if (!read(response, in)) {
 		response = mpi_response::CLIENT_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else if (response == mpi_response::SUCCESS) {
-		patches = (hash_map<position, patch_state>*) malloc(sizeof(hash_map<position, patch_state>));
+		patches = (array<array<patch_state>>*) malloc(sizeof(array<array<patch_state>>));
 		if (patches == NULL) {
 			fprintf(stderr, "receive_get_map_response ERROR: Out of memory.\n");
 			response = mpi_response::CLIENT_PARSE_MESSAGE_ERROR;
 			success = false;
-		} else if (!read(*patches, in, alloc_position_keys, scribe, c.config)) {
+		} else if (!read(*patches, in, c.config)) {
 			response = mpi_response::CLIENT_PARSE_MESSAGE_ERROR;
 			free(patches); success = false;
 		}

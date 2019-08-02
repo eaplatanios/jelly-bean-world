@@ -113,7 +113,7 @@ struct py_client_data {
     mpi_response server_response;
     union response_data {
         PyObject* agent_state;
-        hash_map<position, patch_state>* map;
+        array<array<patch_state>>* map;
     } response_data;
 
     /* for synchronization */
@@ -455,12 +455,12 @@ void on_do_nothing(client<py_client_data>& c, uint64_t agent_id, mpi_response re
  * \param   c        The client that received the response.
  * \param   response The MPI response from the server, containing information
  *                   about any errors.
- * \param   map      A map from patch positions to `patch_state` structures
- *                   containing the state information in each patch.
+ * \param   map      An array of array of `patch_state` structures containing
+ *                   the state information in each patch.
  */
 void on_get_map(client<py_client_data>& c,
         mpi_response response,
-        hash_map<position, patch_state>* map)
+        array<array<patch_state>>* map)
 {
     check_response(response, "get_map: ");
     std::unique_lock<std::mutex> lck(c.data.lock);
@@ -1435,45 +1435,50 @@ static PyObject* simulator_no_op(PyObject *self, PyObject *args) {
  *          - (tuple of 2 ints) The position of the item.
  */
 static PyObject* build_py_map(
-        const hash_map<position, patch_state>& patches,
+        const array<array<patch_state>>& patches,
         const simulator_config& config)
 {
+    unsigned int patch_count = 0;
+    for (const array<patch_state>& row : patches)
+        patch_count += row.length;
+
     unsigned int index = 0;
-    PyObject* list = PyList_New(patches.table.size);
-    for (const auto& entry : patches) {
-        const patch_state& patch = entry.value;
-        PyObject* py_items = PyList_New(patch.item_count);
-        for (unsigned int i = 0; i < patch.item_count; i++)
-            PyList_SetItem(py_items, i, Py_BuildValue("I(LL)",
-                    patch.items[i].item_type,
-                    patch.items[i].location.x,
-                    patch.items[i].location.y));
+    PyObject* list = PyList_New(patch_count);
+    for (const array<patch_state>& row : patches) {
+        for (const patch_state& patch : row) {
+            PyObject* py_items = PyList_New(patch.item_count);
+            for (unsigned int i = 0; i < patch.item_count; i++)
+                PyList_SetItem(py_items, i, Py_BuildValue("I(LL)",
+                        patch.items[i].item_type,
+                        patch.items[i].location.x,
+                        patch.items[i].location.y));
 
-        PyObject* py_agents = PyList_New(patch.agent_count);
-        for (unsigned int i = 0; i < patch.agent_count; i++)
-            PyList_SetItem(py_agents, i, Py_BuildValue("(LLL)", patch.agent_positions[i].x, patch.agent_positions[i].y, (long long) patch.agent_directions[i]));
+            PyObject* py_agents = PyList_New(patch.agent_count);
+            for (unsigned int i = 0; i < patch.agent_count; i++)
+                PyList_SetItem(py_agents, i, Py_BuildValue("(LLL)", patch.agent_positions[i].x, patch.agent_positions[i].y, (long long) patch.agent_directions[i]));
 
-        npy_intp n = (npy_intp) config.patch_size;
-        float* scent = (float*) malloc(sizeof(float) * n * n * config.scent_dimension);
-        float* vision = (float*) malloc(sizeof(float) * n * n * config.color_dimension);
-        memcpy(scent, patch.scent, sizeof(float) * n * n * config.scent_dimension);
-        memcpy(vision, patch.vision, sizeof(float) * n * n * config.color_dimension);
+            npy_intp n = (npy_intp) config.patch_size;
+            float* scent = (float*) malloc(sizeof(float) * n * n * config.scent_dimension);
+            float* vision = (float*) malloc(sizeof(float) * n * n * config.color_dimension);
+            memcpy(scent, patch.scent, sizeof(float) * n * n * config.scent_dimension);
+            memcpy(vision, patch.vision, sizeof(float) * n * n * config.color_dimension);
 
-        npy_intp scent_dim[] = {n, n, (npy_intp) config.scent_dimension};
-        npy_intp vision_dim[] = {n, n, (npy_intp) config.color_dimension};
-        PyObject* py_scent = PyArray_SimpleNewFromData(3, scent_dim, NPY_FLOAT, scent);
-        PyObject* py_vision = PyArray_SimpleNewFromData(3, vision_dim, NPY_FLOAT, vision);
+            npy_intp scent_dim[] = {n, n, (npy_intp) config.scent_dimension};
+            npy_intp vision_dim[] = {n, n, (npy_intp) config.color_dimension};
+            PyObject* py_scent = PyArray_SimpleNewFromData(3, scent_dim, NPY_FLOAT, scent);
+            PyObject* py_vision = PyArray_SimpleNewFromData(3, vision_dim, NPY_FLOAT, vision);
 
-        PyObject* fixed = patch.fixed ? Py_True : Py_False;
-        Py_INCREF(fixed);
-        PyObject* py_patch = Py_BuildValue("((LL)OOOOO)", patch.patch_position.x, patch.patch_position.y, fixed, py_scent, py_vision, py_items, py_agents);
-        Py_DECREF(fixed);
-        Py_DECREF(py_scent);
-        Py_DECREF(py_vision);
-        Py_DECREF(py_items);
-        Py_DECREF(py_agents);
-        PyList_SetItem(list, index, py_patch);
-        index++;
+            PyObject* fixed = patch.fixed ? Py_True : Py_False;
+            Py_INCREF(fixed);
+            PyObject* py_patch = Py_BuildValue("((LL)OOOOO)", patch.patch_position.x, patch.patch_position.y, fixed, py_scent, py_vision, py_items, py_agents);
+            Py_DECREF(fixed);
+            Py_DECREF(py_scent);
+            Py_DECREF(py_vision);
+            Py_DECREF(py_items);
+            Py_DECREF(py_agents);
+            PyList_SetItem(list, index, py_patch);
+            index++;
+        }
     }
     return list;
 }
@@ -1512,14 +1517,16 @@ static PyObject* simulator_map(PyObject *self, PyObject *args) {
         /* the simulation is local, so call get_map directly */
         simulator<py_simulator_data>* sim_handle =
                 (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
-        hash_map<position, patch_state> patches(16, alloc_position_keys);
+        array<array<patch_state>> patches(32);
         if (!sim_handle->get_map(bottom_left, top_right, patches)) {
             PyErr_SetString(PyExc_RuntimeError, "simulator.get_map failed.");
             return NULL;
         }
         PyObject* py_map = build_py_map(patches, sim_handle->get_config());
-        for (auto entry : patches)
-            free(entry.value);
+        for (array<patch_state>& row : patches) {
+            for (patch_state& patch : row) free(patch);
+            free(row);
+        }
         return py_map;
     } else {
         /* this is a client, so send a get_map message to the server */
@@ -1543,8 +1550,10 @@ static PyObject* simulator_map(PyObject *self, PyObject *args) {
             return Py_None;
         }
         PyObject* py_map = build_py_map(*client_handle->data.response_data.map, client_handle->config);
-        for (auto entry : *client_handle->data.response_data.map)
-            free(entry.value);
+        for (array<patch_state>& row : *client_handle->data.response_data.map) {
+            for (patch_state& patch : row) free(patch);
+            free(row);
+        }
         free(*client_handle->data.response_data.map);
         free(client_handle->data.response_data.map);
         return py_map;
