@@ -1,7 +1,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include "vulkan_renderer.h"
-#include "../jbw/simulator.h"
+#include "../simulator.h"
 
 namespace jbw {
 

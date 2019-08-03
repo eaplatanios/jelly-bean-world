@@ -19,9 +19,9 @@
 #include <numpy/arrayobject.h>
 
 #include <thread>
-#include "jbw/gibbs_field.h"
-#include "jbw/mpi.h"
-#include "jbw/simulator.h"
+#include "gibbs_field.h"
+#include "mpi.h"
+#include "simulator.h"
 
 namespace jbw {
 
