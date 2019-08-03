@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdexcept>
 #include <limits.h>
+#include <new>
 
 namespace mirage {
 

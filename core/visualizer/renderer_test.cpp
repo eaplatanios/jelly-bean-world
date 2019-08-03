@@ -134,7 +134,7 @@ bool setup_renderer(vulkan_renderer& renderer,
 	uint32_t ub_binding = 0;
 	uint32_t texture_binding = 1;
 	descriptor_type pool_types[] = { descriptor_type::UNIFORM_BUFFER, descriptor_type::COMBINED_IMAGE_SAMPLER };
-	if (!renderer.create_graphics_pipeline(pipeline, vertex_shader, "main", fragment_shader, "main", primitive_topology::TRIANGLE_FAN, binding, attributes, &layout, 1)) {
+	if (!renderer.create_graphics_pipeline(pipeline, vertex_shader, "main", fragment_shader, "main", primitive_topology::TRIANGLE_STRIP, binding, attributes, &layout, 1)) {
 		return false;
 	} else if (!renderer.create_frame_buffer(fb, pipeline)) {
 		renderer.delete_graphics_pipeline(pipeline);
@@ -202,8 +202,8 @@ int main(int argc, const char** argv)
 	vertex vertices[] = {
 		{{-0.5f, -0.5f}, {1.0f, 0.0f}},
 		{{-0.5f, 0.5f}, {1.0f, 1.0f}},
-		{{0.5f, 0.5f}, {0.0f, 1.0f}},
-		{{0.5f, -0.5f}, {0.0f, 0.0f}}
+		{{0.5f, -0.5f}, {0.0f, 0.0f}},
+		{{0.5f, 0.5f}, {0.0f, 1.0f}}
 	};
 
 	binding_description binding(0, sizeof(vertex));
