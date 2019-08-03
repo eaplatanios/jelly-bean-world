@@ -534,23 +534,28 @@ inline void free(SimulationMapPatch& patch) {
 
 
 bool init(SimulationMap& map,
-  const hash_map<position, patch_state>& patches,
+  const array<array<patch_state>>& patches,
   const simulator_config& config)
 {
+  unsigned int patch_count = 0;
+  for (const array<patch_state>& row : patches)
+    patch_count += row.length;
   unsigned int index = 0;
-  map.patches = (SimulationMapPatch*) malloc(max((size_t) 1, sizeof(SimulationMapPatch) * patches.table.size));
+  map.patches = (SimulationMapPatch*) malloc(max((size_t) 1, sizeof(SimulationMapPatch) * patch_count));
   if (map.patches == nullptr) {
     /* TODO: communicate out of memory error to swift */
     return false;
   }
-  for (const auto& entry : patches) {
-    if (!init(map.patches[index], entry.value, config)) {
-      for (unsigned int i = 0; i < index; i++) free(map.patches[i]);
-      free(map.patches); return false;
+  for (const array<patch_state>& row : patches) {
+    for (const patch_state& patch : row) {
+      if (!init(map.patches[index], patch, config)) {
+        for (unsigned int i = 0; i < index; i++) free(map.patches[i]);
+        free(map.patches); return false;
+      }
     }
     index++;
   }
-  map.numPatches = patches.table.size;
+  map.numPatches = patch_count;
   return true;
 }
 
@@ -617,7 +622,7 @@ struct client_data {
   mpi_response server_response;
   union response_data {
     AgentSimulationState agent_state;
-    hash_map<position, patch_state>* map;
+    array<array<patch_state>>* map;
   } response_data;
 
   /* for synchronization */
@@ -831,7 +836,7 @@ void on_do_nothing(client<client_data>& c, uint64_t agent_id, mpi_response respo
  */
 void on_get_map(client<client_data>& c,
         mpi_response response,
-        hash_map<position, patch_state>* map)
+        array<array<patch_state>>* map)
 {
   check_response(response, "get_map: ");
   std::unique_lock<std::mutex> lck(c.data.lock);
@@ -1288,7 +1293,7 @@ const SimulationMap simulatorMap(
   if (clientHandle == nullptr) {
     /* the simulation is local, so call get_map directly */
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
-    hash_map<position, patch_state> patches(16, alloc_position_keys);
+    array<array<patch_state>> patches(16);
     if (!sim_handle->get_map(bottom_left, top_right, patches)) {
       /* TODO: communicate "simulator.get_map failed." to swift */
       return EMPTY_SIM_MAP;
@@ -1297,8 +1302,11 @@ const SimulationMap simulatorMap(
     SimulationMap map;
     if (!init(map, patches, sim_handle->get_config()))
       map = EMPTY_SIM_MAP;
-    for (auto entry : patches)
-      free(entry.value);
+    for (array<patch_state>& row : patches) {
+      for (auto& entry : row)
+        free(entry);
+      free(row);
+    }
     return map;
   } else {
     /* this is a client, so send a get_map message to the server */
@@ -1322,8 +1330,11 @@ const SimulationMap simulatorMap(
       return EMPTY_SIM_MAP;
     if (!init(map, *client_ptr->data.response_data.map, client_ptr->config))
       map = EMPTY_SIM_MAP;
-    for (auto entry : *client_ptr->data.response_data.map)
-      free(entry.value);
+    for (array<patch_state>& row : *client_ptr->data.response_data.map) {
+      for (patch_state& entry : row)
+        free(entry);
+      free(row);
+    }
     free(*client_ptr->data.response_data.map);
     free(client_ptr->data.response_data.map);
     return map;
