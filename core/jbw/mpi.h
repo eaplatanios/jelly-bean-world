@@ -1077,6 +1077,20 @@ template<typename ClientType>
 void run_response_listener(ClientType& c) {
 	while (c.client_running) {
 		message_type type;
+		while (true) {
+			wait_result result = wait_for_socket(c.connection, 0, 100000);
+			if (!c.client_running) {
+				return; /* stop_client was called */
+			} else if (result == wait_result::DATA_AVAILABLE) {
+				break;
+			} else if (result == wait_result::DATA_UNAVAILABLE) {
+				continue;
+			} else {
+				on_lost_connection(c);
+				return;
+			}
+		}
+
 		bool success = read(type, c.connection);
 		if (!c.client_running) {
 			return; /* stop_client was called */
@@ -1349,12 +1363,12 @@ uint64_t reconnect_client(
 template<typename ClientData>
 void stop_client(client<ClientData>& c) {
 	c.client_running = false;
-	shutdown(c.connection.handle, 2);
 	if (c.response_listener.joinable()) {
 		try {
 			c.response_listener.join();
 		} catch (...) { }
 	}
+	shutdown(c.connection.handle, 2);
 }
 
 } /* namespace jbw */
