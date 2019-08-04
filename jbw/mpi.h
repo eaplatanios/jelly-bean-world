@@ -626,7 +626,7 @@ inline bool write_extra_data(Stream& out,
 template<typename... ExtraData>
 inline bool send_step_response(
 		async_server& server,
-		const array<agent_state*>& agents,
+		const hash_map<uint64_t, agent_state*>& agents,
 		const simulator_config& config,
 		ExtraData&&... extra_data)
 {
@@ -645,7 +645,7 @@ inline bool send_step_response(
 
 		bool client_success = true;
 		for (uint64_t agent_id : agent_ids) {
-			if (!write(*agents[(size_t) agent_id], out, config)) {
+			if (!write(*agents.get(agent_id), out, config)) {
 				client_success = false;
 				break;
 			}

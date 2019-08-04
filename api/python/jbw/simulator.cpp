@@ -286,7 +286,7 @@ static PyObject* build_py_agent(
  * \param   time    The new simulation time of `sim`.
  */
 void on_step(simulator<py_simulator_data>* sim,
-        const array<agent_state*>& agents, uint64_t time)
+        const hash_map<uint64_t, agent_state*>& agents, uint64_t time)
 {
     py_simulator_data& data = sim->get_data();
     if (data.server.status != server_status::STOPPING) {
@@ -305,7 +305,7 @@ void on_step(simulator<py_simulator_data>* sim,
     }
     const simulator_config& config = sim->get_config();
     for (size_t i = 0; i < data.agent_ids.length; i++)
-        PyList_SetItem(py_states, i, build_py_agent(*agents[(size_t) data.agent_ids[i]], config, data.agent_ids[i]));
+        PyList_SetItem(py_states, i, build_py_agent(*agents.get(data.agent_ids[i]), config, data.agent_ids[i]));
 
     /* call python callback */
     PyObject* args = Py_BuildValue("(O)", py_states);

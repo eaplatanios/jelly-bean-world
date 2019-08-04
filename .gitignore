@@ -3,6 +3,9 @@
 temp/
 
 # Compiled Executables
+jbw/diffusion_test
+jbw/map_test
+jbw/network_test
 jbw/simulator_test
 jbw/visualizer/renderer_test
 jbw/visualizer/visualizer_test
