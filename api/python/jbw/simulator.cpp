@@ -1114,7 +1114,7 @@ static PyObject* simulator_reconnect_client(PyObject *self, PyObject *args)
 
     PyObject* py_states = PyList_New(agent_count);
     if (py_states == NULL) return NULL;
-    for (Py_ssize_t i = 0; i < agent_count; i++) {
+    for (Py_ssize_t i = 0; i < (Py_ssize_t) agent_count; i++) {
         PyList_SetItem(py_states, i, build_py_agent(agent_states[i], new_client->config, agent_ids[i]));
         free(agent_states[i]);
     }

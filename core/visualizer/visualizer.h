@@ -216,8 +216,8 @@ public:
 				top_right_corner.x = max(top_right_corner.x, row.last().patch_position.x);
 			}
 
-			unsigned int texture_width = (top_right_corner.x - bottom_left_corner.x) * patch_size;
-			unsigned int texture_height = (top_right_corner.y - bottom_left_corner.y) * patch_size;
+			unsigned int texture_width = (unsigned int) (top_right_corner.x - bottom_left_corner.x) * patch_size;
+			unsigned int texture_height = (unsigned int) (top_right_corner.y - bottom_left_corner.y) * patch_size;
 
 			unsigned int y_index = 0;
 			for (int64_t y = bottom_left_corner.y; y <= top_right_corner.y; y++) {
@@ -366,9 +366,9 @@ private:
 		float z = max(0.0f, min(1.0f, log(pow(cell_scent[2], 0.4f) + 1.0f) / 0.9f));
 
 		pixel out;
-		out.r = 255 - (uint8_t) 255 * ((y + z) / 2);
-		out.g = 255 - (uint8_t) 255 * ((x + z) / 2);
-		out.b = 255 - (uint8_t) 255 * ((x + y) / 2);
+		out.r = 255 - (uint8_t) (255 * ((y + z) / 2));
+		out.g = 255 - (uint8_t) (255 * ((x + z) / 2));
+		out.b = 255 - (uint8_t) (255 * ((x + y) / 2));
 		out.a = 255;
 		return out;
 	}
@@ -406,14 +406,14 @@ private:
 	}
 
 	static inline void make_orthographic_projection(float (&proj)[16],
-			float left, float right, float bottom, float top, float near, float far)
+			float fLeft, float fRight, float fBottom, float fTop, float fNear, float fFar)
 	{
-		proj[0] = 2 / (right - left);
-		proj[5] = -2 / (top - bottom); /* make the positive y axis direction point upwards */
-		proj[10] = 2 / (near - far);
-		proj[12] = (left + right) / (left - right);
-		proj[13] = (bottom + top) / (bottom - top);
-		proj[14] = (near + far) / (near - far);
+		proj[0] = 2 / (fRight - fLeft);
+		proj[5] = -2 / (fTop - fBottom); /* make the positive y axis direction point upwards */
+		proj[10] = 2 / (fNear - fFar);
+		proj[12] = (fLeft + fRight) / (fLeft - fRight);
+		proj[13] = (fBottom + fTop) / (fBottom - fTop);
+		proj[14] = (fNear + fFar) / (fNear - fFar);
 		proj[15] = 1.0f;
 	}
 

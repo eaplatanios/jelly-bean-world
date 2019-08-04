@@ -1,3 +1,4 @@
+#include <core/core.h>
 #include <vulkan/vulkan.h>
 #include <stdio.h>
 #include <string.h>
@@ -6,13 +7,7 @@
 
 namespace mirage {
 
-inline size_t min(size_t a, size_t b) {
-	return (a < b) ? a : b;
-}
-
-inline size_t max(size_t a, size_t b) {
-	return (a > b) ? a : b;
-}
+using namespace core;
 
 enum class device_selector {
 	FIRST_DISCRETE_GPU,
@@ -201,7 +196,7 @@ public:
 };
 
 class sampler {
-	VkSampler sampler;
+	VkSampler vk_sampler;
 
 	friend class vulkan_renderer;
 };
@@ -711,10 +706,10 @@ public:
 
 	inline bool create_descriptor_set(
 			descriptor_set& ds, const uniform_buffer* uniform_buffers,
-			uint32_t* uniform_buffer_bindings, size_t uniform_buffer_count,
-			const texture_image* texture_images, uint32_t* texture_image_bindings, size_t texture_image_count,
-			const dynamic_texture_image* dyn_texture_images, uint32_t* dyn_texture_image_bindings, size_t dyn_texture_image_count,
-			const sampler& sampler, const descriptor_set_layout& layout, const descriptor_pool& pool)
+			uint32_t* uniform_buffer_bindings, uint32_t uniform_buffer_count,
+			const texture_image* texture_images, uint32_t* texture_image_bindings, uint32_t texture_image_count,
+			const dynamic_texture_image* dyn_texture_images, uint32_t* dyn_texture_image_bindings, uint32_t dyn_texture_image_count,
+			const sampler& tex_sampler, const descriptor_set_layout& layout, const descriptor_pool& pool)
 	{
 		ds.sets = (VkDescriptorSet*) malloc(sizeof(VkDescriptorSet) * swap_chain_image_count);
 		if (ds.sets == nullptr) {
@@ -741,8 +736,8 @@ public:
 		}
 		free(layouts);
 
-		VkDescriptorBufferInfo* buffer_info_array = (VkDescriptorBufferInfo*) calloc(max(1, uniform_buffer_count), sizeof(VkDescriptorBufferInfo));
-		VkDescriptorImageInfo* image_info_array = (VkDescriptorImageInfo*) calloc(max(1, texture_image_count + dyn_texture_image_count), sizeof(VkDescriptorImageInfo));
+		VkDescriptorBufferInfo* buffer_info_array = (VkDescriptorBufferInfo*) calloc(max((uint32_t) 1, uniform_buffer_count), sizeof(VkDescriptorBufferInfo));
+		VkDescriptorImageInfo* image_info_array = (VkDescriptorImageInfo*) calloc(max((uint32_t) 1, texture_image_count + dyn_texture_image_count), sizeof(VkDescriptorImageInfo));
 		VkWriteDescriptorSet* descriptorWrites = (VkWriteDescriptorSet*) calloc(uniform_buffer_count + texture_image_count + dyn_texture_image_count, sizeof(VkWriteDescriptorSet));
 		if (buffer_info_array == nullptr || image_info_array == nullptr || descriptorWrites == nullptr) {
 			fprintf(stderr, "vulkan_renderer.create_descriptor_set ERROR: Insufficient memory for `descriptorWrites`.\n");
@@ -767,7 +762,7 @@ public:
 			for (size_t j = 0; j < texture_image_count; j++) {
 				image_info_array[j].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 				image_info_array[j].imageView = texture_images[j].view;
-				image_info_array[j].sampler = sampler.sampler;
+				image_info_array[j].sampler = tex_sampler.vk_sampler;
 
 				descriptorWrites[uniform_buffer_count + j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 				descriptorWrites[uniform_buffer_count + j].dstSet = ds.sets[i];
@@ -780,7 +775,7 @@ public:
 			for (size_t j = 0; j < dyn_texture_image_count; j++) {
 				image_info_array[texture_image_count + j].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 				image_info_array[texture_image_count + j].imageView = dyn_texture_images[j].view;
-				image_info_array[texture_image_count + j].sampler = sampler.sampler;
+				image_info_array[texture_image_count + j].sampler = tex_sampler.vk_sampler;
 
 				descriptorWrites[uniform_buffer_count + texture_image_count + j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 				descriptorWrites[uniform_buffer_count + texture_image_count + j].dstSet = ds.sets[i];
@@ -893,7 +888,7 @@ public:
 		vkFreeMemory(logical_device, image.memory, nullptr);
 	}
 
-	inline bool create_sampler(sampler& s,
+	inline bool create_sampler(sampler& tex_sampler,
 			filter mag_filter, filter min_filter,
 			sampler_address_mode address_mode_u,
 			sampler_address_mode address_mode_v,
@@ -919,15 +914,15 @@ public:
 		samplerInfo.minLod = 0.0f;
 		samplerInfo.maxLod = 0.0f;
 
-		if (vkCreateSampler(logical_device, &samplerInfo, nullptr, &s.sampler) != VK_SUCCESS) {
+		if (vkCreateSampler(logical_device, &samplerInfo, nullptr, &tex_sampler.vk_sampler) != VK_SUCCESS) {
 			fprintf(stderr, "vulkan_renderer.create_sampler ERROR: Failed to create sampler.\n");
 			return false;
 		}
 		return true;
 	}
 
-	inline void delete_sampler(sampler& s) {
-		vkDestroySampler(logical_device, s.sampler, nullptr);
+	inline void delete_sampler(sampler& tex_sampler) {
+		vkDestroySampler(logical_device, tex_sampler.vk_sampler, nullptr);
 	}
 
 	template<typename ResetCommandBuffersFunction, typename GetWindowDimensionsFunction>
@@ -1021,7 +1016,7 @@ private:
 			uint32_t supported_layer_count;
 			vkEnumerateInstanceLayerProperties(&supported_layer_count, nullptr);
 
-			VkLayerProperties* supported_layers = (VkLayerProperties*) malloc(max(1, sizeof(VkLayerProperties) * supported_layer_count));
+			VkLayerProperties* supported_layers = (VkLayerProperties*) malloc(max((size_t) 1, sizeof(VkLayerProperties) * supported_layer_count));
 			if (supported_layers == nullptr)
 				throw std::bad_alloc();
 			vkEnumerateInstanceLayerProperties(&supported_layer_count, supported_layers);
