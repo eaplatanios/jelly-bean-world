@@ -650,7 +650,7 @@ inline bool init(patch_data& data) {
  */
 template<typename Stream>
 bool read(patch_data& data, Stream& in,
-		const hash_map<uint64_t, agent_state*>& agents)
+        const hash_map<uint64_t, agent_state*>& agents)
 {
     size_t agent_count = 0;
     if (!read(agent_count, in)
@@ -1150,8 +1150,8 @@ class simulator {
     /* Agents managed by this simulator. */
     hash_map<uint64_t, agent_state*> agents;
 
-	/* A counter for assigning IDs to new agents. */
-	uint64_t agent_id_counter;
+    /* A counter for assigning IDs to new agents. */
+    uint64_t agent_id_counter;
 
     /* Lock for the agents array and their state (not including their requested
        actions), used to prevent simultaneous updates. */
@@ -1228,24 +1228,24 @@ public:
      */
     inline pair<uint64_t, agent_state*> add_agent() {
         agent_states_lock.lock();
-		if (!agents.check_size()) {
-			agent_states_lock.unlock();
-			fprintf(stderr, "simulator.add_agent ERROR: Failed to expand agent table.\n");
-			return make_pair(UINT64_MAX, (agent_state*) nullptr);
-		}
+        if (!agents.check_size()) {
+            agent_states_lock.unlock();
+            fprintf(stderr, "simulator.add_agent ERROR: Failed to expand agent table.\n");
+            return make_pair(UINT64_MAX, (agent_state*) nullptr);
+        }
 
-		unsigned int bucket = agents.table.index_to_insert(agent_id_counter);
+        unsigned int bucket = agents.table.index_to_insert(agent_id_counter);
         agent_state* new_agent = (agent_state*) malloc(sizeof(agent_state));
         uint64_t id = agent_id_counter;
         if (new_agent == nullptr) {
             fprintf(stderr, "simulator.add_agent ERROR: Insufficient memory for new agent.\n");
             return make_pair(UINT64_MAX, (agent_state*) nullptr);
         }
-		agents.table.keys[bucket] = agent_id_counter;
-		agents.values[bucket] = new_agent;
-		agents.table.size++;
+        agents.table.keys[bucket] = agent_id_counter;
+        agents.values[bucket] = new_agent;
+        agents.table.size++;
         active_agent_count++;
-		agent_id_counter++;
+        agent_id_counter++;
         agent_states_lock.unlock();
 
         if (!init(*new_agent, world, scent_model, config, time)) {
@@ -1263,7 +1263,7 @@ public:
      */
     inline void set_agent_active(uint64_t agent_id, bool active) {
         agent_states_lock.lock();
-		agent_state& agent = *agents.get(agent_id);
+        agent_state& agent = *agents.get(agent_id);
         agent_states_lock.unlock();
 
         agent.lock.lock();
@@ -1317,7 +1317,7 @@ public:
             return false;
 
         agent_states_lock.lock();
-		agent_state& agent = *agents.get(agent_id);
+        agent_state& agent = *agents.get(agent_id);
         agent_states_lock.unlock();
 
         agent.lock.lock();
@@ -1638,127 +1638,127 @@ public:
 
 private:
     /* Precondition: The mutex is locked. This function does not release the mutex. */
-	inline void step()
-	{
-		requested_move_lock.lock();
-		if (config.collision_policy == movement_conflict_policy::RANDOM) {
-			for (auto entry : requested_moves) {
-				array<agent_state*>& conflicts = entry.value;
-				if (conflicts[0]->current_position == entry.key) continue; /* give preference to agents that don't move */
-				unsigned int result = sample_uniform((unsigned int)conflicts.length);
-				core::swap(conflicts[0], conflicts[result]);
-			}
-		}
+    inline void step()
+    {
+        requested_move_lock.lock();
+        if (config.collision_policy == movement_conflict_policy::RANDOM) {
+            for (auto entry : requested_moves) {
+                array<agent_state*>& conflicts = entry.value;
+                if (conflicts[0]->current_position == entry.key) continue; /* give preference to agents that don't move */
+                unsigned int result = sample_uniform((unsigned int)conflicts.length);
+                core::swap(conflicts[0], conflicts[result]);
+            }
+        }
 
-		/* check for items that block movement */
-		array<position> occupied_positions(16);
-		for (auto entry : requested_moves) {
-			patch_type* neighborhood[4]; position patch_positions[4];
-			unsigned int index = world.get_fixed_neighborhood(
-				entry.key, neighborhood, patch_positions);
-			patch_type& current_patch = *neighborhood[index];
-			for (item& item : current_patch.items) {
-				if (item.location == entry.key && item.deletion_time == 0 && config.item_types[item.item_type].blocks_movement) {
-					/* there is an item at our new position that blocks movement */
-					array<agent_state*>& conflicts = entry.value;
-					occupied_positions.add(conflicts[0]->current_position);
-					conflicts[0] = NULL; /* prevent any agent from moving here */
-				}
-			}
-		}
+        /* check for items that block movement */
+        array<position> occupied_positions(16);
+        for (auto entry : requested_moves) {
+            patch_type* neighborhood[4]; position patch_positions[4];
+            unsigned int index = world.get_fixed_neighborhood(
+                entry.key, neighborhood, patch_positions);
+            patch_type& current_patch = *neighborhood[index];
+            for (item& item : current_patch.items) {
+                if (item.location == entry.key && item.deletion_time == 0 && config.item_types[item.item_type].blocks_movement) {
+                    /* there is an item at our new position that blocks movement */
+                    array<agent_state*>& conflicts = entry.value;
+                    occupied_positions.add(conflicts[0]->current_position);
+                    conflicts[0] = NULL; /* prevent any agent from moving here */
+                }
+            }
+        }
 
-		/* need to ensure agents don't move into positions where other agents failed to move */
-		if (config.collision_policy != movement_conflict_policy::NO_COLLISIONS) {
-			array<position> occupied_positions(16);
-			for (auto entry : requested_moves) {
-				array<agent_state*>& conflicts = entry.value;
-				for (unsigned int i = 1; i < conflicts.length; i++)
-					occupied_positions.add(conflicts[i]->current_position);
-			}
-		}
+        /* need to ensure agents don't move into positions where other agents failed to move */
+        if (config.collision_policy != movement_conflict_policy::NO_COLLISIONS) {
+            array<position> occupied_positions(16);
+            for (auto entry : requested_moves) {
+                array<agent_state*>& conflicts = entry.value;
+                for (unsigned int i = 1; i < conflicts.length; i++)
+                    occupied_positions.add(conflicts[i]->current_position);
+            }
+        }
 
-		bool contains;
-		while (occupied_positions.length > 0) {
-			array<agent_state*>& conflicts = requested_moves.get(occupied_positions.pop(), contains);
-			if (!contains || conflicts[0] == NULL) {
-				continue;
-			}
-			else if (contains) {
-				for (unsigned int i = 0; i < conflicts.length; i++)
-					occupied_positions.add(conflicts[i]->current_position);
-				conflicts[0] = NULL; /* prevent any agent from moving here */
-			}
-		}
+        bool contains;
+        while (occupied_positions.length > 0) {
+            array<agent_state*>& conflicts = requested_moves.get(occupied_positions.pop(), contains);
+            if (!contains || conflicts[0] == NULL) {
+                continue;
+            }
+            else if (contains) {
+                for (unsigned int i = 0; i < conflicts.length; i++)
+                    occupied_positions.add(conflicts[i]->current_position);
+                conflicts[0] = NULL; /* prevent any agent from moving here */
+            }
+        }
 
-		time++;
-		acted_agent_count = 0;
-		for (auto entry : agents) {
-			agent_state* agent = entry.value;
-			if (!agent->agent_acted) continue;
+        time++;
+        acted_agent_count = 0;
+        for (auto entry : agents) {
+            agent_state* agent = entry.value;
+            if (!agent->agent_acted) continue;
 
-			agent->current_direction = agent->requested_direction;
+            agent->current_direction = agent->requested_direction;
 
-			/* check if this agent moved, in accordance with the collision policy */
-			position old_patch_position;
-			world.world_to_patch_coordinates(agent->current_position, old_patch_position);
-			if (config.collision_policy == movement_conflict_policy::NO_COLLISIONS
-				|| (agent == requested_moves.get(agent->requested_position)[0]))
-			{
-				agent->current_position = agent->requested_position;
+            /* check if this agent moved, in accordance with the collision policy */
+            position old_patch_position;
+            world.world_to_patch_coordinates(agent->current_position, old_patch_position);
+            if (config.collision_policy == movement_conflict_policy::NO_COLLISIONS
+                || (agent == requested_moves.get(agent->requested_position)[0]))
+            {
+                agent->current_position = agent->requested_position;
 
-				/* delete any items that are automatically picked up at this cell */
-				patch_type* neighborhood[4]; position patch_positions[4];
-				unsigned int index = world.get_fixed_neighborhood(
-					agent->current_position, neighborhood, patch_positions);
-				patch_type& current_patch = *neighborhood[index];
-				for (item& item : current_patch.items) {
-					if (item.location == agent->current_position && item.deletion_time == 0) {
-						/* there is an item at our new position */
-						bool collect = true;
-						for (unsigned int i = 0; i < config.item_types.length; i++) {
-							if (agent->collected_items[i] < config.item_types[item.item_type].required_item_counts[i]) {
-								collect = false; break;
-							}
-						}
+                /* delete any items that are automatically picked up at this cell */
+                patch_type* neighborhood[4]; position patch_positions[4];
+                unsigned int index = world.get_fixed_neighborhood(
+                    agent->current_position, neighborhood, patch_positions);
+                patch_type& current_patch = *neighborhood[index];
+                for (item& item : current_patch.items) {
+                    if (item.location == agent->current_position && item.deletion_time == 0) {
+                        /* there is an item at our new position */
+                        bool collect = true;
+                        for (unsigned int i = 0; i < config.item_types.length; i++) {
+                            if (agent->collected_items[i] < config.item_types[item.item_type].required_item_counts[i]) {
+                                collect = false; break;
+                            }
+                        }
 
-						if (collect) {
-							/* collect this item */
-							item.deletion_time = time;
-							agent->collected_items[item.item_type]++;
+                        if (collect) {
+                            /* collect this item */
+                            item.deletion_time = time;
+                            agent->collected_items[item.item_type]++;
 
-							for (unsigned int i = 0; i < config.item_types.length; i++) {
-								if (agent->collected_items[i] < config.item_types[item.item_type].required_item_costs[i])
-									agent->collected_items[i] = 0;
-								else agent->collected_items[i] -= config.item_types[item.item_type].required_item_costs[i];
-							}
-						}
-					}
-				}
+                            for (unsigned int i = 0; i < config.item_types.length; i++) {
+                                if (agent->collected_items[i] < config.item_types[item.item_type].required_item_costs[i])
+                                    agent->collected_items[i] = 0;
+                                else agent->collected_items[i] -= config.item_types[item.item_type].required_item_costs[i];
+                            }
+                        }
+                    }
+                }
 
-				if (old_patch_position != patch_positions[index]) {
-					patch_type& prev_patch = world.get_existing_patch(old_patch_position);
-					prev_patch.data.patch_lock.lock();
-					prev_patch.data.agents.remove(prev_patch.data.agents.index_of(agent));
-					prev_patch.data.patch_lock.unlock();
-					current_patch.data.patch_lock.lock();
-					current_patch.data.agents.add(agent);
-					current_patch.data.patch_lock.unlock();
-				}
-			}
-			agent->agent_acted = false;
-		}
+                if (old_patch_position != patch_positions[index]) {
+                    patch_type& prev_patch = world.get_existing_patch(old_patch_position);
+                    prev_patch.data.patch_lock.lock();
+                    prev_patch.data.agents.remove(prev_patch.data.agents.index_of(agent));
+                    prev_patch.data.patch_lock.unlock();
+                    current_patch.data.patch_lock.lock();
+                    current_patch.data.agents.add(agent);
+                    current_patch.data.patch_lock.unlock();
+                }
+            }
+            agent->agent_acted = false;
+        }
 
 #if !defined(NDEBUG)
-		/* check for collisions, if there aren't supposed to be any */
-		if (config.collision_policy != movement_conflict_policy::NO_COLLISIONS) {
-			for (unsigned int i = 0; i < agents.table.capacity; i++) {
-				if (is_empty(agents.table.keys[i])) continue;
-				for (unsigned int j = i + 1; j < agents.table.capacity; j++) {
-					if (is_empty(agents.table.keys[j])) continue;
-					if (agents.values[i]->current_position == agents.values[j]->current_position)
-						fprintf(stderr, "simulator.step WARNING: Agents %u and %u are at the same position.\n", i, j);
-				}
-			}
+        /* check for collisions, if there aren't supposed to be any */
+        if (config.collision_policy != movement_conflict_policy::NO_COLLISIONS) {
+            for (unsigned int i = 0; i < agents.table.capacity; i++) {
+                if (is_empty(agents.table.keys[i])) continue;
+                for (unsigned int j = i + 1; j < agents.table.capacity; j++) {
+                    if (is_empty(agents.table.keys[j])) continue;
+                    if (agents.values[i]->current_position == agents.values[j]->current_position)
+                        fprintf(stderr, "simulator.step WARNING: Agents %u and %u are at the same position.\n", i, j);
+                }
+            }
         }
 #endif
 
@@ -1777,7 +1777,7 @@ private:
 
     inline void update_agent_scent_and_vision() {
         for (auto entry : agents) {
-			agent_state* agent = entry.value;
+            agent_state* agent = entry.value;
             patch_type* neighborhood[4]; position patch_positions[4];
             world.get_fixed_neighborhood(
                 agent->current_position, neighborhood, patch_positions);
@@ -1837,7 +1837,7 @@ bool init(simulator<SimulatorData>& sim,
     sim.time = 0;
     sim.acted_agent_count = 0;
     sim.active_agent_count = 0;
-	sim.agent_id_counter = 1;
+    sim.agent_id_counter = 1;
     if (!init(sim.data, data)) {
         return false;
     } else if (!hash_map_init(sim.agents, 32)) {
@@ -1887,7 +1887,7 @@ inline bool init(simulator<SimulatorData>& sim,
 
 template<typename Stream>
 inline bool read(agent_state*& agent, Stream& in,
-		const hash_map<uint64_t, agent_state*>& agents)
+        const hash_map<uint64_t, agent_state*>& agents)
 {
     uint64_t id;
     if (!read(id, in)) return false;
@@ -1918,27 +1918,27 @@ bool read(simulator<SimulatorData>& sim, Stream& in, const SimulatorData& data)
         free(sim.data); return false;
     }
 
-	unsigned int agent_count;
-	if (!read(agent_count, in)
-	 || !hash_map_init(sim.agents, ((size_t)1) << (core::log2(agent_count) + 1) * RESIZE_THRESHOLD_INVERSE))
-	{
-		free(sim.data); free(sim.config);
-		return false;
-	}
+    unsigned int agent_count;
+    if (!read(agent_count, in)
+     || !hash_map_init(sim.agents, ((size_t)1) << (core::log2(agent_count) + 1) * RESIZE_THRESHOLD_INVERSE))
+    {
+        free(sim.data); free(sim.config);
+        return false;
+    }
 
-	for (unsigned int i = 0; i < agent_count; i++) {
-		uint64_t id;
-		agent_state* agent = (agent_state*) malloc(sizeof(agent_state));
-		if (agent == nullptr || !read(id, in) || !read(*agent, in, sim.config)) {
-			if (agent != nullptr) free(agent);
-			for (auto entry : sim.agents) {
-				free(*entry.value); free(entry.value);
-			}
-			free(sim.data); free(sim.agents);
-			free(sim.config); return false;
-		}
-		sim.agents.put(id, agent);
-	}
+    for (unsigned int i = 0; i < agent_count; i++) {
+        uint64_t id;
+        agent_state* agent = (agent_state*) malloc(sizeof(agent_state));
+        if (agent == nullptr || !read(id, in) || !read(*agent, in, sim.config)) {
+            if (agent != nullptr) free(agent);
+            for (auto entry : sim.agents) {
+                free(*entry.value); free(entry.value);
+            }
+            free(sim.data); free(sim.agents);
+            free(sim.config); return false;
+        }
+        sim.agents.put(id, agent);
+    }
 
     if (!read(sim.world, in, sim.config.item_types.data, (unsigned int) sim.config.item_types.length, sim.agents)) {
         for (auto entry : sim.agents) {
@@ -1950,9 +1950,9 @@ bool read(simulator<SimulatorData>& sim, Stream& in, const SimulatorData& data)
 
     default_scribe scribe;
     if (!read(sim.requested_moves, in, alloc_position_keys, scribe, sim.agents)) {
-		for (auto entry : sim.agents) {
-			free(*entry.value); free(entry.value);
-		}
+        for (auto entry : sim.agents) {
+            free(*entry.value); free(entry.value);
+        }
         free(sim.data); free(sim.agents);
         free(sim.config); free(sim.world); return false;
     }
@@ -1963,9 +1963,9 @@ bool read(simulator<SimulatorData>& sim, Stream& in, const SimulatorData& data)
             (double) sim.config.decay_param, sim.config.patch_size,
             sim.config.deleted_item_lifetime))
     {
-		for (auto entry : sim.agents) {
-			free(*entry.value); free(entry.value);
-		}
+        for (auto entry : sim.agents) {
+            free(*entry.value); free(entry.value);
+        }
         for (auto entry : sim.requested_moves)
             free(entry.value);
         free(sim.data); free(sim.world); free(sim.agents);
@@ -1992,16 +1992,16 @@ bool write(const simulator<SimulatorData>& sim, Stream& out)
         return false;
 
     hash_map<const agent_state*, uint64_t> agent_ids((unsigned int) sim.agents.table.size * RESIZE_THRESHOLD_INVERSE);
-	if (!write(sim.agents.table.size, out)) return false;
-	for (const auto& entry : sim.agents) {
-		if (!agent_ids.put(entry.value, entry.key)
-		 || !write(entry.key, out) || !write(*entry.value, out, sim.config))
-		{
-			return false;
-		}
-	}
+    if (!write(sim.agents.table.size, out)) return false;
+    for (const auto& entry : sim.agents) {
+        if (!agent_ids.put(entry.value, entry.key)
+         || !write(entry.key, out) || !write(*entry.value, out, sim.config))
+        {
+            return false;
+        }
+    }
 
-	default_scribe scribe;
+    default_scribe scribe;
     return write(sim.world, out, agent_ids)
         && write(sim.requested_moves, out, scribe, agent_ids)
         && write(sim.time, out)
