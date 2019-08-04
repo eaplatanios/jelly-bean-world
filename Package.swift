@@ -21,11 +21,11 @@ let package = Package(
       path: ".", 
       sources: [
         "api/swift/Sources/CJellyBeanWorld",
-        "core/jbw/simulator.cpp"],
+        "jbw/simulator.cpp"],
       publicHeadersPath: "api/swift/Sources/CJellyBeanWorld",
       cxxSettings: [
-        .headerSearchPath("core"),
-        .headerSearchPath("core/deps"),
+        .headerSearchPath("jbw"),
+        .headerSearchPath("jbw/deps"),
         .unsafeFlags([
           "-std=c++11", "-Wall", "-Wpedantic", "-Ofast", "-DNDEBUG", 
           "-fno-stack-protector", "-mtune=native", "-march=native",

@@ -2,6 +2,11 @@
 
 temp/
 
+# Compiled Executables
+jbw/simulator_test
+jbw/visualizer/renderer_test
+jbw/visualizer/visualizer_test
+
 # IntelliJ
 **/.idea/**/*
 

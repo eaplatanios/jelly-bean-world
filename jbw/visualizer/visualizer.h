@@ -1,7 +1,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include "vulkan_renderer.h"
-#include "../jbw/simulator.h"
+#include "../simulator.h"
 
 namespace jbw {
 
@@ -267,8 +267,8 @@ public:
 			vertex vertices[] = {
 				{{(float) bottom_left_corner.x * patch_size, (float) bottom_left_corner.y * patch_size}, {(float) texture_width / width, 0.0f}},
 				{{(float) bottom_left_corner.x * patch_size, (float) top_right_corner.y * patch_size}, {(float) texture_width / width, (float) texture_height / height}},
-				{{(float) top_right_corner.x * patch_size, (float) top_right_corner.y * patch_size}, {0.0f, (float) texture_height / height}},
-				{{(float) top_right_corner.x * patch_size, (float) bottom_left_corner.x * patch_size}, {0.0f, 0.0f}}
+				{{(float) top_right_corner.x * patch_size, (float) bottom_left_corner.x * patch_size}, {0.0f, 0.0f}},
+				{{(float) top_right_corner.x * patch_size, (float) top_right_corner.y * patch_size}, {0.0f, (float) texture_height / height}}
 			};
 			renderer.fill_vertex_buffer(scent_quad_buffer, vertices, sizeof(vertex) * 4);
 
@@ -322,7 +322,7 @@ private:
 		uint32_t ub_binding = 0;
 		uint32_t texture_binding = 1;
 		descriptor_type pool_types[] = { descriptor_type::UNIFORM_BUFFER, descriptor_type::COMBINED_IMAGE_SAMPLER };
-		if (!renderer.create_graphics_pipeline(pipeline, vertex_shader, "main", fragment_shader, "main", primitive_topology::TRIANGLE_FAN, binding, attributes, &layout, 1)) {
+		if (!renderer.create_graphics_pipeline(pipeline, vertex_shader, "main", fragment_shader, "main", primitive_topology::TRIANGLE_STRIP, binding, attributes, &layout, 1)) {
 			return false;
 		} else if (!renderer.create_frame_buffer(fb, pipeline)) {
 			renderer.delete_graphics_pipeline(pipeline);

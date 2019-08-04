@@ -64,7 +64,7 @@ class Item(object):
 
 class IntensityFunction(Enum):
   """Item intensity function used in the Gibbs sampler for map generation.
-  See `core/jbw/energy_functions.h` for implementations of these functions."""
+  See `jbw/energy_functions.h` for implementations of these functions."""
 
   ZERO = 0
   """A function that always outputs zero: f_i(x) = 0."""
@@ -76,7 +76,7 @@ class IntensityFunction(Enum):
 
 class InteractionFunction(Enum):
   """Item interaction function used in the Gibbs sampler for map generation.
-  See `core/jbw/energy_functions.h` for implementations of these functions."""
+  See `jbw/energy_functions.h` for implementations of these functions."""
 
   ZERO = 0
   """A function that always outputs zero: f_ij(x,y) = 0."""
