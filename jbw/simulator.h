@@ -2001,8 +2001,9 @@ bool write(const simulator<SimulatorData>& sim, Stream& out)
 		}
 	}
 
+	default_scribe scribe;
     return write(sim.world, out, agent_ids)
-        && write(sim.requested_moves, out, default_scribe(), agent_ids)
+        && write(sim.requested_moves, out, scribe, agent_ids)
         && write(sim.time, out)
         && write(sim.acted_agent_count, out)
         && write(sim.active_agent_count, out);

@@ -662,7 +662,7 @@ inline bool init(client_data& data) {
  * \param   time    The new simulation time of `sim`.
  */
 void on_step(simulator<simulator_data>* sim,
-    const array<agent_state*>& agents, uint64_t time)
+    const hash_map<uint64_t, agent_state*>& agents, uint64_t time)
 {
   simulator_data& data = sim->get_data();
   if (data.server.status != server_status::STOPPING) {
@@ -678,7 +678,7 @@ void on_step(simulator<simulator_data>* sim,
   }
   const simulator_config& config = sim->get_config();
   for (size_t i = 0; i < data.agent_ids.length; i++) {
-    if (!init(agent_states[i], *agents[(size_t) data.agent_ids[i]], config, data.agent_ids[i])) {
+    if (!init(agent_states[i], *agents.get(data.agent_ids[i]), config, data.agent_ids[i])) {
       fprintf(stderr, "on_step ERROR: Insufficient memory for agent_state.\n");
       for (size_t j = 0; j < i; j++) free(agent_states[j]);
       free(agent_states); return;

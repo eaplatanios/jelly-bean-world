@@ -434,7 +434,7 @@ void on_step(client<client_data>& c,
 
 void on_lost_connection(client<client_data>& c) {
 	print_lock.lock();
-	fprintf(out, "Client %I64u lost connection to server.\n", c.data.client_id);
+	fprintf(out, "Client %" PRIu64 " lost connection to server.\n", c.data.client_id);
 	print_lock.unlock();
 	c.client_running = false;
 	c.data.condition.notify_one();
