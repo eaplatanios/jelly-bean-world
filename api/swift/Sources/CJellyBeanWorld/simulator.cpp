@@ -763,6 +763,29 @@ void on_add_agent(client<client_data>& c, uint64_t agent_id,
 
 
 /**
+ * The callback invoked when the client receives a remove_agent response from
+ * the server. This function wakes up the parent thread (which should be
+ * waiting in the `simulatorRemoveAgent` function) so that it can return the
+ * response back to Python.
+ *
+ * \param   c         The client that received the response.
+ * \param   agent_id  The ID of the removed agent.
+ * \param   response  The MPI response from the server, containing information
+ *                    about any errors.
+ */
+void on_remove_agent(client<client_data>& c,
+    uint64_t agent_id, mpi_response response)
+{
+    check_response(response, "remove_agent: ");
+
+    std::unique_lock<std::mutex> lck(c.data.lock);
+    c.data.waiting_for_server = false;
+    c.data.server_response = response;
+    c.data.cv.notify_one();
+}
+
+
+/**
  * The callback invoked when the client receives a move response from the
  * server. This function copies the result into `c.data.server_response` and
  * wakes up the parent thread (which should be waiting in the
@@ -1112,6 +1135,45 @@ AgentSimulationState simulatorAddAgent(void* simulatorHandle, void* clientHandle
     wait_for_server(*client_ptr);
 
     return client_ptr->data.response_data.agent_state;
+  }
+}
+
+
+bool simulatorRemoveAgent(
+  void* simulatorHandle,
+  void* clientHandle,
+  uint64_t agentId)
+{
+  if (clientHandle == nullptr) {
+    /* the simulation is local, so call add_agent directly */
+    simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
+    if (!sim_handle->remove_agent(agentId))
+      return false;
+
+    array<uint64_t>& agent_ids = sim_handle->get_data().agent_ids;
+    unsigned int index = agent_ids.index_of(agentId);
+    if (index != agent_ids.length)
+      agent_ids.remove(index);
+    return true;
+  } else {
+    /* this is a client, so send an add_agent message to the server */
+    client<client_data>* client_ptr =
+        (client<client_data>*) clientHandle;
+    if (!client_ptr->client_running) {
+      /* TODO: communicate "Connection to the server was lost." error to swift */
+      return false;
+    }
+
+    client_ptr->data.waiting_for_server = true;
+    if (!send_remove_agent(*client_ptr, agentId)) {
+      /* TODO: communicate "Unable to send add_agent request." error to swift */
+      return false;
+    }
+
+    /* wait for response from server */
+    wait_for_server(*client_ptr);
+
+    return client_ptr->data.server_response == mpi_response::SUCCESS;
   }
 }
 

@@ -131,8 +131,9 @@ class MapVisualizer(object):
 			self._ax.add_collection(PatchCollection(patches, match_original=True))
 
 		# draw the agent's perspective
-		if self._ax_agent != None and (0 in self._sim.agents):
-			agent = self._sim.agents[0]
+		if self._ax_agent != None and len(self._sim.agents) > 0:
+			agent_ids = sorted(self._sim.agents.keys())
+			agent = self._sim.agents[agent_ids[0]]
 			R = self._config.vision_range
 			self._ax_agent.clear()
 			self._ax_agent.set_xlim([-R - 0.5, R + 0.5])

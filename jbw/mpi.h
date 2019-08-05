@@ -29,6 +29,8 @@ constexpr uint64_t NEW_CLIENT_REQUEST = 0;
 enum class message_type : uint64_t {
 	ADD_AGENT = 0,
 	ADD_AGENT_RESPONSE,
+	REMOVE_AGENT,
+	REMOVE_AGENT_RESPONSE,
 	MOVE,
 	MOVE_RESPONSE,
 	TURN,
@@ -70,6 +72,7 @@ template<typename Stream>
 inline bool print(const message_type& type, Stream& out) {
 	switch (type) {
 	case message_type::ADD_AGENT:        return core::print("ADD_AGENT", out);
+	case message_type::REMOVE_AGENT:     return core::print("REMOVE_AGENT", out);
 	case message_type::MOVE:             return core::print("MOVE", out);
 	case message_type::TURN:             return core::print("TURN", out);
 	case message_type::DO_NOTHING:       return core::print("DO_NOTHING", out);
@@ -78,6 +81,7 @@ inline bool print(const message_type& type, Stream& out) {
 	case message_type::IS_ACTIVE:        return core::print("IS_ACTIVE", out);
 
 	case message_type::ADD_AGENT_RESPONSE:        return core::print("ADD_AGENT_RESPONSE", out);
+	case message_type::REMOVE_AGENT_RESPONSE:     return core::print("REMOVE_AGENT_RESPONSE", out);
 	case message_type::MOVE_RESPONSE:             return core::print("MOVE_RESPONSE", out);
 	case message_type::TURN_RESPONSE:             return core::print("TURN_RESPONSE", out);
 	case message_type::DO_NOTHING_RESPONSE:       return core::print("DO_NOTHING_RESPONSE", out);
@@ -282,6 +286,41 @@ inline bool receive_add_agent(
 }
 
 template<typename Stream, typename SimulatorData>
+inline bool receive_remove_agent(
+		Stream& in, socket_type& connection,
+		array<uint64_t>& agent_ids,
+		simulator<SimulatorData>& sim)
+{
+	uint64_t agent_id = UINT64_MAX;
+	mpi_response response;
+	bool success = true;
+	if (!read(agent_id, in)) {
+		response = mpi_response::SERVER_PARSE_MESSAGE_ERROR;
+		success = false;
+	} else {
+		unsigned int index = agent_ids.index_of(agent_id);
+		if (index == agent_ids.length) {
+			response = mpi_response::INVALID_AGENT_ID;
+		} else {
+			agent_ids.remove(index);
+			if (sim.remove_agent(agent_id)) {
+				response = mpi_response::SUCCESS;
+			} else {
+				response = mpi_response::FAILURE;
+				agent_ids[agent_ids.length++] = agent_id;
+			}
+		}
+	}
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(response));
+	fixed_width_stream<memory_stream> out(mem_stream);
+
+	success &= write(message_type::REMOVE_AGENT_RESPONSE, out)
+			&& write(agent_id, out) && write(response, out)
+			&& send_message(connection, mem_stream.buffer, mem_stream.position);
+	return success;
+}
+
+template<typename Stream, typename SimulatorData>
 inline bool receive_move(
 		Stream& in, socket_type& connection,
 		const array<uint64_t>& agent_ids,
@@ -479,6 +518,8 @@ void server_process_message(socket_type& connection,
 	switch (type) {
 		case message_type::ADD_AGENT:
 			receive_add_agent(in, connection, state.agent_ids.get(client_id), sim); return;
+		case message_type::REMOVE_AGENT:
+			receive_remove_agent(in, connection, state.agent_ids.get(client_id), sim); return;
 		case message_type::MOVE:
 			receive_move(in, connection, state.agent_ids.get(client_id), sim); return;
 		case message_type::TURN:
@@ -493,6 +534,7 @@ void server_process_message(socket_type& connection,
 			receive_is_active(in, connection, state.agent_ids.get(client_id), sim); return;
 
 		case message_type::ADD_AGENT_RESPONSE:
+		case message_type::REMOVE_AGENT_RESPONSE:
 		case message_type::MOVE_RESPONSE:
 		case message_type::TURN_RESPONSE:
 		case message_type::DO_NOTHING_RESPONSE:
@@ -798,6 +840,25 @@ bool send_add_agent(ClientType& c) {
 }
 
 /**
+ * Sends a `remove_agent` message to the server from the client `c`. Once the
+ * server responds, the function
+ * `on_remove_agent(ClientType&, uint64_t, mpi_response)` will be invoked,
+ * where the first argument is `c`, the second is the ID of the agent, and the
+ * third is the response (SUCCESS if successful, and a different value if an
+ * error occurred).
+ *
+ * \returns `true` if the sending is successful; `false` otherwise.
+ */
+template<typename ClientType>
+bool send_remove_agent(ClientType& c, uint64_t agent_id) {
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id));
+	fixed_width_stream<memory_stream> out(mem_stream);
+	return write(message_type::REMOVE_AGENT, out)
+		&& write(agent_id, out)
+		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
+}
+
+/**
  * Sends a `move` message to the server from the client `c`. Once the server
  * responds, the function `on_move(ClientType&, uint64_t, mpi_response)` will
  * be invoked, where the first argument is `c`, the second is `agent_id`, and
@@ -936,6 +997,20 @@ inline bool receive_add_agent_response(ClientType& c) {
 	}
 	on_add_agent(c, agent_id, response, state);
 	if (agent_id != UINT64_MAX) free(state);
+	return success;
+}
+
+template<typename ClientType>
+inline bool receive_remove_agent_response(ClientType& c) {
+	mpi_response response;
+	uint64_t agent_id = 0;
+	bool success = true;
+	fixed_width_stream<socket_type> in(c.connection);
+	if (!read(agent_id, in) || !read(response, in)) {
+		response = mpi_response::CLIENT_PARSE_MESSAGE_ERROR;
+		success = false;
+	}
+	on_remove_agent(c, agent_id, response);
 	return success;
 }
 
@@ -1101,6 +1176,8 @@ void run_response_listener(ClientType& c) {
 		switch (type) {
 		case message_type::ADD_AGENT_RESPONSE:
 			receive_add_agent_response(c); continue;
+		case message_type::REMOVE_AGENT_RESPONSE:
+			receive_remove_agent_response(c); continue;
 		case message_type::MOVE_RESPONSE:
 			receive_move_response(c); continue;
 		case message_type::TURN_RESPONSE:
@@ -1117,6 +1194,7 @@ void run_response_listener(ClientType& c) {
 			receive_step_response(c); continue;
 
 		case message_type::ADD_AGENT:
+		case message_type::REMOVE_AGENT:
 		case message_type::MOVE:
 		case message_type::TURN:
 		case message_type::DO_NOTHING:

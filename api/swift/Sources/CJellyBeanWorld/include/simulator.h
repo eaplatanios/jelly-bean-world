@@ -198,6 +198,11 @@ AgentSimulationState simulatorAddAgent(
   void* simulatorHandle,
   void* clientHandle);
 
+bool simulatorRemoveAgent(
+  void* simulatorHandle,
+  void* clientHandle,
+  uint64_t agentId);
+
 bool simulatorMoveAgent(
   void* simulatorHandle,
   void* clientHandle,

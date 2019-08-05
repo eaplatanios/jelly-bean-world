@@ -1259,6 +1259,40 @@ public:
     }
 
     /**
+     * Removes the given agent from this simulator.
+     *
+     * \param   agent_id  ID of the agent to remove.
+     * \returns `true` if the agent is removed; `false` otherwise.
+     */
+    inline bool remove_agent(uint64_t agent_id) {
+        agent_states_lock.lock();
+        bool contains; unsigned int bucket;
+        agent_state* agent = agents.get(agent_id, contains, bucket);
+        if (!contains) {
+            fprintf(stderr, "simulator.remove_agent ERROR: Given agent is not in this simulator.\n");
+            agent_states_lock.unlock();
+            return false;
+        }
+        agents.remove_at(bucket);
+        agent->lock.lock();
+        if (agent->agent_acted) {
+            unrequest_position(*agent);
+            --acted_agent_count;
+        }
+        if (agent->agent_active)
+            --active_agent_count;
+        agent->lock.unlock();
+        core::free(*agent, world, scent_model, config, time);
+        core::free(agent);
+
+        if (acted_agent_count == active_agent_count)
+            step(); /* advance the simulation by one time step */
+        agent_states_lock.unlock();
+
+        return true;
+    }
+
+    /**
      * Sets whether the agent with the given ID is active.
      */
     inline void set_agent_active(uint64_t agent_id, bool active) {
@@ -1804,6 +1838,20 @@ private:
         if (agent.current_position == agent.requested_position)
             core::swap(agents[0], agents.last());
         requested_move_lock.unlock();
+    }
+
+    inline void unrequest_position(agent_state& agent)
+    {
+        if (!agent.agent_acted || config.collision_policy == movement_conflict_policy::NO_COLLISIONS)
+            return;
+
+        bool contains; unsigned int bucket;
+        std::unique_lock<std::mutex> lock(requested_move_lock);
+        array<agent_state*>& agents = requested_moves.get(agent.requested_position, contains, bucket);
+        if (!contains) return;
+        unsigned int index = agents.index_of(&agent);
+        if (index != agents.length)
+            agents.remove(index);
     }
 
     inline void free_helper() {
