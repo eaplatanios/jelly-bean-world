@@ -18,6 +18,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "status.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -177,18 +179,21 @@ typedef struct SimulationClientInfo {
 
 void* simulatorCreate(
   const SimulatorConfig* config,
-  OnStepCallback onStepCallback);
+  OnStepCallback onStepCallback,
+  JBW_Status* status);
 
 SimulatorInfo simulatorLoad(
   const char* filePath,
-  OnStepCallback onStepCallback);
+  OnStepCallback onStepCallback,
+  JBW_Status* status);
 
 void simulatorDelete(
   void* simulatorHandle);
 
-bool simulatorSave(
+void simulatorSave(
   void* simulatorHandle,
-  const char* filePath);
+  const char* filePath,
+  JBW_Status* status);
 
 void simulatorSetStepCallbackData(
   void* simulatorHandle,
@@ -196,53 +201,62 @@ void simulatorSetStepCallbackData(
 
 AgentSimulationState simulatorAddAgent(
   void* simulatorHandle,
-  void* clientHandle);
+  void* clientHandle,
+  JBW_Status* status);
 
-bool simulatorRemoveAgent(
+void simulatorRemoveAgent(
   void* simulatorHandle,
   void* clientHandle,
-  uint64_t agentId);
+  uint64_t agentId,
+  JBW_Status* status);
 
-bool simulatorMoveAgent(
+void simulatorMoveAgent(
   void* simulatorHandle,
   void* clientHandle,
   uint64_t agentId,
   Direction direction,
-  unsigned int numSteps);
+  unsigned int numSteps,
+  JBW_Status* status);
 
-bool simulatorTurnAgent(
+void simulatorTurnAgent(
   void* simulatorHandle,
   void* clientHandle,
   uint64_t agentId,
-  TurnDirection direction);
+  TurnDirection direction,
+  JBW_Status* status);
 
-bool simulatorNoOpAgent(
+void simulatorNoOpAgent(
   void* simulatorHandle,
   void* clientHandle,
-  uint64_t agentId);
+  uint64_t agentId,
+  JBW_Status* status);
 
 void simulatorSetActive(
   void* simulatorHandle,
   void* clientHandle,
   uint64_t agentId,
-  bool active);
+  bool active,
+  JBW_Status* status);
 
 bool simulatorIsActive(
   void* simulatorHandle,
   void* clientHandle,
-  uint64_t agentId);
+  uint64_t agentId,
+  JBW_Status* status);
 
 const SimulationMap simulatorMap(
   void* simulatorHandle,
   void* clientHandle,
   Position bottomLeftCorner,
-  Position topRightCorner);
+  Position topRightCorner,
+  JBW_Status* status);
 
 void* simulationServerStart(
   void* simulatorHandle,
   unsigned int port,
   unsigned int connectionQueueCapacity,
-  unsigned int numWorkers);
+  unsigned int numWorkers,
+  JBW_Status* status);
 
 void simulationServerStop(
   void* serverHandle);
@@ -251,14 +265,16 @@ SimulationNewClientInfo simulationClientConnect(
   const char* serverAddress,
   unsigned int serverPort,
   OnStepCallback onStepCallback,
-  LostConnectionCallback lostConnectionCallback);
+  LostConnectionCallback lostConnectionCallback,
+  JBW_Status* status);
 
 SimulationClientInfo simulationClientReconnect(
   const char* serverAddress,
   unsigned int serverPort,
   OnStepCallback onStepCallback,
   LostConnectionCallback lostConnectionCallback,
-  uint64_t clientId);
+  uint64_t clientIds,
+  JBW_Status* status);
 
 void simulationClientStop(
   void* clientHandle);

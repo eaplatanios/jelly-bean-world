@@ -17,8 +17,19 @@ import Foundation
 import TensorFlow
 
 public enum JellyBeanWorldError: Error {
+  case NativeError(String) // TODO: This is temporary.
   /// Failure while trying to save the simulator state at the specified path.
   case SimulatorSaveFailure(URL)
+}
+
+@usableFromInline
+internal func checkStatus(_ status: UnsafeMutablePointer<JBW_Status>?) throws {
+  let status = status!.pointee
+  let message = String(cString: status.message)
+  switch status.code {
+  case JBW_OK: ()
+  case _: throw JellyBeanWorldError.NativeError(message)
+  }
 }
 
 /// Position in the simulation map.
@@ -110,20 +121,24 @@ public final class Simulator {
   public init(
     using configuration: Configuration,
     serverConfiguration: ServerConfiguration? = nil
-  ) {
+  ) throws {
     self.configuration = configuration
     self.serverConfiguration = serverConfiguration
     self.clientConfiguration = nil
     var cConfig = configuration.toC()
     defer { cConfig.deallocate() }
-    self.handle = simulatorCreate(&cConfig.configuration, nativeOnStepCallback)
+    var status = JBW_NewStatus()
+    defer { JBW_DeleteStatus(status) }
+    self.handle = simulatorCreate(&cConfig.configuration, nativeOnStepCallback, status)
+    try checkStatus(status)
     simulatorSetStepCallbackData(handle, Unmanaged.passUnretained(self).toOpaque())
     if let config = serverConfiguration {
       self.serverHandle = simulationServerStart(
         handle,
         config.port,
         config.connectionQueueCapacity,
-        config.workerCount)
+        config.workerCount, status)
+      try checkStatus(status)
     }
   }
 
@@ -140,8 +155,11 @@ public final class Simulator {
     fromFile file: URL,
     agents: [Agent],
     serverConfiguration: ServerConfiguration? = nil
-  ) {
-    let cSimulatorInfo = simulatorLoad(file.absoluteString, nativeOnStepCallback)
+  ) throws {
+    var status = JBW_NewStatus()
+    defer { JBW_DeleteStatus(status) }
+    let cSimulatorInfo = simulatorLoad(file.absoluteString, nativeOnStepCallback, status)
+    try checkStatus(status)
     defer { simulatorDeleteSimulatorInfo(cSimulatorInfo) }
     self.handle = cSimulatorInfo.handle
     self.configuration = Configuration(fromC: cSimulatorInfo.config)
@@ -166,7 +184,9 @@ public final class Simulator {
         handle,
         config.port,
         config.connectionQueueCapacity,
-        config.workerCount)
+        config.workerCount,
+        status)
+      try checkStatus(status)
     }
   }
 
@@ -204,8 +224,11 @@ public final class Simulator {
   /// - Parameter agent: The agent to be added to this simulator.
   /// - Returns: ID of the new agent.
   @inlinable
-  public func add(agent: Agent) -> UInt64 {
-    let state = simulatorAddAgent(handle, clientHandle)
+  public func add(agent: Agent) throws -> UInt64 {
+    var status = JBW_NewStatus()
+    defer { JBW_DeleteStatus(status) }
+    let state = simulatorAddAgent(handle, clientHandle, status)
+    try checkStatus(status)
     defer { simulatorDeleteAgentSimulationState(state) }
     let id = state.id
     agents[id] = agent
@@ -216,36 +239,44 @@ public final class Simulator {
   /// Removes the agent with ID `agentID` from this simulator.
   ///
   /// - Parameter id: ID of the agent to remove.
-  /// - Returns: Boolean value indicating whether the removal was successful.
   @inlinable
-  public func remove(agentWithID id: UInt64) -> Bool {
-    simulatorRemoveAgent(handle, clientHandle, id)
+  public func remove(agentWithID id: UInt64) throws {
+    var status = JBW_NewStatus()
+    defer { JBW_DeleteStatus(status) }
+    simulatorRemoveAgent(handle, clientHandle, id, status)
+    try checkStatus(status)
   }
 
   /// Activates the agent with ID `agentID` managed by this simulator.
   ///
   /// - Parameter id: ID of the agent to activate.
   @inlinable
-  public func activate(agentWithID id: UInt64) {
-    simulatorSetActive(handle, clientHandle, id, true)
+  public func activate(agentWithID id: UInt64) throws {
+    var status = JBW_NewStatus()
+    defer { JBW_DeleteStatus(status) }
+    simulatorSetActive(handle, clientHandle, id, true, status)
+    try checkStatus(status)
   }
 
   /// Deactivates the agent with ID `agentID` managed by this simulator.
   ///
   /// - Parameter id: ID of the agent to deactivate.
   @inlinable
-  public func deactivate(agentWithID id: UInt64) {
-    simulatorSetActive(handle, clientHandle, id, false)
+  public func deactivate(agentWithID id: UInt64) throws {
+    var status = JBW_NewStatus()
+    defer { JBW_DeleteStatus(status) }
+    simulatorSetActive(handle, clientHandle, id, false, status)
+    try checkStatus(status)
   }
 
   /// Performs a simulation step.
   ///
   /// - Note: This function will block until all the agents managed by this simulator has acted.
   @inlinable
-  public func step() {
+  public func step() throws {
     if agents.count == 1 {
       let id = agents.first!.key
-      agents[id]!.act(using: agentStates[id]!).invoke(
+      try agents[id]!.act(using: agentStates[id]!).invoke(
         simulatorHandle: handle,
         clientHandle: clientHandle,
         agentID: id)
@@ -260,7 +291,8 @@ public final class Simulator {
       for id in agents.keys {
         let state = agentStates[id]!
         dispatchQueue!.async {
-          self.agents[id]!.act(using: state).invoke(
+          // TODO: !!!! Fix this by propagating the error upwards.
+          try! self.agents[id]!.act(using: state).invoke(
             simulatorHandle: self.handle,
             clientHandle: self.clientHandle,
             agentID: id)
@@ -275,9 +307,10 @@ public final class Simulator {
   /// - Parameter file: File in which to save the state of this simulator.
   @inlinable
   public func save(to file: URL) throws {
-    if !simulatorSave(handle, file.absoluteString) {
-      throw JellyBeanWorldError.SimulatorSaveFailure(file)
-    }
+    var status = JBW_NewStatus()
+    defer { JBW_DeleteStatus(status) }
+    simulatorSave(handle, file.absoluteString, status)
+    try checkStatus(status)
   }
 
   /// Returns the portion of the simulator map that lies within the rectangle formed by the
@@ -290,8 +323,12 @@ public final class Simulator {
   internal func map(
     bottomLeft: Position = Position(x: Int64.min, y: Int64.min),
     topRight: Position = Position(x: Int64.max, y: Int64.max)
-  ) -> SimulationMap {
-    let cSimulationMap = simulatorMap(handle, clientHandle, bottomLeft.toC(), topRight.toC())
+   ) throws -> SimulationMap {
+    var status = JBW_NewStatus()
+    defer { JBW_DeleteStatus(status) }
+    let cSimulationMap = simulatorMap(
+      handle, clientHandle, bottomLeft.toC(), topRight.toC(), status)
+    try checkStatus(status)
     defer { simulatorDeleteSimulationMap(cSimulationMap) }
     return SimulationMap(fromC: cSimulationMap, using: configuration)
   }
@@ -533,20 +570,24 @@ public enum Action {
     simulatorHandle: UnsafeMutableRawPointer?,
     clientHandle: UnsafeMutableRawPointer?,
     agentID: UInt64
-  ) {
+  ) throws {
+    var status = JBW_NewStatus()
+    defer { JBW_DeleteStatus(status) }
     switch self {
     case .none:
-      simulatorNoOpAgent(simulatorHandle, clientHandle, agentID)
+      simulatorNoOpAgent(simulatorHandle, clientHandle, agentID, status)
     case let .move(direction, stepCount):
       simulatorMoveAgent(
         simulatorHandle,
         clientHandle,
         agentID,
         direction.toC(),
-        UInt32(stepCount))
+        UInt32(stepCount),
+        status)
     case let .turn(direction):
-      simulatorTurnAgent(simulatorHandle, clientHandle, agentID, direction.toC())
+      simulatorTurnAgent(simulatorHandle, clientHandle, agentID, direction.toC(), status)
     }
+    try checkStatus(status)
   }
 }
 

@@ -94,14 +94,14 @@ public final class MapVisualizer {
     }
   }
 
-  public func draw() {
+  public func draw() throws {
     if !Bool(plt.fignum_exists(figureID))! {
       fatalError("The Jelly Bean World rendering window has been closed.")
     }
 
     let bottomLeft = Position(x: Int64(floor(xLim.0)), y: Int64(floor(yLim.0)))
     let topRight = Position(x: Int64(ceil(xLim.1)), y: Int64(ceil(yLim.1)))
-    let map = simulator.map(bottomLeft: bottomLeft, topRight: topRight)
+    let map = try simulator.map(bottomLeft: bottomLeft, topRight: topRight)
     let n = Int(simulator.configuration.patchSize)
     ax.clear()
     ax.set_xlim(xLim.0, xLim.1)

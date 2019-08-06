@@ -28,16 +28,16 @@ public final class Environment: ReinforcementLearning.Environment {
   @inlinable public var currentStep: Step<Observation, Tensor<Float>> { step }
 
   @inlinable
-  public init(configurations: [Configuration]) {
+  public init(configurations: [Configuration]) throws {
     let batchSize = configurations.count
     self.batchSize = batchSize
     self.configurations = configurations
     self.actionSpace = Discrete(withSize: 3, batchSize: batchSize)
     self.observationSpace = ObservationSpace(batchSize: batchSize)
-    self.states = configurations.map { configuration -> State in
-      let simulator = Simulator(using: configuration.simulatorConfiguration)
+    self.states = try configurations.map { configuration -> State in
+      let simulator = try Simulator(using: configuration.simulatorConfiguration)
       let agent = Agent()
-      simulator.add(agent: agent)
+      try simulator.add(agent: agent)
       return State(simulator: simulator, agent: agent)
     }
     let observation = Observation.stack(states.map { state in
@@ -61,7 +61,8 @@ public final class Environment: ReinforcementLearning.Environment {
     step = Step<Observation, Tensor<Float>>.stack(states.indices.map { i in
       let previousAgentState = states[i].simulator.agentStates.values.first!
       states[i].agent.nextAction = Int(actions[i].scalarized())
-      states[i].simulator.step()
+      // TODO: !!!! Handle this better.
+      try! states[i].simulator.step()
       let agentState = states[i].simulator.agentStates.values.first!
       let observation = Observation(
         vision: Tensor<Float>(agentState.vision),
@@ -80,9 +81,11 @@ public final class Environment: ReinforcementLearning.Environment {
   @discardableResult
   public func reset() -> Step<Observation, Tensor<Float>> {
     states = configurations.map { configuration -> State in
-      let simulator = Simulator(using: configuration.simulatorConfiguration)
+      // TODO: !!!! Handle this better.
+      let simulator = try! Simulator(using: configuration.simulatorConfiguration)
       let agent = Agent()
-      simulator.add(agent: agent)
+      // TODO: !!!! Handle this better.
+      try! simulator.add(agent: agent)
       return State(simulator: simulator, agent: agent)
     }
     let observation = Observation.stack(states.map { state in
@@ -102,7 +105,8 @@ public final class Environment: ReinforcementLearning.Environment {
   /// Returns a copy of this environment that is reset before being returned.
   @inlinable
   public func copy() -> Environment {
-    Environment(configurations: configurations)
+    // TODO: !!!! Handle this better.
+    try! Environment(configurations: configurations)
   }
 }
 
