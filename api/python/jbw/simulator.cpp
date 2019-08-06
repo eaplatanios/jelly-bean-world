@@ -1155,6 +1155,8 @@ static PyObject* simulator_reconnect_client(PyObject *self, PyObject *args)
 
 /**
  * Stops the specified client and frees all associated system resources.
+ * Note, however, that the client information will persist on the server, and
+ * the client may reconnect to it in the future.
  *
  * \param   self    Pointer to the Python object calling this method.
  * \param   args    Arguments:
@@ -1174,6 +1176,32 @@ static PyObject* simulator_stop_client(PyObject *self, PyObject *args)
     free(*client_handle); free(client_handle);
     Py_INCREF(Py_None);
     return Py_None;
+}
+
+/**
+ * Removes the specified client from the server, disconnects it, and frees all
+ * associated system resources. This function will cause the server to remove
+ * the client from its memory.
+ *
+ * \param   self    Pointer to the Python object calling this method.
+ * \param   args    Arguments:
+ *                  - Handle to the native client object as a PyLong.
+ * \returns `True` if successful, and `False` otherwise.
+ */
+static PyObject* simulator_remove_client(PyObject *self, PyObject *args)
+{
+    PyObject* py_client_handle;
+    if (!PyArg_ParseTuple(args, "O", &py_client_handle)) {
+        fprintf(stderr, "Invalid server handle argument in the call to 'simulator_c.stop_client'.\n");
+        return NULL;
+    }
+    client<py_client_data>* client_handle =
+            (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
+    bool result = remove_client(*client_handle);
+    free(*client_handle); free(client_handle);
+
+    PyObject* py_result = (result ? Py_True : Py_False);
+    Py_INCREF(py_result); return py_result;
 }
 
 /** 
@@ -1768,7 +1796,8 @@ static PyMethodDef SimulatorMethods[] = {
     {"stop_server",  jbw::simulator_stop_server, METH_VARARGS, "Stops the simulator server."},
     {"connect_client",  jbw::simulator_connect_client, METH_VARARGS, "Connects a new simulator client to a server."},
     {"reconnect_client",  jbw::simulator_reconnect_client, METH_VARARGS, "Reconnects an existing client to a server."},
-    {"stop_client",  jbw::simulator_stop_client, METH_VARARGS, "Stops the simulator client."},
+    {"stop_client",  jbw::simulator_stop_client, METH_VARARGS, "Stops the simulator client but does not remove it from the server."},
+    {"remove_client",  jbw::simulator_remove_client, METH_VARARGS, "Stops the simulator client and removes it from the server."},
     {"add_agent",  jbw::simulator_add_agent, METH_VARARGS, "Adds an agent to the simulator and returns its ID."},
     {"remove_agent",  jbw::simulator_remove_agent, METH_VARARGS, "Removes an agent from the simulator."},
     {"move",  jbw::simulator_move, METH_VARARGS, "Attempts to move the agent in the simulation environment."},
