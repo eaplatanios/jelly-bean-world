@@ -222,6 +222,22 @@ public final class Simulator {
     simulatorRemoveAgent(handle, clientHandle, id)
   }
 
+  /// Activates the agent with ID `agentID` managed by this simulator.
+  ///
+  /// - Parameter id: ID of the agent to activate.
+  @inlinable
+  public func activate(agentWithID id: UInt64) {
+    simulatorSetActive(handle, clientHandle, id, true)
+  }
+
+  /// Deactivates the agent with ID `agentID` managed by this simulator.
+  ///
+  /// - Parameter id: ID of the agent to deactivate.
+  @inlinable
+  public func deactivate(agentWithID id: UInt64) {
+    simulatorSetActive(handle, clientHandle, id, false)
+  }
+
   /// Performs a simulation step.
   ///
   /// - Note: This function will block until all the agents managed by this simulator has acted.
