@@ -1752,7 +1752,6 @@ void simulationClientRemove(void* clientHandle, JBW_Status* status) {
   }
   free(*client_ptr);
   free(client_ptr);
-  return result;
 }
 
 
