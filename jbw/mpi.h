@@ -31,6 +31,7 @@ enum class message_type : uint64_t {
 	ADD_AGENT_RESPONSE,
 	REMOVE_AGENT,
 	REMOVE_AGENT_RESPONSE,
+	REMOVE_CLIENT,
 	MOVE,
 	MOVE_RESPONSE,
 	TURN,
@@ -73,6 +74,7 @@ inline bool print(const message_type& type, Stream& out) {
 	switch (type) {
 	case message_type::ADD_AGENT:        return core::print("ADD_AGENT", out);
 	case message_type::REMOVE_AGENT:     return core::print("REMOVE_AGENT", out);
+	case message_type::REMOVE_CLIENT:    return core::print("REMOVE_CLIENT", out);
 	case message_type::MOVE:             return core::print("MOVE", out);
 	case message_type::TURN:             return core::print("TURN", out);
 	case message_type::DO_NOTHING:       return core::print("DO_NOTHING", out);
@@ -321,6 +323,23 @@ inline bool receive_remove_agent(
 }
 
 template<typename Stream, typename SimulatorData>
+bool receive_remove_client(
+		Stream& in, socket_type& connection,
+		server_state& state, uint64_t client_id,
+		simulator<SimulatorData>& sim)
+{
+	bool contains; unsigned int bucket;
+	array<uint64_t>& agent_ids = state.agent_ids.get(client_id, contains, bucket);
+	while (agent_ids.length > 0)
+		sim.remove_agent(agent_ids[--agent_ids.length]);
+	free(agent_ids);
+	state.agent_ids.remove_at(bucket);
+
+	shutdown(connection.handle, 2);
+	return true;
+}
+
+template<typename Stream, typename SimulatorData>
 inline bool receive_move(
 		Stream& in, socket_type& connection,
 		const array<uint64_t>& agent_ids,
@@ -341,6 +360,7 @@ inline bool receive_move(
 			response = mpi_response::SUCCESS;
 		else response = mpi_response::FAILURE;
 	}
+
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(response));
 	fixed_width_stream<memory_stream> out(mem_stream);
 
@@ -370,6 +390,7 @@ inline bool receive_turn(
 			response = mpi_response::SUCCESS;
 		else response = mpi_response::FAILURE;
 	}
+
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(response));
 	fixed_width_stream<memory_stream> out(mem_stream);
 
@@ -520,6 +541,8 @@ void server_process_message(socket_type& connection,
 			receive_add_agent(in, connection, state.agent_ids.get(client_id), sim); return;
 		case message_type::REMOVE_AGENT:
 			receive_remove_agent(in, connection, state.agent_ids.get(client_id), sim); return;
+		case message_type::REMOVE_CLIENT:
+			receive_remove_client(in, connection, state, client_id, sim); return;
 		case message_type::MOVE:
 			receive_move(in, connection, state.agent_ids.get(client_id), sim); return;
 		case message_type::TURN:
@@ -1195,6 +1218,7 @@ void run_response_listener(ClientType& c) {
 
 		case message_type::ADD_AGENT:
 		case message_type::REMOVE_AGENT:
+		case message_type::REMOVE_CLIENT:
 		case message_type::MOVE:
 		case message_type::TURN:
 		case message_type::DO_NOTHING:
@@ -1436,7 +1460,9 @@ uint64_t reconnect_client(
 }
 
 /**
- * Disconnects the given client `c` from the server.
+ * Disconnects the given client `c` from the server. Note, however, that this
+ * function does not remove the client from the server. This client's ID and
+ * its agents will persist on the server, and the client may reconnect later.
  */
 template<typename ClientData>
 void stop_client(client<ClientData>& c) {
@@ -1447,6 +1473,35 @@ void stop_client(client<ClientData>& c) {
 		} catch (...) { }
 	}
 	shutdown(c.connection.handle, 2);
+}
+
+/**
+ * Sends a `remove_client` message to the server from the client `c`. This
+ * removes the given client `c` from the server, causing the server to remove
+ * all agents owned by this client and to remove the client from its memory.
+ * The server will then disconnect from the client.
+ *
+ * NOTE: This function returns `true` if and only if the message is sent to the
+ * server successfully. It may take some time after this function has returned
+ * before the server processes the message and disconnects the client.
+ */
+template<typename ClientType>
+bool remove_client(ClientType& c) {
+	memory_stream mem_stream = memory_stream(sizeof(message_type));
+	fixed_width_stream<memory_stream> out(mem_stream);
+	c.client_running = false;
+	if (!write(message_type::REMOVE_CLIENT, out)
+	 || !send_message(c.connection, mem_stream.buffer, mem_stream.position))
+	{
+		return false;
+	}
+
+	if (c.response_listener.joinable()) {
+		try {
+			c.response_listener.join();
+		} catch (...) { }
+	}
+	return true;
 }
 
 } /* namespace jbw */

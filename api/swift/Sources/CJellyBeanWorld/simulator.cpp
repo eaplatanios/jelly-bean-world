@@ -1744,6 +1744,14 @@ void simulationClientStop(void* clientHandle) {
 }
 
 
+bool simulationClientRemove(void* clientHandle) {
+  client<client_data>* client_ptr = (client<client_data>*) clientHandle;
+  bool result = remove_client(*client_ptr);
+  free(*client_ptr); free(client_ptr);
+  return result;
+}
+
+
 void simulatorDeleteSimulatorInfo(SimulatorInfo info) {
   for (unsigned int i = 0; i < info.numAgents; i++)
     free(info.agents[i]);
