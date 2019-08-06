@@ -24,7 +24,7 @@ inline void set_interaction_args(
 }
 
 inline void on_step(const simulator<empty_data>* sim,
-		const array<agent_state*>& agents, uint64_t time)
+		const hash_map<uint64_t, agent_state*>& agents, uint64_t time)
 { }
 
 int main(int argc, const char** argv)

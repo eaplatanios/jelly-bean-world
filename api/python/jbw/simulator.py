@@ -282,6 +282,21 @@ class Simulator(object):
     (agent._position, agent._direction, agent._scent, agent._vision, agent._items) = (position, Direction(direction), scent, vision, items)
     return id
 
+  def remove_agent(self, agent):
+    """Removes the given agent from this simulator.
+
+    Arguments:
+      agent: Python agent to be removed from this simulator.
+
+    Returns:
+      `True` if successful, and `False` otherwise.
+    """
+    if simulator_c.remove_agent(self._handle, self._client_handle, agent._id):
+      del self.agents[agent._id]
+      return True
+    else:
+      return False
+
   def move(self, agent, direction, num_steps=1):
     """Moves the specified agent in the simulated environment.
 

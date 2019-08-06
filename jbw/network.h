@@ -453,6 +453,31 @@ inline bool init(socket_listener& listener) {
 	return true;
 }
 
+enum class wait_result {
+	DATA_AVAILABLE,
+	DATA_UNAVAILABLE,
+	ERROR_OCCURRED
+};
+
+inline wait_result wait_for_socket(
+		socket_type& socket,
+		long unsigned int max_seconds,
+		long unsigned int max_microseconds)
+{
+	timeval timeout;
+	timeout.tv_sec = max_seconds;
+	timeout.tv_usec = max_microseconds;
+
+	fd_set set;
+	FD_ZERO(&set);
+	FD_SET(socket.handle, &set);
+	int result = select((int) (socket.handle + 1), &set, nullptr, nullptr, &timeout);
+
+	if (result == 1) return wait_result::DATA_AVAILABLE;
+	else if (result == 0) return wait_result::DATA_UNAVAILABLE;
+	else return wait_result::ERROR_OCCURRED;
+}
+
 /**
  * Reads `sizeof(T)` bytes from `in` and writes them to the memory referenced
  * by `value`. This function does not perform endianness transformations.

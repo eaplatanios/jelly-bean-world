@@ -649,17 +649,19 @@ inline bool init(patch_data& data) {
  * Reads the given patch_data `data` structure from the input stream `in`.
  */
 template<typename Stream>
-bool read(patch_data& data, Stream& in, array<agent_state*>& agents) {
+bool read(patch_data& data, Stream& in,
+        const hash_map<uint64_t, agent_state*>& agents)
+{
     size_t agent_count = 0;
     if (!read(agent_count, in)
      || !array_init(data.agents, max((size_t) 2, agent_count)))
         return false;
     for (unsigned int i = 0; i < agent_count; i++) {
-        unsigned int index;
-        if (!read(index, in)) {
+        uint64_t id;
+        if (!read(id, in)) {
             free(data.agents); return false;
         }
-        data.agents[i] = agents[index];
+        data.agents[i] = agents.get(id);
     }
     data.agents.length = agent_count;
     new (&data.patch_lock) std::mutex();
@@ -671,7 +673,7 @@ bool read(patch_data& data, Stream& in, array<agent_state*>& agents) {
  */
 template<typename Stream>
 bool write(const patch_data& data, Stream& out,
-        hash_map<const agent_state*, unsigned int>& agents)
+        const hash_map<const agent_state*, uint64_t>& agents)
 {
     if (!write(data.agents.length, out))
         return false;
@@ -1146,7 +1148,10 @@ class simulator {
     diffusion<double> scent_model;
 
     /* Agents managed by this simulator. */
-    array<agent_state*> agents;
+    hash_map<uint64_t, agent_state*> agents;
+
+    /* A counter for assigning IDs to new agents. */
+    uint64_t agent_id_counter;
 
     /* Lock for the agents array and their state (not including their requested
        actions), used to prevent simultaneous updates. */
@@ -1189,7 +1194,7 @@ public:
             config.mcmc_iterations,
             config.item_types.data,
             (unsigned int) config.item_types.length, seed),
-        agents(16), requested_moves(32, alloc_position_keys),
+        agents(32), agent_id_counter(1), requested_moves(32, alloc_position_keys),
         acted_agent_count(0), active_agent_count(0), data(data), time(0)
     {
         if (!init(scent_model, (double) config.diffusion_param,
@@ -1223,17 +1228,24 @@ public:
      */
     inline pair<uint64_t, agent_state*> add_agent() {
         agent_states_lock.lock();
-        agents.ensure_capacity(agents.length + 1);
-        agent_state* new_agent = (agent_state*) malloc(sizeof(agent_state));
-        uint64_t id = agents.length;
-        if (new_agent == NULL) {
-            fprintf(stderr, "simulator.add_agent ERROR: Insufficient memory for new agent.\n");
-            return make_pair(UINT64_MAX, (agent_state*) NULL);
-        } else if (!agents.add(new_agent)) {
-            core::free(new_agent);
-            return make_pair(UINT64_MAX, (agent_state*) NULL);
+        if (!agents.check_size()) {
+            agent_states_lock.unlock();
+            fprintf(stderr, "simulator.add_agent ERROR: Failed to expand agent table.\n");
+            return make_pair(UINT64_MAX, (agent_state*) nullptr);
         }
+
+        unsigned int bucket = agents.table.index_to_insert(agent_id_counter);
+        agent_state* new_agent = (agent_state*) malloc(sizeof(agent_state));
+        uint64_t id = agent_id_counter;
+        if (new_agent == nullptr) {
+            fprintf(stderr, "simulator.add_agent ERROR: Insufficient memory for new agent.\n");
+            return make_pair(UINT64_MAX, (agent_state*) nullptr);
+        }
+        agents.table.keys[bucket] = agent_id_counter;
+        agents.values[bucket] = new_agent;
+        agents.table.size++;
         active_agent_count++;
+        agent_id_counter++;
         agent_states_lock.unlock();
 
         if (!init(*new_agent, world, scent_model, config, time)) {
@@ -1247,11 +1259,45 @@ public:
     }
 
     /**
+     * Removes the given agent from this simulator.
+     *
+     * \param   agent_id  ID of the agent to remove.
+     * \returns `true` if the agent is removed; `false` otherwise.
+     */
+    inline bool remove_agent(uint64_t agent_id) {
+        agent_states_lock.lock();
+        bool contains; unsigned int bucket;
+        agent_state* agent = agents.get(agent_id, contains, bucket);
+        if (!contains) {
+            fprintf(stderr, "simulator.remove_agent ERROR: Given agent is not in this simulator.\n");
+            agent_states_lock.unlock();
+            return false;
+        }
+        agents.remove_at(bucket);
+        agent->lock.lock();
+        if (agent->agent_acted) {
+            unrequest_position(*agent);
+            --acted_agent_count;
+        }
+        if (agent->agent_active)
+            --active_agent_count;
+        agent->lock.unlock();
+        core::free(*agent, world, scent_model, config, time);
+        core::free(agent);
+
+        if (acted_agent_count == active_agent_count)
+            step(); /* advance the simulation by one time step */
+        agent_states_lock.unlock();
+
+        return true;
+    }
+
+    /**
      * Sets whether the agent with the given ID is active.
      */
     inline void set_agent_active(uint64_t agent_id, bool active) {
         agent_states_lock.lock();
-        agent_state& agent = *agents[(size_t) agent_id];
+        agent_state& agent = *agents.get(agent_id);
         agent_states_lock.unlock();
 
         agent.lock.lock();
@@ -1280,7 +1326,7 @@ public:
      */
     inline bool is_agent_active(uint64_t agent_id) {
         agent_states_lock.lock();
-        agent_state& agent = *agents[(size_t) agent_id];
+        agent_state& agent = *agents.get(agent_id);
         agent_states_lock.unlock();
         return agent.agent_active;
     }
@@ -1305,7 +1351,7 @@ public:
             return false;
 
         agent_states_lock.lock();
-        agent_state& agent = *agents[(size_t) agent_id];
+        agent_state& agent = *agents.get(agent_id);
         agent_states_lock.unlock();
 
         agent.lock.lock();
@@ -1372,7 +1418,7 @@ public:
             return false;
 
         agent_states_lock.lock();
-        agent_state& agent = *agents[(size_t) agent_id];
+        agent_state& agent = *agents.get(agent_id);
         agent_states_lock.unlock();
 
         agent.lock.lock();
@@ -1433,7 +1479,7 @@ public:
         if (!config.no_op_allowed) return false;
 
         agent_states_lock.lock();
-        agent_state& agent = *agents[(size_t) agent_id];
+        agent_state& agent = *agents.get(agent_id);
         agent_states_lock.unlock();
 
         agent.lock.lock();
@@ -1472,7 +1518,7 @@ public:
     {
         agent_states_lock.lock();
         for (unsigned int i = 0; i < agent_count; i++)
-            states[i] = agents[(size_t) agent_ids[i]];
+            states[i] = agents.get(agent_ids[i]);
         agent_states_lock.unlock();
     }
 
@@ -1633,7 +1679,7 @@ private:
             for (auto entry : requested_moves) {
                 array<agent_state*>& conflicts = entry.value;
                 if (conflicts[0]->current_position == entry.key) continue; /* give preference to agents that don't move */
-                unsigned int result = sample_uniform((unsigned int) conflicts.length);
+                unsigned int result = sample_uniform((unsigned int)conflicts.length);
                 core::swap(conflicts[0], conflicts[result]);
             }
         }
@@ -1670,7 +1716,8 @@ private:
             array<agent_state*>& conflicts = requested_moves.get(occupied_positions.pop(), contains);
             if (!contains || conflicts[0] == NULL) {
                 continue;
-            } else if (contains) {
+            }
+            else if (contains) {
                 for (unsigned int i = 0; i < conflicts.length; i++)
                     occupied_positions.add(conflicts[i]->current_position);
                 conflicts[0] = NULL; /* prevent any agent from moving here */
@@ -1679,7 +1726,8 @@ private:
 
         time++;
         acted_agent_count = 0;
-        for (agent_state* agent : agents) {
+        for (auto entry : agents) {
+            agent_state* agent = entry.value;
             if (!agent->agent_acted) continue;
 
             agent->current_direction = agent->requested_direction;
@@ -1688,7 +1736,7 @@ private:
             position old_patch_position;
             world.world_to_patch_coordinates(agent->current_position, old_patch_position);
             if (config.collision_policy == movement_conflict_policy::NO_COLLISIONS
-             || (agent == requested_moves.get(agent->requested_position)[0]))
+                || (agent == requested_moves.get(agent->requested_position)[0]))
             {
                 agent->current_position = agent->requested_position;
 
@@ -1737,10 +1785,14 @@ private:
 #if !defined(NDEBUG)
         /* check for collisions, if there aren't supposed to be any */
         if (config.collision_policy != movement_conflict_policy::NO_COLLISIONS) {
-            for (unsigned int i = 0; i < agents.length; i++)
-                for (unsigned int j = i + 1; j < agents.length; j++)
-                    if (agents[i]->current_position == agents[j]->current_position)
+            for (unsigned int i = 0; i < agents.table.capacity; i++) {
+                if (is_empty(agents.table.keys[i])) continue;
+                for (unsigned int j = i + 1; j < agents.table.capacity; j++) {
+                    if (is_empty(agents.table.keys[j])) continue;
+                    if (agents.values[i]->current_position == agents.values[j]->current_position)
                         fprintf(stderr, "simulator.step WARNING: Agents %u and %u are at the same position.\n", i, j);
+                }
+            }
         }
 #endif
 
@@ -1754,11 +1806,12 @@ private:
         update_agent_scent_and_vision();
 
         /* Invoke the step callback function for each agent. */
-        on_step((simulator<SimulatorData>*) this, (const array<agent_state*>&) agents, time);
+        on_step((simulator<SimulatorData>*) this, (const hash_map<uint64_t, agent_state*>&) agents, time);
     }
 
     inline void update_agent_scent_and_vision() {
-        for (agent_state* agent : agents) {
+        for (auto entry : agents) {
+            agent_state* agent = entry.value;
             patch_type* neighborhood[4]; position patch_positions[4];
             world.get_fixed_neighborhood(
                 agent->current_position, neighborhood, patch_positions);
@@ -1787,12 +1840,26 @@ private:
         requested_move_lock.unlock();
     }
 
+    inline void unrequest_position(agent_state& agent)
+    {
+        if (!agent.agent_acted || config.collision_policy == movement_conflict_policy::NO_COLLISIONS)
+            return;
+
+        bool contains; unsigned int bucket;
+        std::unique_lock<std::mutex> lock(requested_move_lock);
+        array<agent_state*>& agents = requested_moves.get(agent.requested_position, contains, bucket);
+        if (!contains) return;
+        unsigned int index = agents.index_of(&agent);
+        if (index != agents.length)
+            agents.remove(index);
+    }
+
     inline void free_helper() {
         for (auto entry : requested_moves)
             core::free(entry.value);
-        for (agent_state* agent : agents) {
-            core::free(*agent);
-            core::free(agent);
+        for (auto entry : agents) {
+            core::free(*entry.value);
+            core::free(entry.value);
         }
     }
 
@@ -1818,9 +1885,10 @@ bool init(simulator<SimulatorData>& sim,
     sim.time = 0;
     sim.acted_agent_count = 0;
     sim.active_agent_count = 0;
+    sim.agent_id_counter = 1;
     if (!init(sim.data, data)) {
         return false;
-    } else if (!array_init(sim.agents, 16)) {
+    } else if (!hash_map_init(sim.agents, 32)) {
         free(sim.data); return false;
     } else if (!hash_map_init(sim.requested_moves, 32, alloc_position_keys)) {
         free(sim.data); free(sim.agents); return false;
@@ -1866,20 +1934,20 @@ inline bool init(simulator<SimulatorData>& sim,
 }
 
 template<typename Stream>
-inline bool read(agent_state*& agent,
-        Stream& in, array<agent_state*>& agents)
+inline bool read(agent_state*& agent, Stream& in,
+        const hash_map<uint64_t, agent_state*>& agents)
 {
-    unsigned int index;
-    if (!read(index, in)) return false;
-    agent = agents[index];
+    uint64_t id;
+    if (!read(id, in)) return false;
+    agent = agents.get(id);
     return true;
 }
 
 template<typename Stream>
 inline bool write(const agent_state* agent, Stream& out,
-        hash_map<const agent_state*, unsigned int>& agent_indices)
+        const hash_map<const agent_state*, uint64_t>& agent_ids)
 {
-    return write(agent_indices.get(agent), out);
+    return write(agent_ids.get(agent), out);
 }
 
 /**
@@ -1898,28 +1966,31 @@ bool read(simulator<SimulatorData>& sim, Stream& in, const SimulatorData& data)
         free(sim.data); return false;
     }
 
-    size_t agent_count = 0;
+    unsigned int agent_count;
     if (!read(agent_count, in)
-     || !array_init(sim.agents, ((size_t) 1) << (core::log2(agent_count) + 2))) {
-        free(sim.data); free(sim.config); return false;
+     || !hash_map_init(sim.agents, ((size_t)1) << (core::log2(agent_count) + 1) * RESIZE_THRESHOLD_INVERSE))
+    {
+        free(sim.data); free(sim.config);
+        return false;
     }
+
     for (unsigned int i = 0; i < agent_count; i++) {
-        sim.agents[i] = (agent_state*) malloc(sizeof(agent_state));
-        if (sim.agents[i] == NULL || !read(*sim.agents[i], in, sim.config)) {
-            fprintf(stderr, "read ERROR: Insufficient memory for agent_state in simulator.\n");
-            for (unsigned int j = 0; j < i; j++) {
-                free(*sim.agents[j]); free(sim.agents[j]);
+        uint64_t id;
+        agent_state* agent = (agent_state*) malloc(sizeof(agent_state));
+        if (agent == nullptr || !read(id, in) || !read(*agent, in, sim.config)) {
+            if (agent != nullptr) free(agent);
+            for (auto entry : sim.agents) {
+                free(*entry.value); free(entry.value);
             }
-            if (sim.agents[i] != NULL) free(sim.agents[i]);
             free(sim.data); free(sim.agents);
             free(sim.config); return false;
         }
+        sim.agents.put(id, agent);
     }
-    sim.agents.length = agent_count;
 
     if (!read(sim.world, in, sim.config.item_types.data, (unsigned int) sim.config.item_types.length, sim.agents)) {
-        for (unsigned int j = 0; j < agent_count; j++) {
-            free(*sim.agents[j]); free(sim.agents[j]);
+        for (auto entry : sim.agents) {
+            free(*entry.value); free(entry.value);
         }
         free(sim.data); free(sim.agents);
         free(sim.config); return false;
@@ -1927,8 +1998,8 @@ bool read(simulator<SimulatorData>& sim, Stream& in, const SimulatorData& data)
 
     default_scribe scribe;
     if (!read(sim.requested_moves, in, alloc_position_keys, scribe, sim.agents)) {
-        for (unsigned int j = 0; j < agent_count; j++) {
-            free(*sim.agents[j]); free(sim.agents[j]);
+        for (auto entry : sim.agents) {
+            free(*entry.value); free(entry.value);
         }
         free(sim.data); free(sim.agents);
         free(sim.config); free(sim.world); return false;
@@ -1940,8 +2011,8 @@ bool read(simulator<SimulatorData>& sim, Stream& in, const SimulatorData& data)
             (double) sim.config.decay_param, sim.config.patch_size,
             sim.config.deleted_item_lifetime))
     {
-        for (unsigned int j = 0; j < agent_count; j++) {
-            free(*sim.agents[j]); free(sim.agents[j]);
+        for (auto entry : sim.agents) {
+            free(*entry.value); free(entry.value);
         }
         for (auto entry : sim.requested_moves)
             free(entry.value);
@@ -1968,16 +2039,19 @@ bool write(const simulator<SimulatorData>& sim, Stream& out)
     if (!write(sim.config, out))
         return false;
 
-    hash_map<const agent_state*, unsigned int> agent_indices((unsigned int) sim.agents.length * RESIZE_THRESHOLD_INVERSE);
-    if (!write(sim.agents.length, out)) return false;
-    for (unsigned int i = 0; i < sim.agents.length; i++) {
-        agent_indices.put(sim.agents[i], i);
-        if (!write(*sim.agents[i], out, sim.config)) return false;
+    hash_map<const agent_state*, uint64_t> agent_ids((unsigned int) sim.agents.table.size * RESIZE_THRESHOLD_INVERSE);
+    if (!write(sim.agents.table.size, out)) return false;
+    for (const auto& entry : sim.agents) {
+        if (!agent_ids.put(entry.value, entry.key)
+         || !write(entry.key, out) || !write(*entry.value, out, sim.config))
+        {
+            return false;
+        }
     }
 
     default_scribe scribe;
-    return write(sim.world, out, agent_indices)
-        && write(sim.requested_moves, out, scribe, agent_indices)
+    return write(sim.world, out, agent_ids)
+        && write(sim.requested_moves, out, scribe, agent_ids)
         && write(sim.time, out)
         && write(sim.acted_agent_count, out)
         && write(sim.active_agent_count, out);

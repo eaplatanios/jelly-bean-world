@@ -91,27 +91,27 @@ inline void make_view_matrix(float (&view)[16],
 	view[15] = 1.0f;
 }
 
-inline void make_orthographic_projection(float (&proj)[16],
-		float left, float right, float bottom, float top, float near, float far)
+inline void make_orthographic_projection(float(&proj)[16],
+	float fLeft, float fRight, float fBottom, float fTop, float fNear, float fFar)
 {
-	proj[0] = 2 / (right - left);
-	proj[5] = -2 / (top - bottom); /* make the positive y axis direction point upwards */
-	proj[10] = 2 / (near - far);
-	proj[12] = (left + right) / (left - right);
-	proj[13] = (bottom + top) / (bottom - top);
-	proj[14] = (near + far) / (near - far);
+	proj[0] = 2 / (fRight - fLeft);
+	proj[5] = -2 / (fTop - fBottom); /* make the positive y axis direction point upwards */
+	proj[10] = 2 / (fNear - fFar);
+	proj[12] = (fLeft + fRight) / (fLeft - fRight);
+	proj[13] = (fBottom + fTop) / (fBottom - fTop);
+	proj[14] = (fNear + fFar) / (fNear - fFar);
 	proj[15] = 1.0f;
 }
 
 inline void make_perspective_projection(float (&proj)[16],
-		float fov, float aspect_ratio, float near, float far)
+		float fov, float aspect_ratio, float fNear, float fFar)
 {
 	float tan_half_fov = tan(fov / 2);
 	proj[0] = 1.0f / (aspect_ratio * tan_half_fov);
 	proj[5] = -1.0f / tan_half_fov; /* make the positive y axis direction point upwards */
-	proj[10] = (near + far) / (near - far);
+	proj[10] = (fNear + fFar) / (fNear - fFar);
 	proj[11] = -1.0f;
-	proj[14] = 2 * far * near / (near - far);
+	proj[14] = 2 * fFar * fNear / (fNear - fFar);
 }
 
 template<size_t N>
@@ -167,18 +167,22 @@ int main(int argc, const char** argv)
 {
 	size_t vertex_shader_size;
 	char* vertex_shader_src = read_file<true>("vert.spv", vertex_shader_size);
-	if (vertex_shader_src == nullptr) return EXIT_FAILURE;
+	if (vertex_shader_src == nullptr) {
+		fprintf(stderr, "ERROR: Unable to read 'vert.spv'.\n");
+		return EXIT_FAILURE;
+	}
 
 	size_t fragment_shader_size;
 	char* fragment_shader_src = read_file<true>("frag.spv", fragment_shader_size);
 	if (fragment_shader_src == nullptr) {
+		fprintf(stderr, "ERROR: Unable to read 'frag.spv'.\n");
 		free(vertex_shader_src);
 		return EXIT_FAILURE;
 	}
 
 	glfwInit();
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	uint32_t window_width = 800, window_height = 600;
+	uint32_t window_width = 800, window_height = 800;
 	GLFWwindow* window = glfwCreateWindow(window_width, window_height, "Renderer Test", nullptr, nullptr);
 	glfwSetFramebufferSizeCallback(window, on_framebuffer_resize);
 
@@ -291,7 +295,7 @@ int main(int argc, const char** argv)
 
 		/* set the texture data */
 		pixel* texture_data = (pixel*) texture.mapped_memory;
-		uint8_t value =  128 + 127 * cos(frame_count / 50.0f);
+		uint8_t value =  128 + (uint8_t) (127 * cos(frame_count / 50.0f));
 		for (unsigned int i = 0; i < 32; i++) {
 			for (unsigned int j = 0; j < 32; j++) {
 				texture_data[i * 32 + j].r = ((i + j) % 2 == 0) ? value : (255 - value);

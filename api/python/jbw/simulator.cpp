@@ -286,7 +286,7 @@ static PyObject* build_py_agent(
  * \param   time    The new simulation time of `sim`.
  */
 void on_step(simulator<py_simulator_data>* sim,
-        const array<agent_state*>& agents, uint64_t time)
+        const hash_map<uint64_t, agent_state*>& agents, uint64_t time)
 {
     py_simulator_data& data = sim->get_data();
     if (data.server.status != server_status::STOPPING) {
@@ -305,7 +305,7 @@ void on_step(simulator<py_simulator_data>* sim,
     }
     const simulator_config& config = sim->get_config();
     for (size_t i = 0; i < data.agent_ids.length; i++)
-        PyList_SetItem(py_states, i, build_py_agent(*agents[(size_t) data.agent_ids[i]], config, data.agent_ids[i]));
+        PyList_SetItem(py_states, i, build_py_agent(*agents.get(data.agent_ids[i]), config, data.agent_ids[i]));
 
     /* call python callback */
     PyObject* args = Py_BuildValue("(O)", py_states);
@@ -385,6 +385,28 @@ void on_add_agent(client<py_client_data>& c, uint64_t agent_id,
     std::unique_lock<std::mutex> lck(c.data.lock);
     c.data.waiting_for_server = false;
     c.data.response_data.agent_state = agent;
+    c.data.server_response = response;
+    c.data.cv.notify_one();
+}
+
+/**
+ * The callback invoked when the client receives a remove_agent response from
+ * the server. This function wakes up the Python thread (which should be
+ * waiting in the `simulator_remove_agent` function) so that it can return the
+ * response back to Python.
+ *
+ * \param   c         The client that received the response.
+ * \param   agent_id  The ID of the removed agent.
+ * \param   response  The MPI response from the server, containing information
+ *                    about any errors.
+ */
+void on_remove_agent(client<py_client_data>& c,
+        uint64_t agent_id, mpi_response response)
+{
+    check_response(response, "remove_agent: ");
+
+    std::unique_lock<std::mutex> lck(c.data.lock);
+    c.data.waiting_for_server = false;
     c.data.server_response = response;
     c.data.cv.notify_one();
 }
@@ -1114,7 +1136,7 @@ static PyObject* simulator_reconnect_client(PyObject *self, PyObject *args)
 
     PyObject* py_states = PyList_New(agent_count);
     if (py_states == NULL) return NULL;
-    for (Py_ssize_t i = 0; i < agent_count; i++) {
+    for (Py_ssize_t i = 0; i < (Py_ssize_t) agent_count; i++) {
         PyList_SetItem(py_states, i, build_py_agent(agent_states[i], new_client->config, agent_ids[i]));
         free(agent_states[i]);
     }
@@ -1218,6 +1240,64 @@ static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
     }
 }
 
+/** 
+ * Removes the specified agent from an existing simulator.
+ *
+ * \param   self    Pointer to the Python object calling this method.
+ * \param   args    Arguments:
+ *                  - Handle to the native simulator object as a PyLong.
+ *                  - Handle to the native client object as a PyLong. If this
+ *                    is None, `remove_agent` is directly invoked on the
+ *                    simulator object. Otherwise, the client sends a
+ *                    remove_agent message to the server and waits for its
+ *                    response.
+ *                  - Agent ID.
+ * \returns `True` if successful, and `False` otherwise.
+ */
+static PyObject* simulator_remove_agent(PyObject *self, PyObject *args) {
+    PyObject* py_sim_handle;
+    PyObject* py_client_handle;
+    unsigned long long agent_id;
+    if (!PyArg_ParseTuple(args, "OOK", &py_sim_handle, &py_client_handle, &agent_id)) {
+        fprintf(stderr, "Invalid server handle argument in the call to 'simulator_c.remove_agent'.\n");
+        return NULL;
+    }
+    if (py_client_handle == Py_None) {
+        /* the simulation is local, so call add_agent directly */
+        simulator<py_simulator_data>* sim_handle =
+                (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
+        bool result = sim_handle->remove_agent(agent_id);
+        if (result) {
+            array<uint64_t>& agent_ids = sim_handle->get_data().agent_ids;
+            unsigned int index = agent_ids.index_of(agent_id);
+            if (index != agent_ids.length)
+                agent_ids.remove(index);
+        }
+        PyObject* py_result = (result ? Py_True : Py_False);
+        Py_INCREF(py_result); return py_result;
+    } else {
+        /* this is a client, so send an add_agent message to the server */
+        client<py_client_data>* client_handle =
+                (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
+        if (!client_handle->client_running) {
+            PyErr_SetString(mpi_error, "Connection to the server was lost.");
+            return NULL;
+        }
+
+        client_handle->data.waiting_for_server = true;
+        if (!send_remove_agent(*client_handle, agent_id)) {
+            PyErr_SetString(PyExc_RuntimeError, "Unable to send remove_agent request.");
+            return NULL;
+        }
+
+        /* wait for response from server */
+        wait_for_server(*client_handle);
+
+        PyObject* result = (client_handle->data.server_response == mpi_response::SUCCESS ? Py_True : Py_False);
+        Py_INCREF(result); return result;
+    }
+}
+
 /**
  * Attempt to move the agent in the simulation environment. If the agent
  * already has an action queued for this turn, this attempt will fail.
@@ -1279,8 +1359,7 @@ static PyObject* simulator_move(PyObject *self, PyObject *args) {
         wait_for_server(*client_handle);
 
         PyObject* result = (client_handle->data.server_response == mpi_response::SUCCESS ? Py_True : Py_False);
-        Py_INCREF(result);
-        return result;
+        Py_INCREF(result); return result;
     }
 }
 
@@ -1691,6 +1770,7 @@ static PyMethodDef SimulatorMethods[] = {
     {"reconnect_client",  jbw::simulator_reconnect_client, METH_VARARGS, "Reconnects an existing client to a server."},
     {"stop_client",  jbw::simulator_stop_client, METH_VARARGS, "Stops the simulator client."},
     {"add_agent",  jbw::simulator_add_agent, METH_VARARGS, "Adds an agent to the simulator and returns its ID."},
+    {"remove_agent",  jbw::simulator_remove_agent, METH_VARARGS, "Removes an agent from the simulator."},
     {"move",  jbw::simulator_move, METH_VARARGS, "Attempts to move the agent in the simulation environment."},
     {"turn",  jbw::simulator_turn, METH_VARARGS, "Attempts to turn the agent in the simulation environment."},
     {"no_op",  jbw::simulator_no_op, METH_VARARGS, "Attempts to instruct the agent to do nothing (a no-op) in the simulation environment."},

@@ -47,16 +47,49 @@ enum class movement_pattern {
 	TURNING
 };
 
+struct local_agent_state {
+	bool direction_flag;
+	position agent_position;
+	uint64_t client_id;
+
+	void operator = (const local_agent_state& src) {
+		direction_flag = src.direction_flag;
+		agent_position = src.agent_position;
+		client_id = src.client_id;
+		waiting_for_server = src.waiting_for_server;
+		new (&lock) std::mutex();
+		new (&condition) std::condition_variable();
+	}
+
+	static inline void move(const local_agent_state& src, local_agent_state& dst) {
+		const char* src_data = (const char*) &src;
+		char* dst_data = (char*) &dst;
+		for (unsigned int i = 0; i < sizeof(local_agent_state); i++)
+			dst_data[i] = src_data[i];
+	}
+
+	static inline void free(local_agent_state& state) {
+		state.lock.~mutex();
+		state.condition.~condition_variable();
+	}
+
+	bool waiting_for_server;
+	std::mutex lock;
+	std::condition_variable condition;
+};
+
+inline bool init(local_agent_state& state) {
+	new (&state.lock) std::mutex();
+	new (&state.condition) std::condition_variable();
+	return true;
+}
+
 constexpr unsigned int agent_count = 1;
 constexpr unsigned int max_time = 1000;
 constexpr movement_conflict_policy collision_policy = movement_conflict_policy::FIRST_COME_FIRST_SERVED;
 constexpr movement_pattern move_pattern = movement_pattern::TURNING;
 unsigned int sim_time = 0;
-bool agent_direction[agent_count];
-bool waiting_for_server[agent_count];
-position agent_positions[agent_count];
-std::condition_variable conditions[agent_count];
-std::mutex locks[agent_count];
+hash_map<uint64_t, local_agent_state*> agent_states(agent_count * RESIZE_THRESHOLD_INVERSE);
 std::mutex print_lock;
 FILE* out = stderr;
 async_server server;
@@ -104,14 +137,14 @@ inline direction next_direction(position agent_position,
 }
 
 inline void get_next_move(
-		position current_position, unsigned int i,
+		position current_position, uint64_t id,
 		bool& reverse, direction& dir, bool& is_move)
 {
 	unsigned int counter = sim_time + 1;
 	switch (move_pattern) {
 	case movement_pattern::RADIAL:
 		is_move = true;
-		dir = next_direction(current_position, (2 * M_PI * i) / agent_count); break;
+		dir = next_direction(current_position, (2 * M_PI * (id - 1)) / agent_count); break;
 	case movement_pattern::BACK_AND_FORTH:
 		is_move = true;
 		dir = next_direction(current_position, -10 * (int64_t) agent_count, 10 * agent_count, reverse); break;
@@ -136,28 +169,26 @@ inline void get_next_move(
 }
 
 inline bool try_move(
-		simulator<empty_data>& sim,
-		unsigned int i, bool& reverse)
+		simulator<empty_data>& sim, uint64_t id,
+		position agent_position, bool& reverse)
 {
-	position current_position = agent_positions[i];
-
 	direction dir; bool is_move;
-	get_next_move(current_position, i, reverse, dir, is_move);
+	get_next_move(agent_position, id, reverse, dir, is_move);
 
-	if (is_move && !sim.move((uint64_t) i, dir, 1)) {
+	if (is_move && !sim.move(id, dir, 1)) {
 		print_lock.lock();
 		print("ERROR: Unable to move agent ", out);
-		print(i, out); print(" from ", out);
-		print(current_position, out);
+		print(id, out); print(" from ", out);
+		print(agent_position, out);
 		print(" in direction ", out);
 		print(dir, out); print(".\n", out);
 		print_lock.unlock();
 		return false;
-	} else if (!is_move && !sim.turn((uint64_t) i, dir)) {
+	} else if (!is_move && !sim.turn(id, dir)) {
 		print_lock.lock();
 		print("ERROR: Unable to turn agent ", out);
-		print(i, out); print(" at ", out);
-		print(current_position, out);
+		print(id, out); print(" at ", out);
+		print(agent_position, out);
 		print(" in direction ", out);
 		print(dir, out); print(".\n", out);
 		print_lock.unlock();
@@ -166,30 +197,30 @@ inline bool try_move(
 	return true;
 }
 
-void run_agent(simulator<empty_data>& sim, unsigned int id,
-		std::atomic_uint& move_count, bool& simulation_running)
+void run_agent(simulator<empty_data>& sim,
+	uint64_t agent_id, local_agent_state& agent,
+	std::atomic_uint& move_count,
+	bool& simulation_running)
 {
 	while (simulation_running) {
-		waiting_for_server[id] = true;
-		if (try_move(sim, id, agent_direction[id])) {
+		agent.waiting_for_server = true;
+		if (try_move(sim, agent_id, agent.agent_position, agent.direction_flag)) {
 			move_count++;
 
-			std::unique_lock<std::mutex> lck(locks[id]);
-			while (waiting_for_server[id] && simulation_running)
-				conditions[id].wait(lck);
-			lck.unlock();
+			std::unique_lock<std::mutex> lck(agent.lock);
+			while (agent.waiting_for_server && simulation_running) agent.condition.wait(lck);
 		}
 	}
 }
 
 void on_step(const simulator<empty_data>* sim,
-		const array<agent_state*>& agents, uint64_t time)
+		const hash_map<uint64_t, agent_state*>& agents, uint64_t time)
 {
 	sim_time++;
 
 	/* get agent states */
-	for (unsigned int i = 0; i < agents.length; i++)
-		agent_positions[i] = agents[i]->current_position;
+	for (const auto& entry : agents)
+		agent_states.get(entry.key)->agent_position = entry.value->current_position;
 
 #if defined(USE_MPI)
 	if (!send_step_response(server, agents, sim->get_config())) {
@@ -198,10 +229,11 @@ void on_step(const simulator<empty_data>* sim,
 		print_lock.unlock();
 	}
 #elif defined(MULTITHREADED)
-	for (unsigned int i = 0; i < agent_count; i++) {
-		std::unique_lock<std::mutex> lck(locks[i]);
-		waiting_for_server[i] = false;
-		conditions[i].notify_one();
+	for (const auto& entry : agents) {
+		local_agent_state* agent = agent_states.get(entry.key);
+		std::unique_lock<std::mutex> lck(agent->lock);
+		agent->waiting_for_server = false;
+		agent->condition.notify_one();
 	}
 #endif
 }
@@ -210,16 +242,20 @@ bool add_agents(simulator<empty_data>& sim)
 {
 	for (unsigned int i = 0; i < agent_count; i++) {
 		pair<uint64_t, agent_state*> new_agent = sim.add_agent();
-		if (new_agent.value == NULL) {
+		local_agent_state* new_agent_state = (local_agent_state*) malloc(sizeof(local_agent_state));
+		if (new_agent.value == nullptr || new_agent_state == nullptr || !init(*new_agent_state)) {
 			fprintf(out, "add_agents ERROR: Unable to add new agent.\n");
+			if (new_agent_state != nullptr) free(new_agent_state);
 			return false;
 		}
-		agent_positions[i] = new_agent.value->current_position;
-		agent_direction[i] = (i <= agent_count / 2);
+		new_agent_state->agent_position = new_agent.value->current_position;
+		new_agent_state->direction_flag = (i <= agent_count / 2);
+		new_agent_state->waiting_for_server = false;
+		agent_states.put(new_agent.key, new_agent_state);
 
 		/* advance time by one to avoid collision at (0,0) */
-		for (unsigned int j = 0; j <= i; j++)
-			try_move(sim, j, agent_direction[j]);
+		for (const auto& entry : agent_states)
+			try_move(sim, entry.key, entry.value->agent_position, entry.value->direction_flag);
 	}
 	return true;
 }
@@ -262,8 +298,8 @@ bool test_singlethreaded(const simulator_config& config)
 		}
 #endif
 
-		for (unsigned int j = 0; j < agent_count; j++)
-			try_move(sim, j, agent_direction[j]);
+		for (const auto& entry : agent_states)
+			try_move(sim, entry.key, entry.value->agent_position, entry.value->direction_flag);
 		move_count += agent_count;
 		if (stopwatch.milliseconds() >= 1000) {
 			elapsed += stopwatch.milliseconds();
@@ -287,8 +323,12 @@ bool test_multithreaded(const simulator_config& config)
 	std::atomic_uint move_count(0);
 	bool simulation_running = true;
 	std::thread clients[agent_count];
-	for (unsigned int i = 0; i < agent_count; i++)
-		clients[i] = std::thread([&,i]() { run_agent(sim, i, move_count, simulation_running); });
+	unsigned int i = 0;
+	for (auto entry : agent_states) {
+		clients[i] = std::thread([&,entry]() {
+			run_agent(sim, entry.key, *entry.value, move_count, simulation_running);
+		});
+	}
 
 	timer stopwatch;
 	unsigned long long elapsed = 0;
@@ -299,109 +339,130 @@ bool test_multithreaded(const simulator_config& config)
 		stopwatch.start();
 	}
 	simulation_running = false;
+	for (auto entry : agent_states)
+		entry.value->condition.notify_one();
 	for (unsigned int i = 0; i < agent_count; i++) {
-		conditions[i].notify_one();
-		if (!clients[i].joinable()) continue;
-		try {
-			clients[i].join();
-		} catch (...) { }
+		if (clients[i].joinable()) {
+			try {
+				clients[i].join();
+			} catch (...) { }
+		}
 	}
 	return true;
 }
 
 struct client_data {
-	unsigned int index;
-	uint64_t agent_id;
+	uint64_t client_id;
 	const array<array<patch_state>>* map;
+	bool waiting_for_server;
+	std::mutex lock;
+	std::condition_variable condition;
 
 	bool action_result, waiting_for_step;
+	uint64_t agent_id;
 	position pos;
 };
 
 void on_add_agent(client<client_data>& c, uint64_t agent_id,
 		mpi_response response, const agent_state& state)
 {
-	unsigned int id = c.data.index;
-	std::unique_lock<std::mutex> lck(locks[id]);
-	waiting_for_server[id] = false;
+	std::unique_lock<std::mutex> lck(c.data.lock);
+	c.data.waiting_for_server = false;
 	c.data.agent_id = agent_id;
-	agent_positions[agent_id] = state.current_position;
-	conditions[id].notify_one();
+	if (agent_id != UINT64_MAX) {
+		local_agent_state* agent = (local_agent_state*) malloc(sizeof(local_agent_state));
+		if (agent == nullptr || !init(*agent)) {
+			fprintf(stderr, "on_add_agent ERROR: Out of memory.\n");
+			if (agent == nullptr) free(agent);
+		} else {
+			agent->client_id = c.data.client_id;
+			agent->agent_position = state.current_position;
+			agent->direction_flag = ((agent_id - 1) <= agent_count / 2);
+			agent_states.put(agent_id, agent);
+		}
+	}
+	c.data.condition.notify_one();
+}
+
+void on_remove_agent(client<client_data>& c,
+		uint64_t agent_id, mpi_response response)
+{
+	std::unique_lock<std::mutex> lck(c.data.lock);
+	c.data.waiting_for_server = false;
+	bool contains; unsigned int bucket;
+	local_agent_state* agent = agent_states.get(agent_id, contains, bucket);
+	if (contains) {
+		agent_states.remove_at(bucket);
+		free(*agent); free(agent);
+	}
+	c.data.condition.notify_one();
 }
 
 void on_move(client<client_data>& c, uint64_t agent_id, mpi_response response)
 {
-	unsigned int id = c.data.index;
-	std::unique_lock<std::mutex> lck(locks[id]);
-	waiting_for_server[id] = false;
+	std::unique_lock<std::mutex> lck(c.data.lock);
+	c.data.waiting_for_server = false;
 	c.data.action_result = (response == mpi_response::SUCCESS);
-	conditions[id].notify_one();
+	c.data.condition.notify_one();
 }
 
 void on_turn(client<client_data>& c, uint64_t agent_id, mpi_response response) {
-	unsigned int id = c.data.index;
-	std::unique_lock<std::mutex> lck(locks[id]);
-	waiting_for_server[id] = false;
+	std::unique_lock<std::mutex> lck(c.data.lock);
+	c.data.waiting_for_server = false;
 	c.data.action_result = (response == mpi_response::SUCCESS);
-	conditions[id].notify_one();
+	c.data.condition.notify_one();
 }
 
 void on_do_nothing(client<client_data>& c, uint64_t agent_id, mpi_response response) {
-	unsigned int id = c.data.index;
-	std::unique_lock<std::mutex> lck(locks[id]);
-	waiting_for_server[id] = false;
+	std::unique_lock<std::mutex> lck(c.data.lock);
+	c.data.waiting_for_server = false;
 	c.data.action_result = (response == mpi_response::SUCCESS);
-	conditions[id].notify_one();
+	c.data.condition.notify_one();
 }
 
 void on_get_map(
 		client<client_data>& c, mpi_response response,
 		const array<array<patch_state>>* map)
 {
-	unsigned int id = c.data.index;
-	std::unique_lock<std::mutex> lck(locks[id]);
-	waiting_for_server[id] = false;
+	std::unique_lock<std::mutex> lck(c.data.lock);
+	c.data.waiting_for_server = false;
 	c.data.map = map;
-	conditions[id].notify_one();
+	c.data.condition.notify_one();
 }
 
 void on_set_active(client<client_data>& c, uint64_t agent_id, mpi_response response) {
-	unsigned int id = c.data.index;
-	std::unique_lock<std::mutex> lck(locks[id]);
-	waiting_for_server[id] = false;
-	conditions[id].notify_one();
+	std::unique_lock<std::mutex> lck(c.data.lock);
+	c.data.waiting_for_server = false;
+	c.data.condition.notify_one();
 }
 
 void on_is_active(client<client_data>& c, uint64_t agent_id, mpi_response response) {
-	unsigned int id = c.data.index;
-	std::unique_lock<std::mutex> lck(locks[id]);
-	waiting_for_server[id] = false;
+	std::unique_lock<std::mutex> lck(c.data.lock);
+	c.data.waiting_for_server = false;
 	c.data.action_result = (response == mpi_response::SUCCESS);
-	conditions[id].notify_one();
+	c.data.condition.notify_one();
 }
 
 void on_step(client<client_data>& c,
 		mpi_response response,
 		const array<uint64_t>& agent_ids,
-		const agent_state* agent_states)
+		const agent_state* agent_state_array)
 {
-	unsigned int id = c.data.index;
-	std::unique_lock<std::mutex> lck(locks[id]);
+	std::unique_lock<std::mutex> lck(c.data.lock);
 	c.data.waiting_for_step = false;
-#if !defined(NDEBUG)
-	if (agent_ids.length != 1 || agent_ids[0] != id)
-		fprintf(stderr, "on_step ERROR: Unexpected agent ID.\n");
-#endif
-	agent_positions[id] = agent_states[0].current_position;
-	conditions[id].notify_one();
+	for (unsigned int i = 0; i < agent_ids.length; i++) {
+		local_agent_state& agent = *agent_states.get(agent_ids[i]);
+		agent.agent_position = agent_state_array[i].current_position;
+	}
+	c.data.condition.notify_one();
 }
 
 void on_lost_connection(client<client_data>& c) {
 	print_lock.lock();
-	fprintf(out, "Client %u lost connection to server.\n", c.data.index);
+	fprintf(out, "Client %" PRIu64 " lost connection to server.\n", c.data.client_id);
 	print_lock.unlock();
 	c.client_running = false;
-	conditions[c.data.index].notify_one();
+	c.data.condition.notify_one();
 }
 
 inline void wait_for_server(std::condition_variable& cv,
@@ -412,38 +473,39 @@ inline void wait_for_server(std::condition_variable& cv,
 }
 
 inline bool mpi_try_move(
-		client<client_data>& c, unsigned int i, bool& reverse)
+		client<client_data>& c, uint64_t agent_id,
+		position agent_position, bool& reverse)
 {
 	direction dir; bool is_move;
-	get_next_move(agent_positions[i], i, reverse, dir, is_move);
+	get_next_move(agent_position, agent_id, reverse, dir, is_move);
 
 	/* send move request */
-	waiting_for_server[i] = true;
-	if (is_move && !send_move(c, c.data.agent_id, dir, 1)) {
+	c.data.waiting_for_server = true;
+	if (is_move && !send_move(c, agent_id, dir, 1)) {
 		print_lock.lock();
 		fprintf(out, "ERROR: Unable to send move request.\n");
 		print_lock.unlock();
 		return false;
-	} else if (!is_move && !send_turn(c, c.data.agent_id, dir)) {
+	} else if (!is_move && !send_turn(c, agent_id, dir)) {
 		print_lock.lock();
 		fprintf(out, "ERROR: Unable to send turn request.\n");
 		print_lock.unlock();
 		return false;
 	}
-	wait_for_server(conditions[i], locks[i], waiting_for_server[i], c.client_running);
+	wait_for_server(c.data.condition, c.data.lock, c.data.waiting_for_server, c.client_running);
 	if (!c.client_running) return true;
 
 	if (!c.data.action_result) {
 		print_lock.lock();
 		if (is_move) {
 			print("ERROR: Unable to move agent ", out);
-			print(i, out); print(" from ", out);
+			print(agent_id, out); print(" from ", out);
 			print(c.data.pos, out);
 			print(" in direction ", out);
 			print(dir, out); print(".\n", out);
 		} else {
 			print("ERROR: Unable to turn agent ", out);
-			print(i, out); print(" at ", out);
+			print(agent_id, out); print(" at ", out);
 			print(c.data.pos, out);
 			print(" in direction ", out);
 			print(dir, out); print(".\n", out);
@@ -454,15 +516,20 @@ inline bool mpi_try_move(
 	return true;
 }
 
-void run_mpi_agent(unsigned int id,
-		client<client_data>* clients,
+void run_mpi_agent(uint64_t agent_id,
+		local_agent_state& agent,
+		client<client_data>& c,
 		std::atomic_uint& move_count)
 {
-	while (clients[id].client_running) {
-		clients[id].data.waiting_for_step = true;
-		if (mpi_try_move(clients[id], id, agent_direction[id])) {
+	while (c.client_running) {
+		if (rand() % 100 == 0 && agent_states.table.size > 4) {
+			if (send_remove_agent(c, agent_id)) break;
+		}
+
+		c.data.waiting_for_step = true;
+		if (mpi_try_move(c, agent_id, agent.agent_position, agent.direction_flag)) {
 			move_count++;
-			wait_for_server(conditions[id], locks[id], clients[id].data.waiting_for_step, clients[id].client_running);
+			wait_for_server(c.data.condition, c.data.lock, c.data.waiting_for_step, c.client_running);
 		}
 	}
 }
@@ -487,7 +554,6 @@ bool test_mpi(const simulator_config& config)
 	client<client_data> clients[agent_count];
 	uint64_t client_ids[agent_count];
 	for (unsigned int i = 0; i < agent_count; i++) {
-		clients[i].data.index = i;
 		uint64_t simulator_time = connect_client(clients[i], "localhost", "54353", client_ids[i]);
 		if (simulator_time == UINT64_MAX) {
 			fprintf(out, "ERROR: Unable to initialize client %u.\n", i);
@@ -495,13 +561,14 @@ bool test_mpi(const simulator_config& config)
 		}
 
 		/* each client adds one agent to the simulation */
-		waiting_for_server[i] = true;
+		clients[i].data.waiting_for_server = true;
+		clients[i].data.client_id = client_ids[i];
 		if (!send_add_agent(clients[i])) {
 			fprintf(out, "ERROR: Unable to send add_agent request.\n");
 			cleanup_mpi(clients, i); return false;
 		}
 		/* wait for response from server */
-		wait_for_server(conditions[i], locks[i], waiting_for_server[i], clients[i].client_running);
+		wait_for_server(clients[i].data.condition, clients[i].data.lock, clients[i].data.waiting_for_server, clients[i].client_running);
 
 		if (clients[i].data.agent_id == UINT64_MAX) {
 			fprintf(out, "ERROR: Server returned failure for add_agent request.\n");
@@ -509,20 +576,27 @@ bool test_mpi(const simulator_config& config)
 		}
 
 		/* advance time by one to avoid collision at (0,0) */
-		for (unsigned int j = 0; j <= i; j++) {
-			clients[j].data.waiting_for_step = true;
-			if (!mpi_try_move(clients[j], j, agent_direction[j])) {
+		for (auto entry : agent_states) {
+			client<client_data>& current_client = clients[index_of(entry.value->client_id, client_ids, agent_count)];
+			current_client.data.waiting_for_step = true;
+			if (!mpi_try_move(current_client, entry.key, entry.value->agent_position, entry.value->direction_flag)) {
 				cleanup_mpi(clients, i); return false;
 			}
 		}
-		for (unsigned int j = 0; j <= i; j++)
-			wait_for_server(conditions[j], locks[j], clients[j].data.waiting_for_step, clients[j].client_running);
+		for (auto entry : agent_states) {
+			client<client_data>& current_client = clients[index_of(entry.value->client_id, client_ids, agent_count)];
+			wait_for_server(current_client.data.condition, current_client.data.lock, current_client.data.waiting_for_step, current_client.client_running);
+		}
 	}
 
 	std::atomic_uint move_count(0);
 	std::thread client_threads[agent_count];
-	for (unsigned int i = 0; i < agent_count; i++)
-		client_threads[i] = std::thread([&,i]() { run_mpi_agent(i, clients, move_count); });
+	unsigned int i = 0;
+	for (auto entry : agent_states) {
+		unsigned int client_index = index_of(entry.value->client_id, client_ids, agent_count);
+		client_threads[i] = std::thread([&,entry,client_index]() { run_mpi_agent(entry.key, *entry.value, clients[client_index], move_count); });
+		i++;
+	}
 
 	timer stopwatch;
 	unsigned long long elapsed = 0;
@@ -552,11 +626,15 @@ bool test_mpi(const simulator_config& config)
 		stopwatch.start();
 	}
 	for (unsigned int i = 0; i < agent_count; i++) {
-		clients[i].client_running = false;
-		conditions[i].notify_one();
-		try {
-			client_threads[i].join();
-		} catch (...) { }
+		client<client_data>& current_client = clients[i];
+		current_client.client_running = false;
+		current_client.data.condition.notify_one();
+	} for (unsigned int i = 0; i < agent_count; i++) {
+		if (client_threads[i].joinable()) {
+			try {
+				client_threads[i].join();
+			} catch (...) { }
+		}
 	}
 	cleanup_mpi(clients);
 	return true;
@@ -676,4 +754,9 @@ int main(int argc, const char** argv)
 #else
 	test_singlethreaded(config);
 #endif
+
+	for (auto entry : agent_states) {
+		free(*entry.value);
+		free(entry.value);
+	}
 }
