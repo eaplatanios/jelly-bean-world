@@ -263,6 +263,9 @@ SimulationClientInfo simulationClientReconnect(
 void simulationClientStop(
   void* clientHandle);
 
+bool simulationClientRemove(
+  void* clientHandle);
+
 void simulatorDeleteSimulatorInfo(
   SimulatorInfo info);
 
