@@ -1744,10 +1744,14 @@ void simulationClientStop(void* clientHandle) {
 }
 
 
-bool simulationClientRemove(void* clientHandle) {
+void simulationClientRemove(void* clientHandle, JBW_Status* status) {
   client<client_data>* client_ptr = (client<client_data>*) clientHandle;
-  bool result = remove_client(*client_ptr);
-  free(*client_ptr); free(client_ptr);
+  if (!remove_client(*client_ptr)) {
+    status->code = JBW_UNKNOWN_ERROR;
+    status->message = "Failed to remove a simulation client.";
+  }
+  free(*client_ptr);
+  free(client_ptr);
   return result;
 }
 
