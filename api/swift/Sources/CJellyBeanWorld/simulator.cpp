@@ -255,8 +255,8 @@ inline void init(
     src.requiredItemCosts, src.blocksMovement, intensity_fn, interaction_fns, scent_dimension,
     color_dimension, item_type_count);
   if (!success) {
-    status->code = JBW_UNKNOWN_ERROR;
-    status->message = "Failed while initializing an item properties instance.";
+    status->code = JBW_OUT_OF_MEMORY_ERROR;
+    status->message = "Insufficient memory while initializing an item properties instance.";
     return;
   }
 
@@ -1079,8 +1079,8 @@ void* simulatorCreate(
     return nullptr;
   }
   if (!init(*sim, sim_config, data, config->randomSeed)) {
-    status->code = JBW_UNKNOWN_ERROR;
-    status->message = "Failure while initializing a new simulator.";
+    status->code = JBW_OUT_OF_MEMORY_ERROR;
+    status->message = "Insufficient memory while initializing a new simulator.";
     return nullptr;
   }
   return (void*) sim;
@@ -1242,7 +1242,7 @@ AgentSimulationState simulatorAddAgent(
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
     pair<uint64_t, agent_state*> new_agent = sim_handle->add_agent();
     if (new_agent.key == UINT64_MAX) {
-      status->code = JBW_AGENT_LIMIT_REACHED;
+      status->code = JBW_EXCEEDED_AGENT_LIMIT;
       status->message = "Failed to add new agent.";
       return EMPTY_AGENT_SIM_STATE;
     }

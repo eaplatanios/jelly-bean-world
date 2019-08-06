@@ -22,7 +22,7 @@ extern "C" {
 #endif
 
 // Represents a Jelly Bean World (JBW) error code.
-typedef enum JBW_ErrorCode {
+typedef enum JBW_ErrorCode : unsigned char {
   JBW_OK = 0,
   JBW_UNKNOWN_ERROR,
   JBW_OUT_OF_MEMORY_ERROR,
@@ -31,7 +31,7 @@ typedef enum JBW_ErrorCode {
   JBW_INVALID_SIMULATOR_CONFIGURATION,
   JBW_SERVER_INITIALIZATION_FAILURE,
   JBW_LOST_CONNECTION,
-  JBW_AGENT_LIMIT_REACHED,
+  JBW_EXCEEDED_AGENT_LIMIT,
 } JBW_ErrorCode;
 
 // Represents a Jelly Bean World (JBW) API call status.
