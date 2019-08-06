@@ -199,17 +199,43 @@ public final class Simulator {
     if let h = handle { simulatorDelete(h) }
   }
 
-  /// Adds a new agent to this simulator, and updates
-  /// its simulation state.
+  /// Adds a new agent to this simulator, and updates its simulation state.
   /// 
-  /// - Parameters:
-  ///   - agent: The agent to be added to this simulator.
+  /// - Parameter agent: The agent to be added to this simulator.
+  /// - Returns: ID of the new agent.
   @inlinable
-  public func add(agent: Agent) {
-    let state = simulatorAddAgent(handle, nil)
-    agents[state.id] = agent
-    agentStates[state.id] = AgentState(fromC: state, using: configuration)
-    simulatorDeleteAgentSimulationState(state)
+  public func add(agent: Agent) -> UInt64 {
+    let state = simulatorAddAgent(handle, clientHandle)
+    defer { simulatorDeleteAgentSimulationState(state) }
+    let id = state.id
+    agents[id] = agent
+    agentStates[id] = AgentState(fromC: state, using: configuration)
+    return id
+  }
+
+  /// Removes the agent with ID `agentID` from this simulator.
+  ///
+  /// - Parameter id: ID of the agent to remove.
+  /// - Returns: Boolean value indicating whether the removal was successful.
+  @inlinable
+  public func remove(agentWithID id: UInt64) -> Bool {
+    simulatorRemoveAgent(handle, clientHandle, id)
+  }
+
+  /// Activates the agent with ID `agentID` managed by this simulator.
+  ///
+  /// - Parameter id: ID of the agent to activate.
+  @inlinable
+  public func activate(agentWithID id: UInt64) {
+    simulatorSetActive(handle, clientHandle, id, true)
+  }
+
+  /// Deactivates the agent with ID `agentID` managed by this simulator.
+  ///
+  /// - Parameter id: ID of the agent to deactivate.
+  @inlinable
+  public func deactivate(agentWithID id: UInt64) {
+    simulatorSetActive(handle, clientHandle, id, false)
   }
 
   /// Performs a simulation step.

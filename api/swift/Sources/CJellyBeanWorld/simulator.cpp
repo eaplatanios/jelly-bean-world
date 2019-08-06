@@ -552,8 +552,8 @@ bool init(SimulationMap& map,
         for (unsigned int i = 0; i < index; i++) free(map.patches[i]);
         free(map.patches); return false;
       }
+      index++;
     }
-    index++;
   }
   map.numPatches = patch_count;
   return true;
