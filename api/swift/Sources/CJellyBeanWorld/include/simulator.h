@@ -14,6 +14,9 @@
  * the License.
  */
 
+#ifndef SWIFT_JBW_SIMULATOR_H_
+#define SWIFT_JBW_SIMULATOR_H_
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -298,3 +301,5 @@ void simulatorDeleteSimulationMap(
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
+
+#endif /* SWIFT_JBW_SIMULATOR_H_ */

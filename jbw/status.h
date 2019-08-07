@@ -19,16 +19,39 @@
 
 namespace jbw {
 
+typedef uint8_t status_type;
+
 enum class status : uint8_t {
   OK = 0,
-  OUT_OF_MEMORY_ERROR,
-  IO_ERROR,
-  COMMUNICATION_ERROR,
-	LOST_CONNECTION,
-  SERVER_INITIALIZATION_ERROR,
-  INVALID_SIMULATOR_CONFIGURATION,
-  EXCEEDED_AGENT_LIMIT
+  OUT_OF_MEMORY,
+  INVALID_AGENT_ID,
+  PERMISSION_ERROR,
+  AGENT_ALREADY_ACTED,
+  AGENT_ALREADY_EXISTS,
+  SERVER_PARSE_MESSAGE_ERROR,
+  CLIENT_PARSE_MESSAGE_ERROR,
+  SERVER_OUT_OF_MEMORY,
+  CLIENT_OUT_OF_MEMORY
 };
+
+/**
+ * Reads a status from `in` and stores the result in `s`.
+ */
+template<typename Stream>
+inline bool read(status& s, Stream& in) {
+	status_type v;
+	if (!read(v, in)) return false;
+	s = (status) v;
+	return true;
+}
+
+/**
+ * Writes the given status `s` to the stream `out`.
+ */
+template<typename Stream>
+inline bool write(const status& s, Stream& out) {
+	return write((status_type) s, out);
+}
 
 } /* namespace jbw */
 

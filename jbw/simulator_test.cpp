@@ -175,7 +175,7 @@ inline bool try_move(
 	direction dir; bool is_move;
 	get_next_move(agent_position, id, reverse, dir, is_move);
 
-	if (is_move && !sim.move(id, dir, 1)) {
+	if (is_move && sim.move(id, dir, 1) != status::OK) {
 		print_lock.lock();
 		print("ERROR: Unable to move agent ", out);
 		print(id, out); print(" from ", out);
@@ -184,7 +184,7 @@ inline bool try_move(
 		print(dir, out); print(".\n", out);
 		print_lock.unlock();
 		return false;
-	} else if (!is_move && !sim.turn(id, dir)) {
+	} else if (!is_move && sim.turn(id, dir) != status::OK) {
 		print_lock.lock();
 		print("ERROR: Unable to turn agent ", out);
 		print(id, out); print(" at ", out);
@@ -241,17 +241,18 @@ void on_step(const simulator<empty_data>* sim,
 bool add_agents(simulator<empty_data>& sim)
 {
 	for (unsigned int i = 0; i < agent_count; i++) {
-		pair<uint64_t, agent_state*> new_agent = sim.add_agent();
+		uint64_t new_agent_id; agent_state* new_agent;
+		status result = sim.add_agent(new_agent_id, new_agent);
 		local_agent_state* new_agent_state = (local_agent_state*) malloc(sizeof(local_agent_state));
-		if (new_agent.value == nullptr || new_agent_state == nullptr || !init(*new_agent_state)) {
+		if (result != status::OK || new_agent_state == nullptr || !init(*new_agent_state)) {
 			fprintf(out, "add_agents ERROR: Unable to add new agent.\n");
 			if (new_agent_state != nullptr) free(new_agent_state);
 			return false;
 		}
-		new_agent_state->agent_position = new_agent.value->current_position;
+		new_agent_state->agent_position = new_agent->current_position;
 		new_agent_state->direction_flag = (i <= agent_count / 2);
 		new_agent_state->waiting_for_server = false;
-		agent_states.put(new_agent.key, new_agent_state);
+		agent_states.put(new_agent_id, new_agent_state);
 
 		/* advance time by one to avoid collision at (0,0) */
 		for (const auto& entry : agent_states)
@@ -263,7 +264,7 @@ bool add_agents(simulator<empty_data>& sim)
 bool test_singlethreaded(const simulator_config& config)
 {
 	simulator<empty_data>& sim = *((simulator<empty_data>*) alloca(sizeof(simulator<empty_data>)));
-	if (!init(sim, config, empty_data())) {
+	if (init(sim, config, empty_data()) != status::OK) {
 		fprintf(stderr, "ERROR: Unable to initialize simulator.\n");
 		return false;
 	}
@@ -363,13 +364,14 @@ struct client_data {
 	position pos;
 };
 
-void on_add_agent(client<client_data>& c, uint64_t agent_id,
-		mpi_response response, const agent_state& state)
+void on_add_agent(
+		client<client_data>& c, uint64_t agent_id,
+		status response, const agent_state& state)
 {
 	std::unique_lock<std::mutex> lck(c.data.lock);
 	c.data.waiting_for_server = false;
 	c.data.agent_id = agent_id;
-	if (agent_id != UINT64_MAX) {
+	if (response == status::OK) {
 		local_agent_state* agent = (local_agent_state*) malloc(sizeof(local_agent_state));
 		if (agent == nullptr || !init(*agent)) {
 			fprintf(stderr, "on_add_agent ERROR: Out of memory.\n");
@@ -380,12 +382,14 @@ void on_add_agent(client<client_data>& c, uint64_t agent_id,
 			agent->direction_flag = ((agent_id - 1) <= agent_count / 2);
 			agent_states.put(agent_id, agent);
 		}
+	} else {
+		c.data.agent_id = UINT64_MAX;
 	}
 	c.data.condition.notify_one();
 }
 
 void on_remove_agent(client<client_data>& c,
-		uint64_t agent_id, mpi_response response)
+		uint64_t agent_id, status response)
 {
 	std::unique_lock<std::mutex> lck(c.data.lock);
 	c.data.waiting_for_server = false;
@@ -398,30 +402,30 @@ void on_remove_agent(client<client_data>& c,
 	c.data.condition.notify_one();
 }
 
-void on_move(client<client_data>& c, uint64_t agent_id, mpi_response response)
+void on_move(client<client_data>& c, uint64_t agent_id, status response)
 {
 	std::unique_lock<std::mutex> lck(c.data.lock);
 	c.data.waiting_for_server = false;
-	c.data.action_result = (response == mpi_response::SUCCESS);
+	c.data.action_result = (response == status::OK);
 	c.data.condition.notify_one();
 }
 
-void on_turn(client<client_data>& c, uint64_t agent_id, mpi_response response) {
+void on_turn(client<client_data>& c, uint64_t agent_id, status response) {
 	std::unique_lock<std::mutex> lck(c.data.lock);
 	c.data.waiting_for_server = false;
-	c.data.action_result = (response == mpi_response::SUCCESS);
+	c.data.action_result = (response == status::OK);
 	c.data.condition.notify_one();
 }
 
-void on_do_nothing(client<client_data>& c, uint64_t agent_id, mpi_response response) {
+void on_do_nothing(client<client_data>& c, uint64_t agent_id, status response) {
 	std::unique_lock<std::mutex> lck(c.data.lock);
 	c.data.waiting_for_server = false;
-	c.data.action_result = (response == mpi_response::SUCCESS);
+	c.data.action_result = (response == status::OK);
 	c.data.condition.notify_one();
 }
 
 void on_get_map(
-		client<client_data>& c, mpi_response response,
+		client<client_data>& c, status response,
 		const array<array<patch_state>>* map)
 {
 	std::unique_lock<std::mutex> lck(c.data.lock);
@@ -430,21 +434,21 @@ void on_get_map(
 	c.data.condition.notify_one();
 }
 
-void on_set_active(client<client_data>& c, uint64_t agent_id, mpi_response response) {
+void on_set_active(client<client_data>& c, uint64_t agent_id, status response) {
 	std::unique_lock<std::mutex> lck(c.data.lock);
 	c.data.waiting_for_server = false;
 	c.data.condition.notify_one();
 }
 
-void on_is_active(client<client_data>& c, uint64_t agent_id, mpi_response response) {
+void on_is_active(client<client_data>& c, uint64_t agent_id, status response, bool active) {
 	std::unique_lock<std::mutex> lck(c.data.lock);
 	c.data.waiting_for_server = false;
-	c.data.action_result = (response == mpi_response::SUCCESS);
+	c.data.action_result = active;
 	c.data.condition.notify_one();
 }
 
 void on_step(client<client_data>& c,
-		mpi_response response,
+		status response,
 		const array<uint64_t>& agent_ids,
 		const agent_state* agent_state_array)
 {

@@ -110,8 +110,9 @@ inline bool init(py_simulator_data& data, const py_simulator_data& src)
  */
 struct py_client_data {
     /* storing the server responses */
-    mpi_response server_response;
+    status server_response;
     union response_data {
+        bool active;
         PyObject* agent_state;
         array<array<patch_state>>* map;
     } response_data;
@@ -338,20 +339,27 @@ inline char* concat(const char* first, const char* second) {
     return buf;
 }
 
-inline void check_response(mpi_response response, const char* prefix) {
+inline void check_response(status response, const char* prefix) {
     char* message;
     switch (response) {
-    case mpi_response::INVALID_AGENT_ID:
+    case status::OK:
+        break;
+    case status::INVALID_AGENT_ID:
         message = concat(prefix, "Invalid agent ID.");
         if (message != NULL) { PyErr_SetString(mpi_error, message); free(message); } break;
-    case mpi_response::SERVER_PARSE_MESSAGE_ERROR:
+    case status::SERVER_PARSE_MESSAGE_ERROR:
         message = concat(prefix, "Server was unable to parse MPI message from client.");
         if (message != NULL) { PyErr_SetString(mpi_error, message); free(message); } break;
-    case mpi_response::CLIENT_PARSE_MESSAGE_ERROR:
+    case status::CLIENT_PARSE_MESSAGE_ERROR:
         message = concat(prefix, "Client was unable to parse MPI message from server.");
         if (message != NULL) { PyErr_SetString(mpi_error, message); free(message); } break;
-    case mpi_response::SUCCESS:
-    case mpi_response::FAILURE:
+    case status::SERVER_OUT_OF_MEMORY:
+        message = concat(prefix, "Server had insufficient memory.");
+        if (message != NULL) { PyErr_SetString(mpi_error, message); free(message); } break;
+    case status::CLIENT_OUT_OF_MEMORY:
+        message = concat(prefix, "Client had insufficient memory.");
+        if (message != NULL) { PyErr_SetString(mpi_error, message); free(message); } break;
+    default:
         break;
     }
 }
@@ -366,19 +374,19 @@ inline void check_response(mpi_response response, const char* prefix) {
  * \param   c         The client that received the response.
  * \param   agent_id  The ID of the new agent. This is equal to `UINT64_MAX` if
  *                    the server returned an error.
- * \param   response  The MPI response from the server, containing information
+ * \param   response  The response from the server, containing information
  *                    about any errors.
  * \param   new_agent The state of the new agent.
  */
 void on_add_agent(client<py_client_data>& c, uint64_t agent_id,
-        mpi_response response, const agent_state& new_agent)
+        status response, const agent_state& new_agent)
 {
     check_response(response, "add_agent: ");
     PyGILState_STATE gstate;
     gstate = PyGILState_Ensure(); /* acquire global interpreter lock */
     PyObject* agent;
-    if (response != mpi_response::SUCCESS || agent_id == UINT64_MAX)
-        agent = NULL;
+    if (response != status::OK)
+        agent = nullptr;
     else agent = build_py_agent(new_agent, c.config, agent_id);
     PyGILState_Release(gstate);
 
@@ -397,11 +405,11 @@ void on_add_agent(client<py_client_data>& c, uint64_t agent_id,
  *
  * \param   c         The client that received the response.
  * \param   agent_id  The ID of the removed agent.
- * \param   response  The MPI response from the server, containing information
+ * \param   response  The response from the server, containing information
  *                    about any errors.
  */
 void on_remove_agent(client<py_client_data>& c,
-        uint64_t agent_id, mpi_response response)
+        uint64_t agent_id, status response)
 {
     check_response(response, "remove_agent: ");
 
@@ -419,10 +427,10 @@ void on_remove_agent(client<py_client_data>& c,
  *
  * \param   c               The client that received the response.
  * \param   agent_id        The ID of the agent that requested to move.
- * \param   response        The MPI response from the server, containing
+ * \param   response        The response from the server, containing
  *                          information about any errors.
  */
-void on_move(client<py_client_data>& c, uint64_t agent_id, mpi_response response) {
+void on_move(client<py_client_data>& c, uint64_t agent_id, status response) {
     check_response(response, "move: ");
     std::unique_lock<std::mutex> lck(c.data.lock);
     c.data.waiting_for_server = false;
@@ -438,10 +446,10 @@ void on_move(client<py_client_data>& c, uint64_t agent_id, mpi_response response
  *
  * \param   c               The client that received the response.
  * \param   agent_id        The ID of the agent that requested to turn.
- * \param   response        The MPI response from the server, containing
+ * \param   response        The response from the server, containing
  *                          information about any errors.
  */
-void on_turn(client<py_client_data>& c, uint64_t agent_id, mpi_response response) {
+void on_turn(client<py_client_data>& c, uint64_t agent_id, status response) {
     check_response(response, "turn: ");
     std::unique_lock<std::mutex> lck(c.data.lock);
     c.data.waiting_for_server = false;
@@ -457,10 +465,10 @@ void on_turn(client<py_client_data>& c, uint64_t agent_id, mpi_response response
  *
  * \param   c               The client that received the response.
  * \param   agent_id        The ID of the agent that requested to do nothing.
- * \param   response        The MPI response from the server, containing
+ * \param   response        The response from the server, containing
  *                          information about any errors.
  */
-void on_do_nothing(client<py_client_data>& c, uint64_t agent_id, mpi_response response) {
+void on_do_nothing(client<py_client_data>& c, uint64_t agent_id, status response) {
     check_response(response, "no_op: ");
     std::unique_lock<std::mutex> lck(c.data.lock);
     c.data.waiting_for_server = false;
@@ -475,13 +483,13 @@ void on_do_nothing(client<py_client_data>& c, uint64_t agent_id, mpi_response re
  * function) so that it can return the response back to Python.
  *
  * \param   c        The client that received the response.
- * \param   response The MPI response from the server, containing information
- *                   about any errors.
+ * \param   response The response from the server, containing information about
+ *                   any errors.
  * \param   map      An array of array of `patch_state` structures containing
  *                   the state information in each patch.
  */
 void on_get_map(client<py_client_data>& c,
-        mpi_response response,
+        status response,
         array<array<patch_state>>* map)
 {
     check_response(response, "get_map: ");
@@ -500,10 +508,10 @@ void on_get_map(client<py_client_data>& c,
  *
  * \param   c        The client that received the response.
  * \param   agent_id The ID of the agent whose active status was set.
- * \param   response The MPI response from the server, containing information
- *                   about any errors.
+ * \param   response The response from the server, containing information about
+ *                   any errors.
  */
-void on_set_active(client<py_client_data>& c, uint64_t agent_id, mpi_response response)
+void on_set_active(client<py_client_data>& c, uint64_t agent_id, status response)
 {
     check_response(response, "set_active: ");
     std::unique_lock<std::mutex> lck(c.data.lock);
@@ -521,15 +529,17 @@ void on_set_active(client<py_client_data>& c, uint64_t agent_id, mpi_response re
  *
  * \param   c        The client that received the response.
  * \param   agent_id The ID of the agent whose active status was requested.
- * \param   response The MPI response from the server, containing information
- *                   about whether the agent is active and any errors.
+ * \param   response The response from the server, containing information about
+ *                   any errors.
+ * \param   active   Whether or not the agent is active.
  */
-void on_is_active(client<py_client_data>& c, uint64_t agent_id, mpi_response response)
+void on_is_active(client<py_client_data>& c, uint64_t agent_id, status response, bool active)
 {
     check_response(response, "is_active: ");
     std::unique_lock<std::mutex> lck(c.data.lock);
     c.data.waiting_for_server = false;
     c.data.server_response = response;
+    c.data.response_data.active = active;
     c.data.cv.notify_one();
 }
 
@@ -539,13 +549,15 @@ void on_is_active(client<py_client_data>& c, uint64_t agent_id, mpi_response res
  * this client and invokes the Python function `c.data.step_callback`.
  *
  * \param   c            The client that received the response.
+ * \param   response     The response from the server, containing information
+ *                       about any errors.
  * \param   agent_ids    An array of agent IDs governed by the client.
  * \param   agent_states An array, parallel to `agent_ids`, containing the
  *                       state information of each agent at the beginning of
  *                       the new time step in the simulation.
  */
 void on_step(client<py_client_data>& c,
-        mpi_response response,
+        status response,
         const array<uint64_t>& agent_ids,
         const agent_state* agent_states)
 {
@@ -808,7 +820,7 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
     if (sim == NULL) {
         PyErr_NoMemory();
         return NULL;
-    } else if (!init(*sim, config, data, seed)) {
+    } else if (init(*sim, config, data, seed) != status::OK) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to initialize simulator.");
         return NULL;
     }
@@ -1229,14 +1241,15 @@ static PyObject* simulator_add_agent(PyObject *self, PyObject *args) {
         /* the simulation is local, so call add_agent directly */
         simulator<py_simulator_data>* sim_handle =
                 (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
-        pair<uint64_t, agent_state*> new_agent = sim_handle->add_agent();
-        if (new_agent.key == UINT64_MAX) {
+        uint64_t new_agent_id; agent_state* new_agent;
+        status result = sim_handle->add_agent(new_agent_id, new_agent);
+        if (result != status::OK) {
             PyErr_SetString(add_agent_error, "Failed to add new agent.");
             return NULL;
         }
-        sim_handle->get_data().agent_ids.add(new_agent.key);
-        std::unique_lock<std::mutex> lock(new_agent.value->lock);
-        PyObject* py_agent = build_py_agent(*new_agent.value, sim_handle->get_config(), new_agent.key);
+        sim_handle->get_data().agent_ids.add(new_agent_id);
+        std::unique_lock<std::mutex> lock(new_agent->lock);
+        PyObject* py_agent = build_py_agent(*new_agent, sim_handle->get_config(), new_agent_id);
         PyObject* to_return = Py_BuildValue("O", py_agent);
         Py_DECREF(py_agent);
         return to_return;
@@ -1294,14 +1307,14 @@ static PyObject* simulator_remove_agent(PyObject *self, PyObject *args) {
         /* the simulation is local, so call add_agent directly */
         simulator<py_simulator_data>* sim_handle =
                 (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
-        bool result = sim_handle->remove_agent(agent_id);
-        if (result) {
+        status result = sim_handle->remove_agent(agent_id);
+        if (result == status::OK) {
             array<uint64_t>& agent_ids = sim_handle->get_data().agent_ids;
             unsigned int index = agent_ids.index_of(agent_id);
             if (index != agent_ids.length)
                 agent_ids.remove(index);
         }
-        PyObject* py_result = (result ? Py_True : Py_False);
+        PyObject* py_result = ((result == status::OK) ? Py_True : Py_False);
         Py_INCREF(py_result); return py_result;
     } else {
         /* this is a client, so send an add_agent message to the server */
@@ -1321,7 +1334,7 @@ static PyObject* simulator_remove_agent(PyObject *self, PyObject *args) {
         /* wait for response from server */
         wait_for_server(*client_handle);
 
-        PyObject* result = (client_handle->data.server_response == mpi_response::SUCCESS ? Py_True : Py_False);
+        PyObject* result = (client_handle->data.server_response == status::OK ? Py_True : Py_False);
         Py_INCREF(result); return result;
     }
 }
@@ -1362,11 +1375,11 @@ static PyObject* simulator_move(PyObject *self, PyObject *args) {
 
         /* release the global interpreter lock */
         PyThreadState* python_thread = PyEval_SaveThread();
-        bool result = sim_handle->move(agent_id, (direction) dir, num_steps);
+        status result = sim_handle->move(agent_id, (direction) dir, num_steps);
 
         /* re-acquire the global interpreter lock and return */
         PyEval_RestoreThread(python_thread);
-        PyObject* py_result = (result ? Py_True : Py_False);
+        PyObject* py_result = ((result == status::OK) ? Py_True : Py_False);
         Py_INCREF(py_result); return py_result;
     } else {
         /* this is a client, so send a move message to the server */
@@ -1386,7 +1399,7 @@ static PyObject* simulator_move(PyObject *self, PyObject *args) {
         /* wait for response from server */
         wait_for_server(*client_handle);
 
-        PyObject* result = (client_handle->data.server_response == mpi_response::SUCCESS ? Py_True : Py_False);
+        PyObject* result = (client_handle->data.server_response == status::OK ? Py_True : Py_False);
         Py_INCREF(result); return result;
     }
 }
@@ -1425,11 +1438,11 @@ static PyObject* simulator_turn(PyObject *self, PyObject *args) {
 
         /* release the global interpreter lock */
         PyThreadState* python_thread = PyEval_SaveThread();
-        bool result = sim_handle->turn(agent_id, (direction) dir);
+        status result = sim_handle->turn(agent_id, (direction) dir);
 
         /* re-acquire the global interpreter lock and return */
         PyEval_RestoreThread(python_thread);
-        PyObject* py_result = (result ? Py_True : Py_False);
+        PyObject* py_result = ((result == status::OK) ? Py_True : Py_False);
         Py_INCREF(py_result); return py_result;
     } else {
         /* this is a client, so send a turn message to the server */
@@ -1449,7 +1462,7 @@ static PyObject* simulator_turn(PyObject *self, PyObject *args) {
         /* wait for response from server */
         wait_for_server(*client_handle);
 
-        PyObject* result = (client_handle->data.server_response == mpi_response::SUCCESS ? Py_True : Py_False);
+        PyObject* result = (client_handle->data.server_response == status::OK ? Py_True : Py_False);
         Py_INCREF(result);
         return result;
     }
@@ -1485,11 +1498,11 @@ static PyObject* simulator_no_op(PyObject *self, PyObject *args) {
 
         /* release the global interpreter lock */
         PyThreadState* python_thread = PyEval_SaveThread();
-        bool result = sim_handle->do_nothing(agent_id);
+        status result = sim_handle->do_nothing(agent_id);
 
         /* re-acquire the global interpreter lock and return */
         PyEval_RestoreThread(python_thread);
-        PyObject* py_result = (result ? Py_True : Py_False);
+        PyObject* py_result = ((result == status::OK) ? Py_True : Py_False);
         Py_INCREF(py_result); return py_result;
     } else {
         /* this is a client, so send a do_nothing message to the server */
@@ -1509,7 +1522,7 @@ static PyObject* simulator_no_op(PyObject *self, PyObject *args) {
         /* wait for response from server */
         wait_for_server(*client_handle);
 
-        PyObject* result = (client_handle->data.server_response == mpi_response::SUCCESS ? Py_True : Py_False);
+        PyObject* result = (client_handle->data.server_response == status::OK ? Py_True : Py_False);
         Py_INCREF(result);
         return result;
     }
@@ -1625,7 +1638,7 @@ static PyObject* simulator_map(PyObject *self, PyObject *args) {
         simulator<py_simulator_data>* sim_handle =
                 (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
         array<array<patch_state>> patches(32);
-        if (!sim_handle->get_map(bottom_left, top_right, patches)) {
+        if (sim_handle->get_map(bottom_left, top_right, patches) != status::OK) {
             PyErr_SetString(PyExc_RuntimeError, "simulator.get_map failed.");
             return NULL;
         }
@@ -1652,7 +1665,7 @@ static PyObject* simulator_map(PyObject *self, PyObject *args) {
 
         /* wait for response from server */
         wait_for_server(*client_handle);
-        if (client_handle->data.server_response != mpi_response::SUCCESS) {
+        if (client_handle->data.server_response != status::OK) {
             Py_INCREF(Py_None);
             return Py_None;
         }
@@ -1774,12 +1787,12 @@ static PyObject* simulator_is_active(PyObject *self, PyObject *args) {
         /* wait for response from server */
         wait_for_server(*client_handle);
         PyObject* py_result;
-        if (client_handle->data.server_response == mpi_response::SUCCESS) {
-            py_result = Py_True;
-        } else if (client_handle->data.server_response == mpi_response::FAILURE) {
-            py_result = Py_False;
-        } else {
+        if (client_handle->data.server_response != status::OK) {
             py_result = Py_None;
+        } else if (client_handle->data.response_data.active) {
+            py_result = Py_True;
+        } else {
+            py_result = Py_False;
         }
         Py_INCREF(py_result); return py_result;
     }

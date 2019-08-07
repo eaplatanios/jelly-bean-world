@@ -700,8 +700,9 @@ inline bool init(simulator_data& data, const simulator_data& src) {
  */
 struct client_data {
   /* storing the server responses */
-  mpi_response server_response;
+  status server_response;
   union response_data {
+    bool active;
     AgentSimulationState agent_state;
     array<array<patch_state>>* map;
   } response_data;
@@ -805,20 +806,27 @@ inline char* concat(const char* first, const char* second) {
   return buf;
 }
 
-inline void check_response(mpi_response response, const char* prefix) {
+inline void check_response(status response, const char* prefix) {
   char* message;
   switch (response) {
-  case mpi_response::INVALID_AGENT_ID:
+  case status::OK:
+    break;
+  case status::INVALID_AGENT_ID:
     message = concat(prefix, "Invalid agent ID.");
     if (message != nullptr) { /* TODO: communicate error `message` to swift */ free(message); } break;
-  case mpi_response::SERVER_PARSE_MESSAGE_ERROR:
+  case status::SERVER_PARSE_MESSAGE_ERROR:
     message = concat(prefix, "Server was unable to parse MPI message from client.");
     if (message != nullptr) { /* TODO: communicate error `message` to swift */ free(message); } break;
-  case mpi_response::CLIENT_PARSE_MESSAGE_ERROR:
+  case status::CLIENT_PARSE_MESSAGE_ERROR:
     message = concat(prefix, "Client was unable to parse MPI message from server.");
     if (message != nullptr) { /* TODO: communicate error `message` to swift */ free(message); } break;
-  case mpi_response::SUCCESS:
-  case mpi_response::FAILURE:
+  case status::SERVER_OUT_OF_MEMORY:
+    message = concat(prefix, "Server had insufficient memory.");
+    if (message != nullptr) { /* TODO: communicate error `message` to swift */ free(message); } break;
+  case status::CLIENT_OUT_OF_MEMORY:
+    message = concat(prefix, "Client had insufficient memory.");
+    if (message != nullptr) { /* TODO: communicate error `message` to swift */ free(message); } break;
+  default:
     break;
   }
 }
@@ -833,21 +841,20 @@ inline void check_response(mpi_response response, const char* prefix) {
  * \param   c         The client that received the response.
  * \param   agent_id  The ID of the new agent. This is equal to `UINT64_MAX` if
  *                    the server returned an error.
- * \param   response  The MPI response from the server, containing information
+ * \param   response  The response from the server, containing information
  *                    about any errors.
  * \param   new_agent The state of the new agent.
  */
 void on_add_agent(
   client<client_data>& c,
   uint64_t agent_id,
-  mpi_response response,
+  status response,
   const agent_state& new_agent
 ) {
-  check_response(response, "add_agent: ");
   auto* status = JBW_NewStatus();
   AgentSimulationState new_agent_state;
   init(new_agent_state, new_agent, c.config, agent_id, status);
-  if (response != mpi_response::SUCCESS || status->code != JBW_OK)
+  if (response != status::OK || status->code != JBW_OK)
     new_agent_state = EMPTY_AGENT_SIM_STATE;
   std::unique_lock<std::mutex> lck(c.data.lock);
   c.data.waiting_for_server = false;
@@ -865,11 +872,10 @@ void on_add_agent(
  *
  * \param   c         The client that received the response.
  * \param   agent_id  The ID of the removed agent.
- * \param   response  The MPI response from the server, containing information
+ * \param   response  The response from the server, containing information
  *                    about any errors.
  */
-void on_remove_agent(client<client_data>& c, uint64_t agent_id, mpi_response response) {
-  check_response(response, "remove_agent: ");
+void on_remove_agent(client<client_data>& c, uint64_t agent_id, status response) {
   std::unique_lock<std::mutex> lck(c.data.lock);
   c.data.waiting_for_server = false;
   c.data.server_response = response;
@@ -884,11 +890,10 @@ void on_remove_agent(client<client_data>& c, uint64_t agent_id, mpi_response res
  *
  * \param   c               The client that received the response.
  * \param   agent_id        The ID of the agent that requested to move.
- * \param   response        The MPI response from the server, containing
+ * \param   response        The response from the server, containing
  *                          information about any errors.
  */
-void on_move(client<client_data>& c, uint64_t agent_id, mpi_response response) {
-  check_response(response, "move: ");
+void on_move(client<client_data>& c, uint64_t agent_id, status response) {
   std::unique_lock<std::mutex> lck(c.data.lock);
   c.data.waiting_for_server = false;
   c.data.server_response = response;
@@ -904,11 +909,10 @@ void on_move(client<client_data>& c, uint64_t agent_id, mpi_response response) {
  *
  * \param   c               The client that received the response.
  * \param   agent_id        The ID of the agent that requested to turn.
- * \param   response        The MPI response from the server, containing
+ * \param   response        The response from the server, containing
  *                          information about any errors.
  */
-void on_turn(client<client_data>& c, uint64_t agent_id, mpi_response response) {
-  check_response(response, "turn: ");
+void on_turn(client<client_data>& c, uint64_t agent_id, status response) {
   std::unique_lock<std::mutex> lck(c.data.lock);
   c.data.waiting_for_server = false;
   c.data.server_response = response;
@@ -924,11 +928,10 @@ void on_turn(client<client_data>& c, uint64_t agent_id, mpi_response response) {
  *
  * \param   c               The client that received the response.
  * \param   agent_id        The ID of the agent that requested to do nothing.
- * \param   response        The MPI response from the server, containing
+ * \param   response        The response from the server, containing
  *                          information about any errors.
  */
-void on_do_nothing(client<client_data>& c, uint64_t agent_id, mpi_response response) {
-  check_response(response, "no_op: ");
+void on_do_nothing(client<client_data>& c, uint64_t agent_id, status response) {
   std::unique_lock<std::mutex> lck(c.data.lock);
   c.data.waiting_for_server = false;
   c.data.server_response = response;
@@ -943,13 +946,12 @@ void on_do_nothing(client<client_data>& c, uint64_t agent_id, mpi_response respo
  * function) so that it can return the response back.
  *
  * \param   c        The client that received the response.
- * \param   response The MPI response from the server, containing information
- *                   about any errors.
+ * \param   response The response from the server, containing information about
+ *                   any errors.
  * \param   map      A map from patch positions to `patch_state` structures
  *                   containing the state information in each patch.
  */
-void on_get_map(client<client_data>& c, mpi_response response, array<array<patch_state>>* map) {
-  check_response(response, "get_map: ");
+void on_get_map(client<client_data>& c, status response, array<array<patch_state>>* map) {
   std::unique_lock<std::mutex> lck(c.data.lock);
   c.data.waiting_for_server = false;
   c.data.response_data.map = map;
@@ -965,11 +967,10 @@ void on_get_map(client<client_data>& c, mpi_response response, array<array<patch
  *
  * \param   c        The client that received the response.
  * \param   agent_id The ID of the agent whose active status was set.
- * \param   response The MPI response from the server, containing information
- *                   about any errors.
+ * \param   response The response from the server, containing information about
+ *                   any errors.
  */
-void on_set_active(client<client_data>& c, uint64_t agent_id, mpi_response response) {
-  check_response(response, "set_active: ");
+void on_set_active(client<client_data>& c, uint64_t agent_id, status response) {
   std::unique_lock<std::mutex> lck(c.data.lock);
   c.data.waiting_for_server = false;
   c.data.server_response = response;
@@ -985,13 +986,14 @@ void on_set_active(client<client_data>& c, uint64_t agent_id, mpi_response respo
  *
  * \param   c        The client that received the response.
  * \param   agent_id The ID of the agent whose active status was requested.
- * \param   response The MPI response from the server, containing information
- *                   about whether the agent is active and any errors.
+ * \param   response The response from the server, containing information about
+ *                   any errors.
+ * \param   active   Whether or not the agent is active.
  */
-void on_is_active(client<client_data>& c, uint64_t agent_id, mpi_response response) {
-  check_response(response, "is_active: ");
+void on_is_active(client<client_data>& c, uint64_t agent_id, status response, bool active) {
   std::unique_lock<std::mutex> lck(c.data.lock);
   c.data.waiting_for_server = false;
+  c.data.response_data.active = active;
   c.data.server_response = response;
   c.data.cv.notify_one();
 }
@@ -999,10 +1001,12 @@ void on_is_active(client<client_data>& c, uint64_t agent_id, mpi_response respon
 
 /**
  * The callback invoked when the client receives a step response from the
- * server. This function constructs a list of AgentSimulationState objects governed by
- * this client and invokes the function `c.data.step_callback`.
+ * server. This function constructs a list of AgentSimulationState objects
+ * governed by this client and invokes the function `c.data.step_callback`.
  *
  * \param   c            The client that received the response.
+ * \param   response     The response from the server, containing information
+ *                       about any errors.
  * \param   agent_ids    An array of agent IDs governed by the client.
  * \param   agent_states An array, parallel to `agent_ids`, containing the
  *                       state information of each agent at the beginning of
@@ -1010,7 +1014,7 @@ void on_is_active(client<client_data>& c, uint64_t agent_id, mpi_response respon
  */
 void on_step(
   client<client_data>& c,
-  mpi_response response,
+  status response,
   const array<uint64_t>& agent_ids,
   const agent_state* agent_states
 ) {
@@ -1065,22 +1069,24 @@ inline void wait_for_server(client<client_data>& c) {
 void* simulatorCreate(
   const SimulatorConfig* config,
   OnStepCallback onStepCallback,
-  JBW_Status* status
+  JBW_Status* jbwStatus
 ) {
   simulator_config sim_config;
-  init(sim_config, *config, status);
-  if (status->code != JBW_OK) return nullptr;
+  init(sim_config, *config, jbwStatus);
+  if (jbwStatus->code != JBW_OK) return nullptr;
   simulator_data data(onStepCallback, nullptr);
   simulator<simulator_data>* sim = (simulator<simulator_data>*) malloc(
     sizeof(simulator<simulator_data>));
   if (sim == nullptr) {
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while creating a new simulator.";
+    jbwStatus->code = JBW_OUT_OF_MEMORY_ERROR;
+    jbwStatus->message = "Insufficient memory while creating a new simulator.";
     return nullptr;
   }
-  if (!init(*sim, sim_config, data, config->randomSeed)) {
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while initializing a new simulator.";
+  status result = init(*sim, sim_config, data, config->randomSeed);
+  /* TODO: translate status enum */
+  if (result != status::OK) {
+    jbwStatus->code = JBW_OUT_OF_MEMORY_ERROR;
+    jbwStatus->message = "Insufficient memory while initializing a new simulator.";
     return nullptr;
   }
   return (void*) sim;
@@ -1136,8 +1142,8 @@ SimulatorInfo simulatorLoad(
   FILE* file = open_file(filePath, "rb");
   if (file == nullptr) {
     free(sim);
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while loading a simulator.";
+    status->code = JBW_IO_ERROR;
+    status->message = "Failed to open file from which to load the simulator.";
     return EMPTY_SIM_INFO;
   }
 
@@ -1156,7 +1162,6 @@ SimulatorInfo simulatorLoad(
    || !read(sim_data.agent_ids.data, in, agent_id_count)
    || !read(sim_data.server.state, in))
   {
-    /* TODO: communicate "Failed to load agent IDs." error */
     free(*sim);
     free(sim);
     fclose(file);
@@ -1235,44 +1240,47 @@ void simulatorSetStepCallbackData(void* simulatorHandle, const void* callbackDat
 AgentSimulationState simulatorAddAgent(
   void* simulatorHandle,
   void* clientHandle,
-  JBW_Status* status
+  JBW_Status* jbwStatus
 ) {
   if (clientHandle == nullptr) {
     /* the simulation is local, so call add_agent directly */
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
-    pair<uint64_t, agent_state*> new_agent = sim_handle->add_agent();
-    if (new_agent.key == UINT64_MAX) {
-      status->code = JBW_EXCEEDED_AGENT_LIMIT;
-      status->message = "Failed to add new agent.";
+    uint64_t new_agent_id; agent_state* new_agent;
+    status result = sim_handle->add_agent(new_agent_id, new_agent);
+    /* TODO: translate status enum */
+    if (result != status::OK) {
+      jbwStatus->code = JBW_EXCEEDED_AGENT_LIMIT;
+      jbwStatus->message = "Failed to add new agent.";
       return EMPTY_AGENT_SIM_STATE;
     }
 
-    sim_handle->get_data().agent_ids.add(new_agent.key);
+    sim_handle->get_data().agent_ids.add(new_agent_id);
 
     AgentSimulationState new_agent_state;
-    std::unique_lock<std::mutex> lock(new_agent.value->lock);
-    init(new_agent_state, *new_agent.value, sim_handle->get_config(), new_agent.key, status);
-    if (status->code != JBW_OK) return EMPTY_AGENT_SIM_STATE;
+    std::unique_lock<std::mutex> lock(new_agent->lock);
+    init(new_agent_state, *new_agent, sim_handle->get_config(), new_agent_id, jbwStatus);
+    if (jbwStatus->code != JBW_OK) return EMPTY_AGENT_SIM_STATE;
     return new_agent_state;
   } else {
     /* this is a client, so send an add_agent message to the server */
     client<client_data>* client_ptr = (client<client_data>*) clientHandle;
     if (!client_ptr->client_running) {
-      status->code = JBW_LOST_CONNECTION;
-      status->message = "Connection to the simulation server was lost.";
+      jbwStatus->code = JBW_LOST_CONNECTION;
+      jbwStatus->message = "Connection to the simulation server was lost.";
       return EMPTY_AGENT_SIM_STATE;
     }
 
     client_ptr->data.waiting_for_server = true;
     if (!send_add_agent(*client_ptr)) {
-      status->code = JBW_COMMUNICATION_ERROR;
-      status->message = "Failed to send an \"add agent\" request.";
+      jbwStatus->code = JBW_COMMUNICATION_ERROR;
+      jbwStatus->message = "Failed to send an \"add agent\" request.";
       return EMPTY_AGENT_SIM_STATE;
     }
 
     /* wait for response from server */
     wait_for_server(*client_ptr);
 
+    /* TODO: translate status enum from `client_ptr->data.server_response` (`client_ptr->data.response_data.agent_state` here could be EMPTY_AGENT_SIM_STATE) */
     return client_ptr->data.response_data.agent_state;
   }
 }
@@ -1282,14 +1290,17 @@ void simulatorRemoveAgent(
   void* simulatorHandle,
   void* clientHandle,
   uint64_t agentId,
-  JBW_Status* status
+  JBW_Status* jbwStatus
 ) {
   if (clientHandle == nullptr) {
     /* the simulation is local, so call add_agent directly */
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
-    if (!sim_handle->remove_agent(agentId)) {
-      status->code = JBW_UNKNOWN_ERROR;
-      status->message = "Failed to remove an agent.";
+
+    status result = sim_handle->remove_agent(agentId);
+    if (result != status::OK) {
+      /* TODO: translate status enum */
+      jbwStatus->code = JBW_UNKNOWN_ERROR;
+      jbwStatus->message = "Failed to remove an agent.";
       return;
     }
 
@@ -1301,24 +1312,25 @@ void simulatorRemoveAgent(
     /* this is a client, so send an add_agent message to the server */
     client<client_data>* client_ptr = (client<client_data>*) clientHandle;
     if (!client_ptr->client_running) {
-      status->code = JBW_LOST_CONNECTION;
-      status->message = "Connection to the simulation server was lost.";
+      jbwStatus->code = JBW_LOST_CONNECTION;
+      jbwStatus->message = "Connection to the simulation server was lost.";
       return;
     }
 
     client_ptr->data.waiting_for_server = true;
     if (!send_remove_agent(*client_ptr, agentId)) {
-      status->code = JBW_COMMUNICATION_ERROR;
-      status->message = "Failed to send an \"add agent\" request.";
+      jbwStatus->code = JBW_COMMUNICATION_ERROR;
+      jbwStatus->message = "Failed to send an \"add agent\" request.";
       return;
     }
 
     /* wait for response from server */
     wait_for_server(*client_ptr);
 
-    if (client_ptr->data.server_response != mpi_response::SUCCESS) {
-      status->code = JBW_UNKNOWN_ERROR;
-      status->message = "Failed to remove an agent.";
+    if (client_ptr->data.server_response != status::OK) {
+      /* TODO: translate status enum */
+      jbwStatus->code = JBW_UNKNOWN_ERROR;
+      jbwStatus->message = "Failed to remove an agent.";
       return;
     }
   }
@@ -1331,38 +1343,41 @@ void simulatorMoveAgent(
   uint64_t agentId,
   Direction direction,
   unsigned int numSteps,
-  JBW_Status* status
+  JBW_Status* jbwStatus
 ) {
   if (clientHandle == nullptr) {
     /* the simulation is local, so call move directly */
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
-    if (!sim_handle->move(agentId, to_direction(direction), numSteps)) {
-      status->code = JBW_UNKNOWN_ERROR;
-      status->message = "Failed to move an agent.";
+    status result = sim_handle->move(agentId, to_direction(direction), numSteps);
+    if (result != status::OK) {
+      /* TODO: translate status enum */
+      jbwStatus->code = JBW_UNKNOWN_ERROR;
+      jbwStatus->message = "Failed to move an agent.";
       return;
     }
   } else {
     /* this is a client, so send a move message to the server */
     client<client_data>* client_ptr = (client<client_data>*) clientHandle;
     if (!client_ptr->client_running) {
-      status->code = JBW_LOST_CONNECTION;
-      status->message = "Connection to the simulation server was lost.";
+      jbwStatus->code = JBW_LOST_CONNECTION;
+      jbwStatus->message = "Connection to the simulation server was lost.";
       return;
     }
 
     client_ptr->data.waiting_for_server = true;
     if (!send_move(*client_ptr, agentId, to_direction(direction), numSteps)) {
-      status->code = JBW_COMMUNICATION_ERROR;
-      status->message = "Failed to send a \"move agent\" request.";
+      jbwStatus->code = JBW_COMMUNICATION_ERROR;
+      jbwStatus->message = "Failed to send a \"move agent\" request.";
       return;
     }
 
     /* wait for response from server */
     wait_for_server(*client_ptr);
 
-    if (client_ptr->data.server_response != mpi_response::SUCCESS) {
-      status->code = JBW_UNKNOWN_ERROR;
-      status->message = "Failed to move an agent.";
+    if (client_ptr->data.server_response != status::OK) {
+      /* TODO: translate status enum */
+      jbwStatus->code = JBW_UNKNOWN_ERROR;
+      jbwStatus->message = "Failed to move an agent.";
       return;
     }
   }
@@ -1374,38 +1389,41 @@ void simulatorTurnAgent(
   void* clientHandle,
   uint64_t agentId,
   TurnDirection direction,
-  JBW_Status* status
+  JBW_Status* jbwStatus
 ) {
   if (clientHandle == nullptr) {
     /* the simulation is local, so call turn directly */
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
-    if (!sim_handle->turn(agentId, to_direction(direction))) {
-      status->code = JBW_UNKNOWN_ERROR;
-      status->message = "Failed to turn an agent.";
+    status result = sim_handle->turn(agentId, to_direction(direction));
+    if (result != status::OK) {
+      /* TODO: translate status enum */
+      jbwStatus->code = JBW_UNKNOWN_ERROR;
+      jbwStatus->message = "Failed to turn an agent.";
       return;
     }
   } else {
     /* this is a client, so send a turn message to the server */
     client<client_data>* client_ptr = (client<client_data>*) clientHandle;
     if (!client_ptr->client_running) {
-      status->code = JBW_LOST_CONNECTION;
-      status->message = "Connection to the simulation server was lost.";
+      jbwStatus->code = JBW_LOST_CONNECTION;
+      jbwStatus->message = "Connection to the simulation server was lost.";
       return;
     }
 
     client_ptr->data.waiting_for_server = true;
     if (!send_turn(*client_ptr, agentId, to_direction(direction))) {
-      status->code = JBW_COMMUNICATION_ERROR;
-      status->message = "Failed to send a \"turn agent\" request.";
+      jbwStatus->code = JBW_COMMUNICATION_ERROR;
+      jbwStatus->message = "Failed to send a \"turn agent\" request.";
       return;
     }
 
     /* wait for response from server */
     wait_for_server(*client_ptr);
 
-    if (client_ptr->data.server_response != mpi_response::SUCCESS) {
-      status->code = JBW_UNKNOWN_ERROR;
-      status->message = "Failed to turn an agent.";
+    if (client_ptr->data.server_response != status::OK) {
+      /* TODO: translate status enum */
+      jbwStatus->code = JBW_UNKNOWN_ERROR;
+      jbwStatus->message = "Failed to turn an agent.";
       return;
     }
   }
@@ -1416,38 +1434,41 @@ void simulatorNoOpAgent(
   void* simulatorHandle,
   void* clientHandle,
   uint64_t agentId,
-  JBW_Status* status
+  JBW_Status* jbwStatus
 ) {
   if (clientHandle == nullptr) {
     /* the simulation is local, so call do_nothing directly */
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
-    if (!sim_handle->do_nothing(agentId)) {
-      status->code = JBW_UNKNOWN_ERROR;
-      status->message = "Failed to perform a \"no-op\" agent action.";
+    status result = sim_handle->do_nothing(agentId);
+    if (result != status::OK) {
+      /* TODO: translate status enum */
+      jbwStatus->code = JBW_UNKNOWN_ERROR;
+      jbwStatus->message = "Failed to perform a \"no-op\" agent action.";
       return;
     }
   } else {
     /* this is a client, so send a do_nothing message to the server */
     client<client_data>* client_ptr = (client<client_data>*) clientHandle;
     if (!client_ptr->client_running) {
-      status->code = JBW_LOST_CONNECTION;
-      status->message = "Connection to the simulation server was lost.";
+      jbwStatus->code = JBW_LOST_CONNECTION;
+      jbwStatus->message = "Connection to the simulation server was lost.";
       return;
     }
 
     client_ptr->data.waiting_for_server = true;
     if (!send_do_nothing(*client_ptr, agentId)) {
-      status->code = JBW_COMMUNICATION_ERROR;
-      status->message = "Failed to send a \"no-op\" request.";
+      jbwStatus->code = JBW_COMMUNICATION_ERROR;
+      jbwStatus->message = "Failed to send a \"no-op\" request.";
       return;
     }
 
     /* wait for response from server */
     wait_for_server(*client_ptr);
 
-    if (client_ptr->data.server_response != mpi_response::SUCCESS) {
-      status->code = JBW_UNKNOWN_ERROR;
-      status->message = "Failed to perform a \"no-op\" agent action.";
+    if (client_ptr->data.server_response != status::OK) {
+      /* TODO: translate status enum */
+      jbwStatus->code = JBW_UNKNOWN_ERROR;
+      jbwStatus->message = "Failed to perform a \"no-op\" agent action.";
       return;
     }
   }
@@ -1515,15 +1536,14 @@ bool simulatorIsActive(
 
     /* wait for response from server */
     wait_for_server(*client_handle);
-    if (client_handle->data.server_response == mpi_response::SUCCESS) {
-      return true;
-    } else if (client_handle->data.server_response == mpi_response::FAILURE) {
-      return false;
-    } else {
+    if (client_handle->data.server_response == status::OK) {
+      /* TODO: translate status enum */
       status->code = JBW_COMMUNICATION_ERROR;
       status->message = "Invalid response received for an \"is active\" request.";
       return false;
     }
+
+    return client_handle->data.response_data.active;
   }
 }
 
@@ -1533,7 +1553,7 @@ const SimulationMap simulatorMap(
   void* clientHandle,
   Position bottomLeftCorner,
   Position topRightCorner,
-  JBW_Status* status
+  JBW_Status* jbwStatus
 ) {
   position bottom_left = position(bottomLeftCorner.x, bottomLeftCorner.y);
   position top_right = position(topRightCorner.x, topRightCorner.y);
@@ -1541,15 +1561,17 @@ const SimulationMap simulatorMap(
     /* the simulation is local, so call get_map directly */
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
     array<array<patch_state>> patches(16);
-    if (!sim_handle->get_map(bottom_left, top_right, patches)) {
-      status->code = JBW_UNKNOWN_ERROR;
-      status->message = "Failed to obtain the simulation map.";
+    status result = sim_handle->get_map(bottom_left, top_right, patches);
+    if (result != status::OK) {
+      /* TODO: translate status enum */
+      jbwStatus->code = JBW_UNKNOWN_ERROR;
+      jbwStatus->message = "Failed to obtain the simulation map.";
       return EMPTY_SIM_MAP;
     }
 
     SimulationMap map;
-    init(map, patches, sim_handle->get_config(), status);
-    if (status->code != JBW_OK)
+    init(map, patches, sim_handle->get_config(), jbwStatus);
+    if (jbwStatus->code != JBW_OK)
       map = EMPTY_SIM_MAP;
     for (array<patch_state>& row : patches) {
       for (auto& entry : row)
@@ -1561,28 +1583,29 @@ const SimulationMap simulatorMap(
     /* this is a client, so send a get_map message to the server */
     client<client_data>* client_ptr = (client<client_data>*) clientHandle;
     if (!client_ptr->client_running) {
-      status->code = JBW_LOST_CONNECTION;
-      status->message = "Connection to the simulation server was lost.";
+      jbwStatus->code = JBW_LOST_CONNECTION;
+      jbwStatus->message = "Connection to the simulation server was lost.";
       return EMPTY_SIM_MAP;
     }
 
     client_ptr->data.waiting_for_server = true;
     if (!send_get_map(*client_ptr, bottom_left, top_right)) {
-      status->code = JBW_COMMUNICATION_ERROR;
-      status->message = "Failed to send a \"get map\" request.";
+      jbwStatus->code = JBW_COMMUNICATION_ERROR;
+      jbwStatus->message = "Failed to send a \"get map\" request.";
       return EMPTY_SIM_MAP;
     }
 
     /* wait for response from server */
     wait_for_server(*client_ptr);
     SimulationMap map;
-    if (client_ptr->data.server_response != mpi_response::SUCCESS) {
-      status->code = JBW_UNKNOWN_ERROR;
-      status->message = "Failed to obtain the simulation map.";
+    if (client_ptr->data.server_response != status::OK) {
+      /* TODO: translate status enum */
+      jbwStatus->code = JBW_UNKNOWN_ERROR;
+      jbwStatus->message = "Failed to obtain the simulation map.";
       return EMPTY_SIM_MAP;
     }
-    init(map, *client_ptr->data.response_data.map, client_ptr->config, status);
-    if (status->code != JBW_OK)
+    init(map, *client_ptr->data.response_data.map, client_ptr->config, jbwStatus);
+    if (jbwStatus->code != JBW_OK)
       map = EMPTY_SIM_MAP;
     for (array<patch_state>& row : *client_ptr->data.response_data.map) {
       for (patch_state& entry : row)

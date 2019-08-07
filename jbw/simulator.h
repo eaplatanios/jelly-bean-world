@@ -23,6 +23,7 @@
 #include <mutex>
 #include "map.h"
 #include "diffusion.h"
+#include "status.h"
 
 namespace jbw {
 
@@ -888,7 +889,7 @@ struct agent_state {
  * \tparam  T               The arithmetic type for the scent diffusion model.
  */
 template<typename T>
-inline bool init(
+inline status init(
         agent_state& agent,
         map<patch_data, item_properties>& world,
         const diffusion<T>& scent_model,
@@ -902,18 +903,18 @@ inline bool init(
     agent.current_scent = (float*) malloc(sizeof(float) * config.scent_dimension);
     if (agent.current_scent == NULL) {
         fprintf(stderr, "init ERROR: Insufficient memory for agent_state.current_scent.\n");
-        return false;
+        return status::OUT_OF_MEMORY;
     }
     agent.current_vision = (float*) malloc(sizeof(float)
         * (2*config.vision_range + 1) * (2*config.vision_range + 1) * config.color_dimension);
     if (agent.current_vision == NULL) {
         fprintf(stderr, "init ERROR: Insufficient memory for agent_state.current_vision.\n");
-        free(agent.current_scent); return false;
+        free(agent.current_scent); return status::OUT_OF_MEMORY;
     }
     agent.collected_items = (unsigned int*) calloc(config.item_types.length, sizeof(unsigned int));
     if (agent.collected_items == NULL) {
         fprintf(stderr, "init ERROR: Insufficient memory for agent_state.collected_items.\n");
-        free(agent.current_scent); free(agent.current_vision); return false;
+        free(agent.current_scent); free(agent.current_vision); return status::OUT_OF_MEMORY;
     }
 
     agent.agent_acted = false;
@@ -937,7 +938,7 @@ inline bool init(
                 free(agent.current_scent); free(agent.current_vision);
                 free(agent.collected_items); agent.lock.~mutex();
                 neighborhood[index]->data.patch_lock.unlock();
-                return false;
+                return status::AGENT_ALREADY_EXISTS;
             }
         }
     }
@@ -957,7 +958,7 @@ inline bool init(
             neighbor->update_state(other_neighborhood, scent_model, config, current_time);
         }
     }
-    return true;
+    return status::OK;
 }
 
 /**
@@ -1222,24 +1223,24 @@ public:
     uint64_t time;
 
     /**
-     * Adds a new agent to this simulator and returns its ID and initial state.
-     *
-     * \returns A pair containing the ID of the new agent and its state.
+     * Adds a new agent to this simulator. Upon success, `new_agent` and
+     * `new_agent_id` will contain the ID of the new agent as well as a pointer
+     * to its state.
      */
-    inline pair<uint64_t, agent_state*> add_agent() {
+    inline status add_agent(uint64_t& new_agent_id, agent_state*& new_agent) {
         agent_states_lock.lock();
         if (!agents.check_size()) {
             agent_states_lock.unlock();
             fprintf(stderr, "simulator.add_agent ERROR: Failed to expand agent table.\n");
-            return make_pair(UINT64_MAX, (agent_state*) nullptr);
+            return status::OUT_OF_MEMORY;
         }
 
         unsigned int bucket = agents.table.index_to_insert(agent_id_counter);
-        agent_state* new_agent = (agent_state*) malloc(sizeof(agent_state));
-        uint64_t id = agent_id_counter;
+        new_agent = (agent_state*) malloc(sizeof(agent_state));
+        new_agent_id = agent_id_counter;
         if (new_agent == nullptr) {
             fprintf(stderr, "simulator.add_agent ERROR: Insufficient memory for new agent.\n");
-            return make_pair(UINT64_MAX, (agent_state*) nullptr);
+            return status::OUT_OF_MEMORY;
         }
         agents.table.keys[bucket] = agent_id_counter;
         agents.values[bucket] = new_agent;
@@ -1248,30 +1249,30 @@ public:
         agent_id_counter++;
         agent_states_lock.unlock();
 
-        if (!init(*new_agent, world, scent_model, config, time)) {
+        status init_status = init(*new_agent, world, scent_model, config, time);
+        if (init_status != status::OK) {
             agent_states_lock.lock();
-            agents.remove((size_t) id);
+            agents.remove((size_t) new_agent_id);
             core::free(new_agent);
             agent_states_lock.unlock();
-            return make_pair(UINT64_MAX, (agent_state*) NULL);
+            return init_status;
         }
-        return make_pair(id, new_agent);
+        return status::OK;
     }
 
     /**
      * Removes the given agent from this simulator.
      *
      * \param   agent_id  ID of the agent to remove.
-     * \returns `true` if the agent is removed; `false` otherwise.
      */
-    inline bool remove_agent(uint64_t agent_id) {
+    inline status remove_agent(uint64_t agent_id) {
         agent_states_lock.lock();
         bool contains; unsigned int bucket;
         agent_state* agent = agents.get(agent_id, contains, bucket);
         if (!contains) {
             fprintf(stderr, "simulator.remove_agent ERROR: Given agent is not in this simulator.\n");
             agent_states_lock.unlock();
-            return false;
+            return status::INVALID_AGENT_ID;
         }
         agents.remove_at(bucket);
         agent->lock.lock();
@@ -1289,7 +1290,7 @@ public:
             step(); /* advance the simulation by one time step */
         agent_states_lock.unlock();
 
-        return true;
+        return status::OK;
     }
 
     /**
@@ -1342,13 +1343,12 @@ public:
      * \param   dir       Direction along which to move, *relative* to the
      *                    agent's current direction.
      * \param   num_steps Number of steps to take in the specified direction.
-     * \returns `true` if the move was successful, and `false` otherwise.
      */
-    inline bool move(uint64_t agent_id, direction dir, unsigned int num_steps)
+    inline status move(uint64_t agent_id, direction dir, unsigned int num_steps)
     {
         if (num_steps > config.max_steps_per_movement
          || config.allowed_movement_directions[(size_t) dir] == action_policy::DISALLOWED)
-            return false;
+            return status::PERMISSION_ERROR;
 
         agent_states_lock.lock();
         agent_state& agent = *agents.get(agent_id);
@@ -1356,7 +1356,8 @@ public:
 
         agent.lock.lock();
         if (agent.agent_acted) {
-            agent.lock.unlock(); return false;
+            agent.lock.unlock();
+            return status::AGENT_ALREADY_ACTED;
         }
         agent.agent_acted = true;
 
@@ -1397,7 +1398,7 @@ public:
                 step(); /* advance the simulation by one time step */
             agent_states_lock.unlock();
         }
-        return true;
+        return status::OK;
     }
 
     /**
@@ -1410,12 +1411,11 @@ public:
      * \param   agent_id ID of the agent to move.
      * \param   dir      Direction to turn, *relative* to the agent's current
      *                   direction.
-     * \returns `true` if the turn was successful, and `false` otherwise.
      */
-    inline bool turn(uint64_t agent_id, direction dir)
+    inline status turn(uint64_t agent_id, direction dir)
     {
         if (config.allowed_rotations[(size_t) dir] == action_policy::DISALLOWED)
-            return false;
+            return status::PERMISSION_ERROR;
 
         agent_states_lock.lock();
         agent_state& agent = *agents.get(agent_id);
@@ -1423,7 +1423,8 @@ public:
 
         agent.lock.lock();
         if (agent.agent_acted) {
-            agent.lock.unlock(); return false;
+            agent.lock.unlock();
+            return status::AGENT_ALREADY_ACTED;
         }
         agent.agent_acted = true;
 
@@ -1465,18 +1466,17 @@ public:
                 step(); /* advance the simulation by one time step */
             agent_states_lock.unlock();
         }
-        return true;
+        return status::OK;
     }
 
     /**
      * Instructs the agent to do nothing this turn.
      *
      * \param   agent_id ID of the agent.
-     * \returns `true` if the action request was successful; `false` otherwise.
      */
-    inline bool do_nothing(uint64_t agent_id)
+    inline status do_nothing(uint64_t agent_id)
     {
-        if (!config.no_op_allowed) return false;
+        if (!config.no_op_allowed) return status::PERMISSION_ERROR;
 
         agent_states_lock.lock();
         agent_state& agent = *agents.get(agent_id);
@@ -1484,7 +1484,8 @@ public:
 
         agent.lock.lock();
         if (agent.agent_acted) {
-            agent.lock.unlock(); return false;
+            agent.lock.unlock();
+            return status::AGENT_ALREADY_ACTED;
         }
         agent.agent_acted = true;
 
@@ -1501,7 +1502,7 @@ public:
                 step(); /* advance the simulation by one time step */
             agent_states_lock.unlock();
         }
-        return true;
+        return status::OK;
     }
 
     /**
@@ -1560,9 +1561,8 @@ public:
      *      will contain the state of the retrieved patches. Each inner array
      *      represents a row of patches that all share the same `y` value in
      *      their patch positions;
-     * \returns `true` if successful; `false` otherwise.
      */
-    bool get_map(
+    status get_map(
             position bottom_left_corner,
             position top_right_corner,
             array<array<patch_state>>& patches)
@@ -1575,10 +1575,10 @@ public:
         for (int64_t y = bottom_left_patch_position.y - 1; y < top_right_patch_position.y + 1; y++)
         {
             if (!patches.ensure_capacity(patches.length + 1))
-                return false;
+                return status::OUT_OF_MEMORY;
             array<patch_state>& current_row = patches[patches.length];
             if (!array_init(current_row, 16))
-                return false;
+                return status::OUT_OF_MEMORY;
             patches.length++;
 
             for (int64_t x = bottom_left_patch_position.x - 1; x < top_right_patch_position.x + 1; x++)
@@ -1587,12 +1587,12 @@ public:
                 if (patch == NULL) continue;
 
                 if (!current_row.ensure_capacity(current_row.length + 1))
-                    return false;
+                    return status::OUT_OF_MEMORY;
                 patch_state& state = current_row[current_row.length];
                 if (!init(state, config.patch_size,
                     config.scent_dimension, config.color_dimension,
                     (unsigned int) patch->items.length,
-                    (unsigned int) patch->data.agents.length)) return false;
+                    (unsigned int) patch->data.agents.length)) return status::OUT_OF_MEMORY;
                 current_row.length++;
 
                 state.patch_position = position(x, y);
@@ -1655,7 +1655,7 @@ public:
             }
         }
 
-        return true;
+        return status::OK;
     }
 
     static inline void free(simulator& s) {
@@ -1863,7 +1863,7 @@ private:
         }
     }
 
-    template<typename A> friend bool init(simulator<A>&, const simulator_config&, const A&, uint_fast32_t);
+    template<typename A> friend status init(simulator<A>&, const simulator_config&, const A&, uint_fast32_t);
     template<typename A, typename B> friend bool read(simulator<A>&, B&, const A&);
     template<typename A, typename B> friend bool write(const simulator<A>&, B&);
 };
@@ -1873,11 +1873,9 @@ private:
  * SimulatorData `data`, calling the
  * `bool init(SimulatorData&, const SimulatorData&)` function to initialize
  * `data`.
- *
- * \returns `true` if successful; `false` otherwise.
  */
 template<typename SimulatorData>
-bool init(simulator<SimulatorData>& sim, 
+status init(simulator<SimulatorData>& sim, 
         const simulator_config& config,
         const SimulatorData& data,
         uint_fast32_t seed)
@@ -1887,29 +1885,29 @@ bool init(simulator<SimulatorData>& sim,
     sim.active_agent_count = 0;
     sim.agent_id_counter = 1;
     if (!init(sim.data, data)) {
-        return false;
+        return status::OUT_OF_MEMORY;
     } else if (!hash_map_init(sim.agents, 32)) {
-        free(sim.data); return false;
+        free(sim.data); return status::OUT_OF_MEMORY;
     } else if (!hash_map_init(sim.requested_moves, 32, alloc_position_keys)) {
-        free(sim.data); free(sim.agents); return false;
+        free(sim.data); free(sim.agents); return status::OUT_OF_MEMORY;
     } else if (!init(sim.config, config)) {
         free(sim.data); free(sim.agents);
-        free(sim.requested_moves); return false;
+        free(sim.requested_moves); return status::OUT_OF_MEMORY;
     } else if (!init(sim.scent_model, (double) sim.config.diffusion_param,
             (double) sim.config.decay_param, sim.config.patch_size, sim.config.deleted_item_lifetime)) {
         free(sim.data); free(sim.config); free(sim.agents);
-        free(sim.requested_moves); return false;
+        free(sim.requested_moves); return status::OUT_OF_MEMORY;
     } else if (!init(sim.world, sim.config.patch_size,
             sim.config.mcmc_iterations,
             sim.config.item_types.data,
             (unsigned int) sim.config.item_types.length, seed)) {
         free(sim.config); free(sim.data);
         free(sim.agents); free(sim.requested_moves);
-        free(sim.scent_model); return false;
+        free(sim.scent_model); return status::OUT_OF_MEMORY;
     }
     new (&sim.agent_states_lock) std::mutex();
     new (&sim.requested_move_lock) std::mutex();
-    return true;
+    return status::OK;
 }
 
 /**
@@ -1917,11 +1915,9 @@ bool init(simulator<SimulatorData>& sim,
  * SimulatorData `data`, calling the
  * `bool init(SimulatorData&, const SimulatorData&)` function to initialize
  * `data`.
- *
- * \returns `true` if successful; `false` otherwise.
  */
 template<typename SimulatorData>
-inline bool init(simulator<SimulatorData>& sim, 
+inline status init(simulator<SimulatorData>& sim, 
         const simulator_config& config,
         const SimulatorData& data)
 {

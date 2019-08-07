@@ -14,8 +14,8 @@
  * the License.
  */
 
-#ifndef JBW_STATUS_H_
-#define JBW_STATUS_H_
+#ifndef SWIFT_JBW_STATUS_H_
+#define SWIFT_JBW_STATUS_H_
 
 #ifdef __cplusplus
 extern "C" {
@@ -50,4 +50,4 @@ void JBW_DeleteStatus(JBW_Status* status);
 } /* extern "C" */
 #endif
 
-#endif /* JBW_STATUS_H_ */
+#endif /* SWIFT_JBW_STATUS_H_ */
