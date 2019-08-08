@@ -360,9 +360,16 @@ struct client_data {
 		size_t length;
 	};
 
+	struct agent_state_array {
+		const uint64_t* ids;
+		const agent_state* states;
+		size_t length;
+	};
+
 	uint64_t client_id;
 	const array<array<patch_state>>* map;
 	fixed_array<uint64_t> agent_ids;
+	agent_state_array agent_states;
 	bool waiting_for_server;
 	std::mutex lock;
 	std::condition_variable condition;
@@ -450,6 +457,19 @@ void on_get_agent_ids(
 	c.data.waiting_for_server = false;
 	c.data.agent_ids.data = agent_ids;
 	c.data.agent_ids.length = count;
+	c.data.condition.notify_one();
+}
+
+void on_get_agent_states(
+		client<client_data>& c, status response,
+		const uint64_t* agent_ids,
+		const agent_state* agent_states, size_t count)
+{
+	std::unique_lock<std::mutex> lck(c.data.lock);
+	c.data.waiting_for_server = false;
+	c.data.agent_states.ids = agent_ids;
+	c.data.agent_states.states = agent_states;
+	c.data.agent_states.length = count;
 	c.data.condition.notify_one();
 }
 

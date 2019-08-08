@@ -25,12 +25,7 @@ class Permissions:
   set_active = False
   get_map = False
   get_agent_ids = False
-
-  def __repr__(self):
-    return repr((self.add_agent, self.remove_agent, self.remove_client, self.set_active, self.get_map, self.get_agent_ids))
-
-  def __str__(self):
-    return str((self.add_agent, self.remove_agent, self.remove_client, self.set_active, self.get_map, self.get_agent_ids))
+  get_agent_states = False
 
 GRANT_ALL_PERMISSIONS = Permissions()
 GRANT_ALL_PERMISSIONS.add_agent = True
@@ -39,6 +34,7 @@ GRANT_ALL_PERMISSIONS.remove_client = True
 GRANT_ALL_PERMISSIONS.set_active = True
 GRANT_ALL_PERMISSIONS.get_map = True
 GRANT_ALL_PERMISSIONS.get_agent_ids = True
+GRANT_ALL_PERMISSIONS.get_agent_states = True
 
 DENY_ALL_PERMISSIONS = Permissions()
 DENY_ALL_PERMISSIONS.add_agent = False
@@ -47,3 +43,4 @@ DENY_ALL_PERMISSIONS.remove_client = False
 DENY_ALL_PERMISSIONS.set_active = False
 DENY_ALL_PERMISSIONS.get_map = False
 DENY_ALL_PERMISSIONS.get_agent_ids = False
+DENY_ALL_PERMISSIONS.get_agent_states = False

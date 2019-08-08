@@ -362,7 +362,7 @@ class Simulator(object):
     if self._server_handle == None:
       raise RuntimeError("`get_permissions` requires that the Simulator be a server.")
     perm = Permissions()
-    (perm.add_agent, perm.remove_agent, perm.remove_client, perm.set_active, perm.get_map, perm.get_agent_ids) = simulator_c.get_permissions(self._server_handle, client_id)
+    (perm.add_agent, perm.remove_agent, perm.remove_client, perm.set_active, perm.get_map, perm.get_agent_ids, perm.get_agent_states) = simulator_c.get_permissions(self._server_handle, client_id)
     return perm
 
   def set_permissions(self, client_id, permissions):
@@ -432,6 +432,10 @@ class Simulator(object):
   def _agent_ids(self):
     """Retrieves a list of the IDs of *all* agents in the simulation environment."""
     return simulator_c.agent_ids(self._handle, self._client_handle)
+
+  def _agent_states(self, agent_ids):
+    """Retrieves a list of the agents states with the given IDs in the simulation environment."""
+    return simulator_c.agent_states(self._handle, self._client_handle, agent_ids)
 
   def _load_agents(self, load_filepath, load_time):
     with open(load_filepath + str(load_time) + '.agent_info', 'rb') as fin:

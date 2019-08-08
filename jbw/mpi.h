@@ -42,6 +42,8 @@ enum class message_type : uint64_t {
 	GET_MAP_RESPONSE,
 	GET_AGENT_IDS,
 	GET_AGENT_IDS_RESPONSE,
+	GET_AGENT_STATES,
+	GET_AGENT_STATES_RESPONSE,
 	SET_ACTIVE,
 	SET_ACTIVE_RESPONSE,
 	IS_ACTIVE,
@@ -82,6 +84,7 @@ inline bool print(const message_type& type, Stream& out) {
 	case message_type::DO_NOTHING:       return core::print("DO_NOTHING", out);
 	case message_type::GET_MAP:          return core::print("GET_MAP", out);
 	case message_type::GET_AGENT_IDS:    return core::print("GET_AGENT_IDS", out);
+	case message_type::GET_AGENT_STATES: return core::print("GET_AGENT_STATES", out);
 	case message_type::SET_ACTIVE:       return core::print("SET_ACTIVE", out);
 	case message_type::IS_ACTIVE:        return core::print("IS_ACTIVE", out);
 
@@ -92,6 +95,7 @@ inline bool print(const message_type& type, Stream& out) {
 	case message_type::DO_NOTHING_RESPONSE:       return core::print("DO_NOTHING_RESPONSE", out);
 	case message_type::GET_MAP_RESPONSE:          return core::print("GET_MAP_RESPONSE", out);
 	case message_type::GET_AGENT_IDS_RESPONSE:    return core::print("GET_AGENT_IDS_RESPONSE", out);
+	case message_type::GET_AGENT_STATES_RESPONSE: return core::print("GET_AGENT_STATES_RESPONSE", out);
 	case message_type::SET_ACTIVE_RESPONSE:       return core::print("SET_ACTIVE_RESPONSE", out);
 	case message_type::IS_ACTIVE_RESPONSE:        return core::print("IS_ACTIVE_RESPONSE", out);
 	case message_type::STEP_RESPONSE:             return core::print("STEP_RESPONSE", out);
@@ -119,11 +123,13 @@ struct permissions {
 	bool set_active;
 	bool get_map;
 	bool get_agent_ids;
+	bool get_agent_states;
 
 	permissions() { }
 	constexpr permissions(bool value) :
 		add_agent(value), remove_agent(value), remove_client(value),
-		set_active(value), get_map(value), get_agent_ids(value)
+		set_active(value), get_map(value), get_agent_ids(value),
+		get_agent_states(value)
 	{ }
 
 	static inline void swap(permissions& first, permissions& second) {
@@ -133,6 +139,7 @@ struct permissions {
 		core::swap(first.set_active, second.set_active);
 		core::swap(first.get_map, second.get_map);
 		core::swap(first.get_agent_ids, second.get_agent_ids);
+		core::swap(first.get_agent_states, second.get_agent_states);
 	}
 
 	static constexpr permissions grant_all() { return permissions(true); }
@@ -146,7 +153,8 @@ bool read(permissions& perms, Stream& in) {
 		&& read(perms.remove_client, in)
 		&& read(perms.set_active, in)
 		&& read(perms.get_map, in)
-		&& read(perms.get_agent_ids, in);
+		&& read(perms.get_agent_ids, in)
+		&& read(perms.get_agent_states, in);
 }
 
 template<typename Stream>
@@ -156,7 +164,8 @@ bool write(const permissions& perms, Stream& out) {
 		&& write(perms.remove_client, out)
 		&& write(perms.set_active, out)
 		&& write(perms.get_map, out)
-		&& write(perms.get_agent_ids, out);
+		&& write(perms.get_agent_ids, out)
+		&& write(perms.get_agent_states, out);
 }
 
 struct client_state {
@@ -573,7 +582,7 @@ inline bool receive_move(
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		if (!cstate.agent_ids.contains(agent_id)) {
+		if (agent_id == 0 || !cstate.agent_ids.contains(agent_id)) {
 			cstate.lock.unlock();
 			response = status::INVALID_AGENT_ID;
 		} else {
@@ -618,7 +627,7 @@ inline bool receive_turn(
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		if (!cstate.agent_ids.contains(agent_id)) {
+		if (agent_id == 0 || !cstate.agent_ids.contains(agent_id)) {
 			cstate.lock.unlock();
 			response = status::INVALID_AGENT_ID;
 		} else {
@@ -662,7 +671,7 @@ inline bool receive_do_nothing(
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		if (!cstate.agent_ids.contains(agent_id)) {
+		if (agent_id == 0 || !cstate.agent_ids.contains(agent_id)) {
 			cstate.lock.unlock();
 			response = status::INVALID_AGENT_ID;
 		} else {
@@ -701,14 +710,14 @@ inline bool receive_get_map(
 	status response;
 	array<array<patch_state>> patches(32);
 	bool success = true;
-	if (!read(bottom_left, in) || !read(top_right, in)) {
-		cstate.lock.unlock();
-		response = status::SERVER_PARSE_MESSAGE_ERROR;
-		success = false;
-	} else if (!cstate.perms.get_map) {
+	if (!cstate.perms.get_map) {
 		/* the client has no permission for this operation */
 		cstate.lock.unlock();
 		response = status::PERMISSION_ERROR;
+	} else if (!read(bottom_left, in) || !read(top_right, in)) {
+		cstate.lock.unlock();
+		response = status::SERVER_PARSE_MESSAGE_ERROR;
+		success = false;
 	} else {
 		cstate.lock.unlock();
 		response = sim.get_map(bottom_left, top_right, patches);
@@ -750,8 +759,8 @@ inline bool receive_get_agent_ids(
 	array<uint64_t> agent_ids(32);
 	bool success = true;
 	if (!cstate.perms.get_agent_ids) {
-		cstate.lock.unlock();
 		/* the client has no permission for this operation */
+		cstate.lock.unlock();
 		response = status::PERMISSION_ERROR;
 	} else {
 		cstate.lock.unlock();
@@ -768,6 +777,110 @@ inline bool receive_get_agent_ids(
 	success &= write(message_type::GET_AGENT_IDS_RESPONSE, out) && write(response, out)
 			&& write(agent_ids.length, out) && write(agent_ids.data, out, agent_ids.length)
 			&& send_message(connection, mem_stream.buffer, mem_stream.position);
+	return success;
+}
+
+template<typename Stream>
+inline bool send_agent_states(
+	Stream& out, uint64_t* agent_ids,
+	agent_state** agent_states,
+	size_t& agent_state_count,
+	const simulator_config& config)
+{
+	/* remove agent IDs from `agent_ids` which don't exist in the simulator */
+	size_t old_agent_state_count = agent_state_count;
+	unsigned int agent_id_index = 0;
+	for (unsigned int i = 0; i < old_agent_state_count; i++) {
+		if (agent_states[i] != nullptr)
+			agent_ids[agent_id_index++] = agent_ids[i];
+	}
+	agent_state_count = agent_id_index;
+
+	if (!write(agent_state_count, out)
+	 || !write(agent_ids, out, agent_state_count))
+	{
+		for (unsigned int i = 0; i < old_agent_state_count; i++)
+			if (agent_states[i] != nullptr) agent_states[i]->lock.unlock();
+		return false;
+	}
+
+	/* send the requested agent states to the client */
+	for (unsigned int i = 0; i < old_agent_state_count; i++) {
+		if (agent_states[i] == nullptr) continue;
+		if (!write(*agent_states[i], out, config)) {
+			for (unsigned int j = i; j < old_agent_state_count; j++)
+				if (agent_states[j] != nullptr) agent_states[j]->lock.unlock();
+			return false;
+		}
+		agent_states[i]->lock.unlock();
+	}
+	return true;
+}
+
+/* Precondition: `state.client_states_lock` must be held by the calling thread. */
+template<typename Stream, typename SimulatorData>
+inline bool receive_get_agent_states(
+		Stream& in, socket_type& connection,
+		server_state& state, uint64_t client_id,
+		simulator<SimulatorData>& sim)
+{
+	client_state& cstate = *state.client_states.get(client_id);
+	cstate.lock.lock();
+	state.client_states_lock.unlock();
+
+	status response;
+	uint64_t* agent_ids;
+	agent_state** agent_states;
+	size_t agent_state_count;
+	bool success = true;
+	if (!cstate.perms.get_agent_states) {
+		/* the client has no permission for this operation */
+		cstate.lock.unlock();
+		response = status::PERMISSION_ERROR;
+	} else if (!read(agent_state_count, in)) {
+		cstate.lock.unlock();
+		response = status::SERVER_PARSE_MESSAGE_ERROR;
+		success = false;
+	} else {
+		cstate.lock.unlock();
+
+		agent_ids = (uint64_t*) malloc(max((size_t) 1, sizeof(uint64_t) * agent_state_count));
+		agent_states = (agent_state**) malloc(max((size_t) 1, sizeof(agent_state*) * agent_state_count));
+		if (agent_ids == nullptr || agent_states == nullptr) {
+			if (agent_ids != nullptr) free(agent_ids);
+			response = status::SERVER_OUT_OF_MEMORY;
+			success = false;
+		} else if (!read(agent_ids, in, agent_state_count)) {
+			free(agent_ids);
+			free(agent_states);
+			response = status::SERVER_PARSE_MESSAGE_ERROR;
+			success = false;
+		} else {
+			/* make sure the agent IDs are valid */
+			response = status::OK;
+			for (size_t i = 0; i < agent_state_count; i++) {
+				if (agent_ids[i] == 0) {
+					free(agent_ids);
+					free(agent_states);
+					response = status::INVALID_AGENT_ID;
+					break;
+				}
+			}
+
+			if (response == status::OK)
+				sim.get_agent_states(agent_states, agent_ids, (unsigned int) agent_state_count);
+		}
+	}
+
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(response) + sizeof(size_t) + (sizeof(uint64_t) + sizeof(agent_state)) * agent_state_count);
+	fixed_width_stream<memory_stream> out(mem_stream);
+	success &= write(message_type::GET_AGENT_STATES_RESPONSE, out) && write(response, out)
+			&& (response != status::OK || send_agent_states(out, agent_ids, agent_states, agent_state_count, sim.get_config()))
+			&& send_message(connection, mem_stream.buffer, mem_stream.position);
+	if (response == status::OK) {
+		free(agent_ids);
+		free(agent_states);
+	}
 	return success;
 }
 
@@ -794,7 +907,7 @@ inline bool receive_set_active(
 		cstate.lock.unlock();
 		response = status::PERMISSION_ERROR;
 	} else {
-		if (!cstate.agent_ids.contains(agent_id)) {
+		if (agent_id == 0 || !cstate.agent_ids.contains(agent_id)) {
 			cstate.lock.unlock();
 			response = status::INVALID_AGENT_ID;
 		} else {
@@ -836,7 +949,7 @@ inline bool receive_is_active(
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		if (!cstate.agent_ids.contains(agent_id)) {
+		if (agent_id == 0 || !cstate.agent_ids.contains(agent_id)) {
 			cstate.lock.unlock();
 			response = status::INVALID_AGENT_ID;
 		} else {
@@ -892,6 +1005,8 @@ void server_process_message(socket_type& connection,
 			receive_get_map(in, connection, state, client_id, sim); return;
 		case message_type::GET_AGENT_IDS:
 			receive_get_agent_ids(in, connection, state, client_id, sim); return;
+		case message_type::GET_AGENT_STATES:
+			receive_get_agent_states(in, connection, state, client_id, sim); return;
 		case message_type::SET_ACTIVE:
 			receive_set_active(in, connection, state, client_id, sim); return;
 		case message_type::IS_ACTIVE:
@@ -904,6 +1019,7 @@ void server_process_message(socket_type& connection,
 		case message_type::DO_NOTHING_RESPONSE:
 		case message_type::GET_MAP_RESPONSE:
 		case message_type::GET_AGENT_IDS_RESPONSE:
+		case message_type::GET_AGENT_STATES_RESPONSE:
 		case message_type::SET_ACTIVE_RESPONSE:
 		case message_type::IS_ACTIVE_RESPONSE:
 		case message_type::STEP_RESPONSE:
@@ -998,37 +1114,15 @@ inline bool process_new_connection(
 			return false;
 		}
 
-		if (cstate.agent_ids.length > 0) {
-			agent_state** agent_states = (agent_state**) malloc(sizeof(agent_state*) * cstate.agent_ids.length);
-			sim.get_agent_states(agent_states, cstate.agent_ids.data, (unsigned int) cstate.agent_ids.length);
+		agent_state** agent_states = (agent_state**) malloc(max((size_t) 1, sizeof(agent_state*) * cstate.agent_ids.length));
+		sim.get_agent_states(agent_states, cstate.agent_ids.data, (unsigned int) cstate.agent_ids.length);
 
-			/* get number of non-null agents */
-			unsigned int agent_count = 0;
-			for (unsigned int i = 0; i < cstate.agent_ids.length; i++) {
-				if (agent_states[i] != nullptr) agent_count++;
-			}
-
-			if (!write(agent_count, out)) {
-				cstate.lock.unlock();
-				fprintf(stderr, "process_new_connection ERROR: Error sending agent count.\n");
-				return false;
-			}
-
-			/* send the requested agent states to the client */
-			for (unsigned int i = 0; i < cstate.agent_ids.length; i++) {
-				if (agent_states[i] == nullptr) continue;
-				std::unique_lock<std::mutex> lock(agent_states[i]->lock);
-				if (!write(*agent_states[i], out, config)) {
-					cstate.lock.unlock();
-					free(agent_states); return false;
-				}
-			}
-			free(agent_states);
-		} else if (!write((unsigned int) 0, out)) {
+		if (!send_agent_states(out, cstate.agent_ids.data, agent_states, cstate.agent_ids.length, config)) {
 			cstate.lock.unlock();
-			fprintf(stderr, "process_new_connection ERROR: Error sending agent count.\n");
-			return false;
+			fprintf(stderr, "process_new_connection ERROR: Error sending agent states.\n");
+			free(agent_states); return false;
 		}
+		free(agent_states);
 		cstate.lock.unlock();
 
 		return send_message(connection, mem_stream.buffer, mem_stream.position);
@@ -1377,6 +1471,31 @@ bool send_get_agent_ids(ClientType& c) {
 }
 
 /**
+ * Sends an `get_agent_states` message to the server from the client `c`. Once
+ * the server responds, the function
+ * `on_get_agent_states(ClientType&, status, uint64_t*, agent_state*, size_t)`
+ * will be invoked, where the first argument is `c`, and the second is the
+ * response (OK if successful, and a different value if an error occurred), the
+ * third is the array of agent IDs (which could be missing items from
+ * `agent_ids` if the corresponding agent does not exist in the simulation),
+ * the fourth is the array of agent states, and the fifth is the size of the
+ * returned arrays of agent IDs and agent states.
+ *
+ * \param agent_ids The list of agent IDs whose states to query.
+ * \param agent_id_count The number of IDs in `agent_ids`.
+ * \returns `true` if the sending is successful; `false` otherwise.
+ */
+template<typename ClientType>
+bool send_get_agent_states(ClientType& c, const uint64_t* agent_ids, size_t agent_id_count) {
+	memory_stream mem_stream = memory_stream(sizeof(message_type));
+	fixed_width_stream<memory_stream> out(mem_stream);
+	return write(message_type::GET_AGENT_STATES, out)
+		&& write(agent_id_count, out)
+		&& write(agent_ids, out, agent_id_count)
+		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
+}
+
+/**
  * Sends a `set_active` message to the server from the client `c`. Once the
  * server responds, the function
  * `on_set_active(ClientType&, uint64_t, status)` will be invoked, where the
@@ -1541,6 +1660,60 @@ inline bool receive_get_agent_ids_response(ClientType& c) {
 	return success;
 }
 
+template<typename Stream>
+inline status read_agent_states(
+		Stream& in,
+		uint64_t*& agent_ids,
+		agent_state*& agent_states,
+		size_t& agent_count,
+		const simulator_config& config)
+{
+	if (!read(agent_count, in)) {
+		return status::CLIENT_PARSE_MESSAGE_ERROR;
+	} else {
+		agent_ids = (uint64_t*) malloc(max((size_t) 1, sizeof(uint64_t) * agent_count));
+		agent_states = (agent_state*) malloc(max((size_t) 1, sizeof(agent_state) * agent_count));
+		if (agent_ids == nullptr || agent_states == nullptr) {
+			fprintf(stderr, "read_agent_states ERROR: Out of memory.\n");
+			if (agent_ids != nullptr) free(agent_ids);
+			return status::CLIENT_OUT_OF_MEMORY;
+		} else if (!read(agent_ids, in, agent_count)) {
+			free(agent_ids); free(agent_states);
+			return status::CLIENT_PARSE_MESSAGE_ERROR;
+		}
+
+		for (size_t i = 0; i < agent_count; i++) {
+			if (!read(agent_states[i], in, config)) {
+				for (size_t j = 0; j < i; j++) free(agent_states[j]);
+				free(agent_ids); free(agent_states);
+				return status::CLIENT_PARSE_MESSAGE_ERROR;
+			}
+		}
+	}
+	return status::OK;
+}
+
+template<typename ClientType>
+inline bool receive_get_agent_states_response(ClientType& c) {
+	status response;
+	bool success = true;
+	size_t agent_count = 0;
+	uint64_t* agent_ids = nullptr;
+	agent_state* agent_states = nullptr;
+	fixed_width_stream<socket_type> in(c.connection);
+	if (!read(response, in)) {
+		response = status::CLIENT_PARSE_MESSAGE_ERROR;
+		success = false;
+	} else if (response == status::OK) {
+		response = read_agent_states(in, agent_ids, agent_states, agent_count, c.config);
+		if (response != status::OK)
+			success = false;
+	}
+	/* ownership of `agent_ids` and `agent_states` is passed to the callee */
+	on_get_agent_states(c, response, agent_ids, agent_states, agent_count);
+	return success;
+}
+
 template<typename ClientType>
 inline bool receive_set_active_response(ClientType& c) {
 	status response;
@@ -1657,6 +1830,8 @@ void run_response_listener(ClientType& c) {
 			receive_get_map_response(c); continue;
 		case message_type::GET_AGENT_IDS_RESPONSE:
 			receive_get_agent_ids_response(c); continue;
+		case message_type::GET_AGENT_STATES_RESPONSE:
+			receive_get_agent_states_response(c); continue;
 		case message_type::SET_ACTIVE_RESPONSE:
 			receive_set_active_response(c); continue;
 		case message_type::IS_ACTIVE_RESPONSE:
@@ -1672,6 +1847,7 @@ void run_response_listener(ClientType& c) {
 		case message_type::DO_NOTHING:
 		case message_type::GET_MAP:
 		case message_type::GET_AGENT_IDS:
+		case message_type::GET_AGENT_STATES:
 		case message_type::SET_ACTIVE:
 		case message_type::IS_ACTIVE:
 			break;
@@ -1783,7 +1959,7 @@ uint64_t reconnect_client(
 		 || !send_message(connection, mem_stream.buffer, mem_stream.position))
 		{
 			fprintf(stderr, "reconnect_client ERROR: Error requesting agent states.\n");
-			stop_client(existing_client); return false;
+			remove_client(existing_client); return false;
 		}
 
 		/* read the simulator response */
@@ -1791,45 +1967,26 @@ uint64_t reconnect_client(
 		fixed_width_stream<socket_type> in(connection);
 		if (!read(response, in)) {
 			fprintf(stderr, "reconnect_client ERROR: Error receiving response from server.\n");
-			stop_client(existing_client); return false;
+			remove_client(existing_client); return false;
 		}
 
 		/* read the simulator time and configuration */
 		simulator_config& config = *((simulator_config*) alloca(sizeof(simulator_config)));
 		if (!read(simulator_time, in)
-		 || !read(config, in)
-		 || !read(agent_count, in))
+		 || !read(config, in))
 		{
 			fprintf(stderr, "reconnect_client ERROR: Error receiving simulator time and configuration.\n");
-			stop_client(existing_client); return false;
+			remove_client(existing_client); return false;
 		}
 		swap(existing_client.config, config);
 		free(config); /* free the old configuration */
 
-		agent_ids = NULL;
-		agent_ids = (uint64_t*) malloc(max((size_t) 1, sizeof(uint64_t) * agent_count));
-		agent_states = (agent_state*) malloc(max((size_t) 1, sizeof(agent_state) * agent_count));
-		if (agent_ids == NULL || agent_states == NULL) {
-			if (agent_ids != NULL) free(agent_ids);
-			fprintf(stderr, "reconnect_client ERROR: Out of memory.\n");
-			stop_client(existing_client); return false;
+		size_t s_agent_count;
+		if (read_agent_states(in, agent_ids, agent_states, s_agent_count, existing_client.config) != status::OK) {
+			fprintf(stderr, "reconnect_client ERROR: Error reading agent states.\n");
+			remove_client(existing_client); return false;
 		}
-
-		/* read the agent IDs associated with this client */
-		if (!read(agent_ids, in, agent_count)) {
-			fprintf(stderr, "reconnect_client ERROR: Error reading agent IDs.\n");
-			free(agent_ids); free(agent_states);
-			stop_client(existing_client); return false;
-		}
-
-		/* read the agent states for the requested agent IDs */
-		for (unsigned int i = 0; i < agent_count; i++) {
-			if (!read(agent_states[i], in, existing_client.config)) {
-				for (unsigned int j = 0; j < i; j++) free(agent_states[j]);
-				free(agent_ids); free(agent_states);
-				stop_client(existing_client); return false;
-			}
-		}
+		agent_count = (unsigned int) s_agent_count;
 
 		auto dispatch = [&]() {
 			run_response_listener(existing_client);

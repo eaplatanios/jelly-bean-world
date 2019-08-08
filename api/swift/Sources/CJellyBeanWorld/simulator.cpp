@@ -140,6 +140,7 @@ inline Permissions to_Permissions(const permissions& src) {
   perms.setActive = src.set_active;
   perms.getMap = src.get_map;
   perms.getAgentIds = src.get_agent_ids;
+  perms.getAgentStates = src.get_agent_states;
   return perms;
 }
 
@@ -152,6 +153,7 @@ inline permissions to_permissions(const Permissions& src) {
   perms.set_active = src.setActive;
   perms.get_map = src.getMap;
   perms.get_agent_ids = src.getAgentIds;
+  perms.get_agent_states = src.getAgentStates;
   return perms;
 }
 
@@ -724,6 +726,12 @@ inline bool init(simulator_data& data, const simulator_data& src) {
  * response listener thread and the calling thread.
  */
 struct client_data {
+  struct agent_state_array {
+    uint64_t* ids;
+    agent_state* states;
+    size_t length;
+  };
+
   /* storing the server responses */
   status server_response;
   union response_data {
@@ -731,6 +739,7 @@ struct client_data {
     AgentSimulationState agent_state;
     array<array<patch_state>>* map;
     pair<uint64_t*, size_t> agent_ids;
+    agent_state_array agent_states;
   } response_data;
 
   /* for synchronization */
@@ -795,7 +804,7 @@ void on_step(
     init(agent_states[i], *agents.get(data.agent_ids[i]), config, data.agent_ids[i], status);
     // TODO: Propagate this to Swift.
     if (status->code != JBW_OK) {
-      fprintf(stderr, "on_step ERROR: Insufficient memory for agent_state.\n");
+      fprintf(stderr, "on_step ERROR: Insufficient memory for agent state.\n");
       for (size_t j = 0; j < i; j++)
         free(agent_states[j]);
       free(agent_states);
@@ -1006,6 +1015,34 @@ void on_get_agent_ids(
   std::unique_lock<std::mutex> lck(c.data.lock);
   c.data.waiting_for_server = false;
   c.data.response_data.agent_ids = make_pair(agent_ids, count);
+  c.data.server_response = response;
+  c.data.cv.notify_one();
+}
+
+
+/**
+ * The callback invoked when the client receives a get_agent_states response
+ * from the server. This function moves the result into
+ * `c.data.response_data.agent_states` and wakes up the parent thread (which
+ * should be waiting in the `simulatorAgentStates` function) so that it can
+ * return the response back.
+ *
+ * \param   c            The client that received the response.
+ * \param   response     The response from the server, containing information
+ *                       about any errors.
+ * \param   agent_ids    The array containing the agent IDs.
+ * \param   agent_states The array containing the agent states.
+ * \param   count        The length of `agent_ids` and `agent_states`.
+ */
+void on_get_agent_states(client<client_data>& c,
+  status response, uint64_t* agent_ids,
+  agent_state* agent_states, size_t count)
+{
+  std::unique_lock<std::mutex> lck(c.data.lock);
+  c.data.waiting_for_server = false;
+  c.data.response_data.agent_states.ids = agent_ids;
+  c.data.response_data.agent_states.states = agent_states;
+  c.data.response_data.agent_states.length = count;
   c.data.server_response = response;
   c.data.cv.notify_one();
 }
@@ -1696,6 +1733,7 @@ const AgentIDList simulatorAgentIds(
     if (!array_init(agent_ids, 16)) {
       status->code = JBW_OUT_OF_MEMORY_ERROR;
       status->message = "Insufficient memory while initializing array for agent IDs.";
+      return EMPTY_AGENT_ID_LIST;
     }
     status result = sim_handle->get_agent_ids(agent_ids);
     if (result != status::OK) {
@@ -1737,6 +1775,123 @@ const AgentIDList simulatorAgentIds(
     list.agentIds = client_ptr->data.response_data.agent_ids.key;
     list.numAgents = (unsigned int) client_ptr->data.response_data.agent_ids.value;
     return list;
+  }
+}
+
+
+const AgentSimulationState* simulatorAgentStates(
+  void* simulatorHandle,
+  void* clientHandle,
+  uint64_t* agentIds,
+  unsigned int numAgents,
+  JBW_Status* jbwStatus
+) {
+  if (clientHandle == nullptr) {
+    /* the simulation is local, so call get_agent_ids directly */
+    simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
+    agent_state** agent_states = (agent_state**) malloc(max((size_t) 1, sizeof(agent_state*) * numAgents));
+    if (agent_states == nullptr) {
+      status->code = JBW_OUT_OF_MEMORY_ERROR;
+      status->message = "Insufficient memory while initializing array for agent state pointers.";
+      return nullptr;
+    }
+    sim_handle->get_agent_states(agent_states, agentIds, numAgents);
+
+    AgentSimulationState* agent_simulation_states = (AgentSimulationState*) malloc(
+      max((size_t) 1, sizeof(AgentSimulationState) * numAgents));
+    if (agent_simulation_states == nullptr) {
+      fprintf(stderr, "simulatorAgentStates ERROR: Insufficient memory for `agent_simulation_states`.\n");
+      for (size_t i = 0; i < numAgents; i++)
+        if (agent_states[i] != nullptr) agent_states[i]->lock.unlock();
+      free(agent_states); return nullptr;
+    }
+    const simulator_config& config = sim_handle->get_config();
+    auto* status = JBW_NewStatus(); /* TODO: this will cause a memory leak; i copied this from `on_step` */
+    for (size_t i = 0; i < numAgents; i++) {
+      if (agent_states[i] == nullptr) {
+        agent_simulation_states[i] = EMPTY_AGENT_SIM_STATE;
+      } else {
+        init(agent_simulation_states[i], *agent_states[i], config, agentIds[i], status);
+        // TODO: Propagate this to Swift.
+        if (status->code != JBW_OK) {
+          fprintf(stderr, "simulatorAgentStates ERROR: Insufficient memory for agent state.\n");
+          for (size_t j = 0; j < i; j++) free(agent_simulation_states[j]);
+          for (size_t j = i; j < numAgents; j++) agent_states[j]->lock.unlock();
+          free(agent_simulation_states);
+          free(agent_states); return nullptr;
+        }
+        agent_states[i]->lock.unlock();
+      }
+    }
+    return agent_simulation_states;
+
+  } else {
+    /* this is a client, so send a get_agent_states message to the server */
+    client<client_data>* client_ptr = (client<client_data>*) clientHandle;
+    if (!client_ptr->client_running) {
+      jbwStatus->code = JBW_LOST_CONNECTION;
+      jbwStatus->message = "Connection to the simulation server was lost.";
+      return nullptr;
+    }
+
+    client_ptr->data.waiting_for_server = true;
+    if (!send_get_agent_states(*client_ptr, agentIds, numAgents)) {
+      jbwStatus->code = JBW_COMMUNICATION_ERROR;
+      jbwStatus->message = "Failed to send a \"get agent states\" request.";
+      return nullptr;
+    }
+
+    /* wait for response from server */
+    wait_for_server(*client_ptr);
+    if (client_ptr->data.server_response != status::OK) {
+      /* TODO: translate status enum */
+      jbwStatus->code = JBW_UNKNOWN_ERROR;
+      jbwStatus->message = "Failed to obtain the agent states.";
+      return nullptr;
+    }
+
+    AgentSimulationState* agent_simulation_states = (AgentSimulationState*) malloc(
+      max((size_t) 1, sizeof(AgentSimulationState) * numAgents));
+    if (agent_simulation_states == nullptr) {
+      fprintf(stderr, "simulatorAgentStates ERROR: Insufficient memory for `agent_simulation_states`.\n");
+      for (size_t i = 0; i < client_ptr->data.response_data.agent_states.length; i++) {
+        client_ptr->data.response_data.agent_states.states[i].lock.unlock();
+        free(client_ptr->data.response_data.agent_states.states[i]);
+      }
+      free(client_ptr->data.response_data.agent_states.ids);
+      free(client_ptr->data.response_data.agent_states.states);
+      return nullptr;
+    }
+    const simulator_config& config = client_ptr->config;
+    auto* status = JBW_NewStatus(); /* TODO: this will cause a memory leak; i copied this from `on_step` */
+    size_t next_index = 0;
+    for (size_t i = 0; i < numAgents; i++) {
+      if (next_index == client_ptr->data.response_data.agent_states.length
+       || client_ptr->data.response_data.agent_states.ids[next_index] != agentIds[i])
+      {
+        agent_simulation_states[i] = EMPTY_AGENT_SIM_STATE;
+      } else {
+        init(agent_simulation_states[i], client_ptr->data.response_data.agent_states.states[i], config, agentIds[i], status);
+        // TODO: Propagate this to Swift.
+        if (status->code != JBW_OK) {
+          fprintf(stderr, "simulatorAgentStates ERROR: Insufficient memory for agent state.\n");
+          for (size_t j = i; j < numAgents; j++) {
+            client_ptr->data.response_data.agent_states.states[j].lock.unlock();
+            free(client_ptr->data.response_data.agent_states.states[j]);
+          }
+          free(client_ptr->data.response_data.agent_states.ids);
+          free(client_ptr->data.response_data.agent_states.states);
+          free(agent_simulation_states);
+          return nullptr;
+        }
+        client_ptr->data.response_data.agent_states.states[i].lock.unlock();
+        free(client_ptr->data.response_data.agent_states.states[i]);
+        next_index++;
+      }
+    }
+    free(client_ptr->data.response_data.agent_states.ids);
+    free(client_ptr->data.response_data.agent_states.states);
+    return agent_simulation_states;
   }
 }
 

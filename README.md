@@ -241,7 +241,7 @@ int main(int argc, const char** argv) {
 
   /* create a local simulator */
   simulator<empty_data>& sim = *((simulator<empty_data>*) alloca(sizeof(simulator<empty_data>)));
-  if (!init(sim, config, empty_data())) {
+  if (init(sim, config, empty_data()) != status::OK) {
     fprintf(stderr, "ERROR: Unable to initialize simulator.\n");
     return EXIT_FAILURE;
   }
@@ -255,7 +255,7 @@ int main(int argc, const char** argv) {
 
   /* the main simulation loop */
   for (unsigned int t = 0; t < 10000; t++) {
-    if (!sim.move(agent.key, direction::UP, 1)) {
+    if (sim.move(agent.key, direction::UP, 1) != status::OK) {
       fprintf(stderr, "ERROR: Unable to move agent.\n");
       return EXIT_FAILURE;
     }

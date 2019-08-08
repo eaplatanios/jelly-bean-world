@@ -1540,6 +1540,9 @@ public:
      * has length `agent_count`. For any invalid agent ID, the corresponding
      * agent_state is set to nullptr.
      *
+     * NOTE: This function will lock each non-null agent in `states`. The
+     *       caller must unlock them afterwards.
+     *
      * \param      states The output array of agent_state pointers.
      * \param   agent_ids The array of agent IDs whose states to retrieve.
      * \param agent_count The length of `states` and `agent_ids`.
@@ -1551,7 +1554,8 @@ public:
         for (unsigned int i = 0; i < agent_count; i++) {
             bool contains;
             states[i] = agents.get(agent_ids[i], contains);
-            if (!contains) states[i] = nullptr;
+            if (contains) states[i]->lock.lock();
+            else states[i] = nullptr;
         }
     }
 

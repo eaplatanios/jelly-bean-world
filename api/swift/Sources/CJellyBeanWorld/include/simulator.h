@@ -65,6 +65,7 @@ typedef struct Permissions {
   bool setActive;
   bool getMap;
   bool getAgentIds;
+  bool getAgentStates;
 } Permissions;
 
 typedef struct Position {
@@ -271,6 +272,13 @@ const SimulationMap simulatorMap(
 const AgentIDList simulatorAgentIds(
   void* simulatorHandle,
   void* clientHandle,
+  JBW_Status* jbwStatus);
+
+const AgentSimulationState* simulatorAgentStates(
+  void* simulatorHandle,
+  void* clientHandle,
+  uint64_t* agentIds,
+  unsigned int numAgents,
   JBW_Status* jbwStatus);
 
 void* simulationServerStart(
