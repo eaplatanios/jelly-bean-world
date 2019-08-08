@@ -115,6 +115,7 @@ struct py_client_data {
         bool active;
         PyObject* agent_state;
         array<array<patch_state>>* map;
+        pair<uint64_t*, size_t> agent_ids;
     } response_data;
 
     /* for synchronization */
@@ -496,6 +497,31 @@ void on_get_map(client<py_client_data>& c,
     std::unique_lock<std::mutex> lck(c.data.lock);
     c.data.waiting_for_server = false;
     c.data.response_data.map = map;
+    c.data.server_response = response;
+    c.data.cv.notify_one();
+}
+
+/**
+ * The callback invoked when the client receives a get_agent_ids response from
+ * the server. This function moves the result into
+ * `c.data.response_data.agent_ids` and wakes up the Python thread (which
+ * should be waiting in the `simulator_agent_ids` function) so that it can
+ * return the response back to Python.
+ *
+ * \param   c         The client that received the response.
+ * \param   response  The response from the server, containing information
+ *                    about any errors.
+ * \param   agent_ids The array containing the agent IDs.
+ * \param   count     The number of IDs in the array `agent_ids`.
+ */
+void on_get_agent_ids(
+        client<py_client_data>& c, status response,
+        uint64_t* agent_ids, size_t count)
+{
+    check_response(response, "get_agent_ids: ");
+    std::unique_lock<std::mutex> lck(c.data.lock);
+    c.data.waiting_for_server = false;
+    c.data.response_data.agent_ids = make_pair(agent_ids, count);
     c.data.server_response = response;
     c.data.cv.notify_one();
 }
@@ -1002,7 +1028,7 @@ static PyObject* simulator_start_server(PyObject *self, PyObject *args)
     simulator<py_simulator_data>* sim_handle =
             (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
     async_server& server = sim_handle->get_data().server;
-    if (!init_server(server, *sim_handle, (uint16_t) port, connection_queue_capacity, num_workers)) {
+    if (!init_server(server, *sim_handle, (uint16_t) port, connection_queue_capacity, num_workers, ~0)) { /* TODO: get permissions from user */
         PyErr_SetString(PyExc_RuntimeError, "Unable to initialize MPI server.");
         return NULL;
     }
@@ -1681,6 +1707,77 @@ static PyObject* simulator_map(PyObject *self, PyObject *args) {
 }
 
 /**
+ * Retrieves a list of the IDs of all the agents in the simulation.
+ *
+ * \param   self    Pointer to the Python object calling this method.
+ * \param   args    Arguments:
+ *                  - Handle to the native simulator object as a PyLong.
+ *                  - Handle to the native client object as a PyLong. If this
+ *                    is None, `get_agent_ids` is directly invoked on the
+ *                    simulator object. Otherwise, the client sends a
+ *                    get_agent_ids message to the server and waits for its
+ *                    response.
+ * \returns A Python list of tuples, where each tuple contains the state
+ *          information of a patch within the bounding box. See `build_py_map`
+ *          for details on the contents of each tuple. If an error occurs, None
+ *          is returned, instead.
+ */
+static PyObject* simulator_agent_ids(PyObject *self, PyObject *args) {
+    PyObject* py_sim_handle;
+    PyObject* py_client_handle;
+    if (!PyArg_ParseTuple(args, "OO", &py_sim_handle, &py_client_handle))
+        return NULL;
+
+    if (py_client_handle == Py_None) {
+        /* the simulation is local, so call get_agent_ids directly */
+        simulator<py_simulator_data>* sim_handle =
+                (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
+        array<uint64_t> agent_ids(32);
+        if (sim_handle->get_agent_ids(agent_ids) != status::OK) {
+            PyErr_SetString(PyExc_RuntimeError, "simulator.get_agent_ids failed.");
+            return NULL;
+        }
+
+        PyObject* py_agent_ids = PyList_New((Py_ssize_t) agent_ids.length);
+        if (py_agent_ids == NULL)
+            return NULL;
+        for (size_t i = 0; i < agent_ids.length; i++)
+            PyList_SetItem(py_agent_ids, (Py_ssize_t) i, PyLong_FromUnsignedLongLong(agent_ids[i]));
+        return py_agent_ids;
+    } else {
+        /* this is a client, so send a get_agent_ids message to the server */
+        client<py_client_data>* client_handle =
+                (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
+        if (!client_handle->client_running) {
+            PyErr_SetString(mpi_error, "Connection to the server was lost.");
+            return NULL;
+        }
+
+        client_handle->data.waiting_for_server = true;
+        if (!send_get_agent_ids(*client_handle)) {
+            PyErr_SetString(PyExc_RuntimeError, "Unable to send get_agent_ids request.");
+            return NULL;
+        }
+
+        /* wait for response from server */
+        wait_for_server(*client_handle);
+        if (client_handle->data.server_response != status::OK) {
+            Py_INCREF(Py_None);
+            return Py_None;
+        }
+        PyObject* py_agent_ids = PyList_New((Py_ssize_t) client_handle->data.response_data.agent_ids.value);
+        if (py_agent_ids == NULL) {
+            free(*client_handle->data.response_data.agent_ids.key);
+            Py_INCREF(Py_None); return Py_None;
+        }
+        for (size_t i = 0; i < client_handle->data.response_data.agent_ids.value; i++)
+            PyList_SetItem(py_agent_ids, (Py_ssize_t) i, PyLong_FromUnsignedLongLong(client_handle->data.response_data.agent_ids.key[i]));
+        free(*client_handle->data.response_data.agent_ids.key);
+        return py_agent_ids;
+    }
+}
+
+/**
  * Sets whether the agent is active or inactive.
  *
  * \param   self    Pointer to the Python object calling this method.
@@ -1712,14 +1809,17 @@ static PyObject* simulator_set_active(PyObject *self, PyObject *args) {
     }
 
     if (py_client_handle == Py_None) {
-        /* the simulation is local, so call get_map directly */
+        /* the simulation is local, so call set_active directly */
         simulator<py_simulator_data>* sim_handle =
                 (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
-        sim_handle->set_agent_active(agent_id, active);
+        if (sim_handle->set_agent_active(agent_id, active) != status::OK) {
+            PyErr_SetString(PyExc_RuntimeError, "simulator.set_agent_active failed.");
+            return NULL;
+        }
         Py_INCREF(Py_None);
         return Py_None;
     } else {
-        /* this is a client, so send a get_map message to the server */
+        /* this is a client, so send a set_active message to the server */
         client<py_client_data>* client_handle =
                 (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
         if (!client_handle->client_running) {
@@ -1763,14 +1863,18 @@ static PyObject* simulator_is_active(PyObject *self, PyObject *args) {
         return NULL;
 
     if (py_client_handle == Py_None) {
-        /* the simulation is local, so call get_map directly */
+        /* the simulation is local, so call is_active directly */
         simulator<py_simulator_data>* sim_handle =
                 (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
-        bool active = sim_handle->is_agent_active(agent_id);
+        bool active;
+        if (sim_handle->is_agent_active(agent_id, active) != status::OK) {
+            PyErr_SetString(PyExc_RuntimeError, "simulator.is_agent_active failed.");
+            return NULL;
+        }
         PyObject* py_result = (active ? Py_True : Py_False);
         Py_INCREF(py_result); return py_result;
     } else {
-        /* this is a client, so send a get_map message to the server */
+        /* this is a client, so send an is_active message to the server */
         client<py_client_data>* client_handle =
                 (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
         if (!client_handle->client_running) {
@@ -1817,6 +1921,7 @@ static PyMethodDef SimulatorMethods[] = {
     {"turn",  jbw::simulator_turn, METH_VARARGS, "Attempts to turn the agent in the simulation environment."},
     {"no_op",  jbw::simulator_no_op, METH_VARARGS, "Attempts to instruct the agent to do nothing (a no-op) in the simulation environment."},
     {"map",  jbw::simulator_map, METH_VARARGS, "Returns a list of patches within a given bounding box."},
+    {"agent_ids",  jbw::simulator_agent_ids, METH_VARARGS, "Returns a list of the IDs of all agents in the simulation environment."},
     {"set_active",  jbw::simulator_set_active, METH_VARARGS, "Sets whether the agent is active or inactive."},
     {"is_active",  jbw::simulator_is_active, METH_VARARGS, "Gets whether the agent is active or inactive."},
     {NULL, NULL, 0, NULL}        /* Sentinel */

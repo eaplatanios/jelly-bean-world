@@ -993,7 +993,8 @@ inline bool read(agent_state& agent, Stream& in, const simulator_config& config)
      || !read(agent.agent_active, in)
      || !read(agent.requested_position, in)
      || !read(agent.requested_direction, in)
-     || !read(agent.collected_items, in, (unsigned int) config.item_types.length)) {
+     || !read(agent.collected_items, in, (unsigned int) config.item_types.length))
+    {
          free(agent.current_scent); free(agent.current_vision);
          free(agent.collected_items); return false;
      }
@@ -1239,8 +1240,15 @@ public:
         new_agent = (agent_state*) malloc(sizeof(agent_state));
         new_agent_id = agent_id_counter;
         if (new_agent == nullptr) {
-            fprintf(stderr, "simulator.add_agent ERROR: Insufficient memory for new agent.\n");
+            agent_states_lock.unlock();
             return status::OUT_OF_MEMORY;
+        }
+
+        status init_status = init(*new_agent, world, scent_model, config, time);
+        if (init_status != status::OK) {
+            core::free(new_agent);
+            agent_states_lock.unlock();
+            return init_status;
         }
         agents.table.keys[bucket] = agent_id_counter;
         agents.values[bucket] = new_agent;
@@ -1248,15 +1256,6 @@ public:
         active_agent_count++;
         agent_id_counter++;
         agent_states_lock.unlock();
-
-        status init_status = init(*new_agent, world, scent_model, config, time);
-        if (init_status != status::OK) {
-            agent_states_lock.lock();
-            agents.remove((size_t) new_agent_id);
-            core::free(new_agent);
-            agent_states_lock.unlock();
-            return init_status;
-        }
         return status::OK;
     }
 
@@ -1270,7 +1269,6 @@ public:
         bool contains; unsigned int bucket;
         agent_state* agent = agents.get(agent_id, contains, bucket);
         if (!contains) {
-            fprintf(stderr, "simulator.remove_agent ERROR: Given agent is not in this simulator.\n");
             agent_states_lock.unlock();
             return status::INVALID_AGENT_ID;
         }
@@ -1296,12 +1294,18 @@ public:
     /**
      * Sets whether the agent with the given ID is active.
      */
-    inline void set_agent_active(uint64_t agent_id, bool active) {
+    inline status set_agent_active(uint64_t agent_id, bool active) {
+        bool contains;
         agent_states_lock.lock();
-        agent_state& agent = *agents.get(agent_id);
+        agent_state* agent_ptr = agents.get(agent_id, contains);
+        if (!contains) {
+            agent_states_lock.unlock();
+            return status::INVALID_AGENT_ID;
+        }
+        agent_state& agent = *agent_ptr;
+        agent.lock.lock();
         agent_states_lock.unlock();
 
-        agent.lock.lock();
         if (agent.agent_active && !active) {
             agent.agent_active = false;
             agent.lock.unlock();
@@ -1320,16 +1324,20 @@ public:
         } else {
             agent.lock.unlock();
         }
+        return status::OK;
     }
 
     /**
      * Sets whether the agent with the given ID is active.
      */
-    inline bool is_agent_active(uint64_t agent_id) {
-        agent_states_lock.lock();
-        agent_state& agent = *agents.get(agent_id);
-        agent_states_lock.unlock();
-        return agent.agent_active;
+    inline status is_agent_active(uint64_t agent_id, bool& active) {
+        bool contains;
+        std::unique_lock<std::mutex> lock(agent_states_lock);
+        agent_state* agent_ptr = agents.get(agent_id, contains);
+        if (!contains)
+            return status::INVALID_AGENT_ID;
+        active = agent_ptr->agent_active;
+        return status::OK;
     }
 
     /**
@@ -1350,11 +1358,16 @@ public:
          || config.allowed_movement_directions[(size_t) dir] == action_policy::DISALLOWED)
             return status::PERMISSION_ERROR;
 
+        bool contains;
         agent_states_lock.lock();
-        agent_state& agent = *agents.get(agent_id);
+        agent_state& agent = *agents.get(agent_id, contains);
+        if (!contains) {
+            agent_states_lock.unlock();
+            return status::INVALID_AGENT_ID;
+        }
+        agent.lock.lock();
         agent_states_lock.unlock();
 
-        agent.lock.lock();
         if (agent.agent_acted) {
             agent.lock.unlock();
             return status::AGENT_ALREADY_ACTED;
@@ -1387,16 +1400,18 @@ public:
 
             agent.requested_position += diff;
         }
-        agent.lock.unlock();
 
         /* add the agent's move to the list of requested moves */
         request_position(agent);
 
         if (agent.agent_active) {
+            agent.lock.unlock();
             agent_states_lock.lock();
             if (++acted_agent_count == active_agent_count)
                 step(); /* advance the simulation by one time step */
             agent_states_lock.unlock();
+        } else {
+            agent.lock.unlock();
         }
         return status::OK;
     }
@@ -1417,11 +1432,16 @@ public:
         if (config.allowed_rotations[(size_t) dir] == action_policy::DISALLOWED)
             return status::PERMISSION_ERROR;
 
+        bool contains;
         agent_states_lock.lock();
-        agent_state& agent = *agents.get(agent_id);
+        agent_state& agent = *agents.get(agent_id, contains);
+        if (!contains) {
+            agent_states_lock.unlock();
+            return status::INVALID_AGENT_ID;
+        }
+        agent.lock.lock();
         agent_states_lock.unlock();
 
-        agent.lock.lock();
         if (agent.agent_acted) {
             agent.lock.unlock();
             return status::AGENT_ALREADY_ACTED;
@@ -1455,16 +1475,18 @@ public:
             case direction::COUNT: break;
             }
         }
-        agent.lock.unlock();
 
         /* add the agent's move to the list of requested moves */
         request_position(agent);
 
         if (agent.agent_active) {
+            agent.lock.unlock();
             agent_states_lock.lock();
             if (++acted_agent_count == active_agent_count)
                 step(); /* advance the simulation by one time step */
             agent_states_lock.unlock();
+        } else {
+            agent.lock.unlock();
         }
         return status::OK;
     }
@@ -1478,11 +1500,16 @@ public:
     {
         if (!config.no_op_allowed) return status::PERMISSION_ERROR;
 
+        bool contains;
         agent_states_lock.lock();
-        agent_state& agent = *agents.get(agent_id);
+        agent_state& agent = *agents.get(agent_id, contains);
+        if (!contains) {
+            agent_states_lock.unlock();
+            return status::INVALID_AGENT_ID;
+        }
+        agent.lock.lock();
         agent_states_lock.unlock();
 
-        agent.lock.lock();
         if (agent.agent_acted) {
             agent.lock.unlock();
             return status::AGENT_ALREADY_ACTED;
@@ -1491,16 +1518,18 @@ public:
 
         agent.requested_position = agent.current_position;
         agent.requested_direction = agent.current_direction;
-        agent.lock.unlock();
 
         /* add the agent's move to the list of requested moves */
         request_position(agent);
 
         if (agent.agent_active) {
+            agent.lock.unlock();
             agent_states_lock.lock();
             if (++acted_agent_count == active_agent_count)
                 step(); /* advance the simulation by one time step */
             agent_states_lock.unlock();
+        } else {
+            agent.lock.unlock();
         }
         return status::OK;
     }
@@ -1508,7 +1537,8 @@ public:
     /**
      * Retrieves an array of pointers to agent_state structures, storing them
      * in `states`, which is parallel to the specified `agent_ids` array, and
-     * has length `agent_count`.
+     * has length `agent_count`. For any invalid agent ID, the corresponding
+     * agent_state is set to nullptr.
      *
      * \param      states The output array of agent_state pointers.
      * \param   agent_ids The array of agent IDs whose states to retrieve.
@@ -1517,35 +1547,29 @@ public:
     inline void get_agent_states(agent_state** states,
             uint64_t* agent_ids, unsigned int agent_count)
     {
-        agent_states_lock.lock();
-        for (unsigned int i = 0; i < agent_count; i++)
-            states[i] = agents.get(agent_ids[i]);
-        agent_states_lock.unlock();
+        std::unique_lock<std::mutex> lock(agent_states_lock);
+        for (unsigned int i = 0; i < agent_count; i++) {
+            bool contains;
+            states[i] = agents.get(agent_ids[i], contains);
+            if (!contains) states[i] = nullptr;
+        }
     }
 
     /**
-     * Returns a SimulatorData reference associated with this simulator.
+     * Retrieves an array of IDs of all agents in this simulation.
+     *
+     * \param   agent_ids The array that will be populated with agent IDs.
      */
-    inline SimulatorData& get_data() {
-        return data;
-    }
-
-    /**
-     * Returns a SimulatorData reference associated with this simulator.
-     */
-    inline const SimulatorData& get_data() const {
-        return data;
-    }
-
-    /**
-     * Returns the simulator configuration used to construct this simulator.
-     */
-    inline const simulator_config& get_config() const {
-        return config;
-    }
-
-    inline map<patch_data, item_properties>& get_world() {
-        return world;
+    inline status get_agent_ids(array<uint64_t>& agent_ids)
+    {
+        std::unique_lock<std::mutex> lock(agent_states_lock);
+        if (!agent_ids.ensure_capacity(agent_ids.length + agents.table.size)) {
+            agent_states_lock.unlock();
+            return status::OUT_OF_MEMORY;
+        }
+        for (const auto& entry : agents)
+            agent_ids[agent_ids.length++] = entry.key;
+        return status::OK;
     }
 
     /**
@@ -1656,6 +1680,31 @@ public:
         }
 
         return status::OK;
+    }
+
+    /**
+     * Returns a SimulatorData reference associated with this simulator.
+     */
+    inline SimulatorData& get_data() {
+        return data;
+    }
+
+    /**
+     * Returns a SimulatorData reference associated with this simulator.
+     */
+    inline const SimulatorData& get_data() const {
+        return data;
+    }
+
+    /**
+     * Returns the simulator configuration used to construct this simulator.
+     */
+    inline const simulator_config& get_config() const {
+        return config;
+    }
+
+    inline map<patch_data, item_properties>& get_world() {
+        return world;
     }
 
     static inline void free(simulator& s) {
@@ -1826,7 +1875,7 @@ private:
             return;
 
         bool contains; unsigned int bucket;
-        requested_move_lock.lock();
+        std::unique_lock<std::mutex> lock(requested_move_lock);
         requested_moves.check_size(alloc_position_keys);
         array<agent_state*>& agents = requested_moves.get(agent.requested_position, contains, bucket);
         if (!contains) {
@@ -1837,7 +1886,6 @@ private:
         agents.add(&agent);
         if (agent.current_position == agent.requested_position)
             core::swap(agents[0], agents.last());
-        requested_move_lock.unlock();
     }
 
     inline void unrequest_position(agent_state& agent)

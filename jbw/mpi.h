@@ -40,6 +40,8 @@ enum class message_type : uint64_t {
 	DO_NOTHING_RESPONSE,
 	GET_MAP,
 	GET_MAP_RESPONSE,
+	GET_AGENT_IDS,
+	GET_AGENT_IDS_RESPONSE,
 	SET_ACTIVE,
 	SET_ACTIVE_RESPONSE,
 	IS_ACTIVE,
@@ -79,6 +81,7 @@ inline bool print(const message_type& type, Stream& out) {
 	case message_type::TURN:             return core::print("TURN", out);
 	case message_type::DO_NOTHING:       return core::print("DO_NOTHING", out);
 	case message_type::GET_MAP:          return core::print("GET_MAP", out);
+	case message_type::GET_AGENT_IDS:    return core::print("GET_AGENT_IDS", out);
 	case message_type::SET_ACTIVE:       return core::print("SET_ACTIVE", out);
 	case message_type::IS_ACTIVE:        return core::print("IS_ACTIVE", out);
 
@@ -88,6 +91,7 @@ inline bool print(const message_type& type, Stream& out) {
 	case message_type::TURN_RESPONSE:             return core::print("TURN_RESPONSE", out);
 	case message_type::DO_NOTHING_RESPONSE:       return core::print("DO_NOTHING_RESPONSE", out);
 	case message_type::GET_MAP_RESPONSE:          return core::print("GET_MAP_RESPONSE", out);
+	case message_type::GET_AGENT_IDS_RESPONSE:    return core::print("GET_AGENT_IDS_RESPONSE", out);
 	case message_type::SET_ACTIVE_RESPONSE:       return core::print("SET_ACTIVE_RESPONSE", out);
 	case message_type::IS_ACTIVE_RESPONSE:        return core::print("IS_ACTIVE_RESPONSE", out);
 	case message_type::STEP_RESPONSE:             return core::print("STEP_RESPONSE", out);
@@ -108,47 +112,129 @@ inline bool init(client_info& info) {
 	return true;
 }
 
+constexpr uint64_t PERMISSION_ADD_AGENT = (1 << 0);
+constexpr uint64_t PERMISSION_REMOVE_AGENT = (1 << 1);
+constexpr uint64_t PERMISSION_REMOVE_CLIENT = (1 << 2);
+constexpr uint64_t PERMISSION_GET_MAP = (1 << 3);
+constexpr uint64_t PERMISSION_GET_AGENT_IDS = (1 << 4);
+constexpr uint64_t PERMISSION_SET_ACTIVE = (1 << 5);
+
+struct client_state {
+	std::mutex lock;
+	array<uint64_t> agent_ids;
+	uint64_t permissions;
+
+	static inline void free(client_state& cstate) {
+		cstate.lock.~mutex();
+		core::free(cstate.agent_ids);
+	}
+};
+
+inline bool init(client_state& cstate, uint64_t permissions) {
+	cstate.permissions = permissions;
+	if (!array_init(cstate.agent_ids, 8)) return false;
+	new (&cstate.lock) std::mutex();
+	return true;
+}
+
+template<typename Stream>
+bool read(client_state& cstate, Stream& in) {
+	if (!read(cstate.permissions, in)
+	 || !read(cstate.agent_ids, in)) return false;
+	new (&cstate.lock) std::mutex();
+	return true;
+}
+
+/* **NOTE:** this function assumes the variables in the simulator are not modified during writing. */
+template<typename Stream>
+bool write(const client_state& cstate, Stream& out) {
+	return write(cstate.permissions, out)
+		&& write(cstate.agent_ids, out);
+}
+
 /**
  * A structure that keeps track of additional state for the MPI server.
  */
 struct server_state {
-	hash_map<uint64_t, array<uint64_t>> agent_ids;
+	std::mutex client_states_lock;
+	hash_map<uint64_t, client_state*> client_states;
+	uint64_t default_client_permissions;
 	uint64_t client_id_counter;
 
-	server_state() : agent_ids(16), client_id_counter(1) { }
+	server_state() : client_states(16), default_client_permissions(0), client_id_counter(1) { }
 	~server_state() { free_helper(); }
 
 	static inline void swap(server_state& first, server_state& second) {
-		core::swap(first.agent_ids, second.agent_ids);
+		core::swap(first.client_states, second.client_states);
+		core::swap(first.default_client_permissions, second.default_client_permissions);
+		core::swap(first.client_id_counter, second.client_id_counter);
 	}
 
 	static inline void free(server_state& state) {
 		state.free_helper();
-		core::free(state.agent_ids);
+		core::free(state.client_states);
+		state.client_states_lock.~mutex();
 	}
 
 private:
 	inline void free_helper() {
-		for (auto entry : agent_ids)
+		for (auto entry : client_states) {
+			core::free(*entry.value);
 			core::free(entry.value);
+		}
 	}
 };
 
 bool init(server_state& state) {
 	state.client_id_counter = 1;
-	return hash_map_init(state.agent_ids, 16);
+	state.default_client_permissions = 0;
+	new (&state.client_states_lock) std::mutex();
+	return hash_map_init(state.client_states, 16);
 }
 
 template<typename Stream>
 bool read(server_state& state, Stream& in) {
-	return read(state.client_id_counter, in)
-		&& read(state.agent_ids, in);
+	unsigned int client_state_count;
+	if (!read(state.client_id_counter, in)
+	 || !read(state.default_client_permissions, in)
+	 || !read(client_state_count, in)) return false;
+
+	if (!hash_map_init(state.client_states, 1 << (core::log2(RESIZE_THRESHOLD_INVERSE * (client_state_count + 1)) + 1)))
+		return false;
+
+	for (unsigned int i = 0; i < client_state_count; i++) {
+		uint64_t id;
+		client_state* cstate = (client_state*) malloc(sizeof(client_state));
+		if (cstate == nullptr || !read(id, in) || !read(*cstate, in)) {
+			if (cstate != nullptr) free(cstate);
+			for (auto entry : state.client_states) {
+				free(*entry.value); free(entry.value);
+				return false;
+			}
+		}
+
+		unsigned bucket = state.client_states.table.index_to_insert(id);
+		state.client_states.table.keys[bucket] = id;
+		state.client_states.table.size++;
+		state.client_states.values[bucket] = cstate;
+	}
+	new (&state.client_states_lock) std::mutex();
+	return true;
 }
 
+/* **NOTE:** this function assumes the variables in the simulator are not modified during writing. */
 template<typename Stream>
 bool write(const server_state& state, Stream& out) {
-	return write(state.client_id_counter, out)
-		&& write(state.agent_ids, out);
+	if (!write(state.client_id_counter, out)
+	 || !write(state.default_client_permissions, out)
+	 || !write(state.client_states.table.size, out))
+		return false;
+
+	for (const auto& entry : state.client_states) {
+		if (!write(entry.key, out) || !write(*entry.value, out))
+			return false;
+	}
+	return true;
 }
 
 /**
@@ -239,6 +325,26 @@ inline bool init(async_server& new_server) {
 	return true;
 }
 
+template<typename ServerType>
+inline void grant_permission(ServerType& server,
+		uint64_t client_id, uint64_t permission)
+{
+	std::unique_lock<std::mutex> lock(server.state.client_states_lock);
+	client_state& cstate = server.state.client_states.get(client_id);
+	std::unique_lock<std::mutex> cstate_lock(cstate.lock);
+	cstate.permissions ^= permission;
+}
+
+template<typename ServerType>
+inline void revoke_permission(ServerType& server,
+		uint64_t client_id, uint64_t permission)
+{
+	std::unique_lock<std::mutex> lock(server.state.client_states_lock);
+	client_state& cstate = server.state.client_states.get(client_id);
+	std::unique_lock<std::mutex> cstate_lock(cstate.lock);
+	cstate.permissions &= ~permission;
+}
+
 /**
  * Writes the bytes in `data` of length `length` to the TCP socket in `socket`.
  */
@@ -246,50 +352,130 @@ inline bool send_message(socket_type& socket, const void* data, unsigned int len
 	return send(socket.handle, (const char*) data, length, 0) != 0;
 }
 
+/* Precondition: `state.client_states_lock` must be held by the calling thread. */
 template<typename Stream, typename SimulatorData>
 inline bool receive_add_agent(
 		Stream& in, socket_type& connection,
-		array<uint64_t>& agent_ids,
+		server_state& state, uint64_t client_id,
 		simulator<SimulatorData>& sim)
 {
-	uint64_t new_agent_id; agent_state* new_agent;
-	status response = sim.add_agent(new_agent_id, new_agent);
-	if (response == status::OK)
-		agent_ids.add(new_agent_id);
-	else if (response == status::OUT_OF_MEMORY)
-		response = status::SERVER_OUT_OF_MEMORY;
+	client_state& cstate = *state.client_states.get(client_id);
+	cstate.lock.lock();
+	state.client_states_lock.unlock();
+
+	status response;
+	client_state* cstate_ptr;
+	uint64_t new_agent_id = 0; agent_state* new_agent = nullptr;
+	if ((cstate.permissions & PERMISSION_ADD_AGENT) == 0) {
+		/* the client has no permission for this operation */
+		cstate.lock.unlock();
+		response = status::PERMISSION_ERROR;
+	} else {
+		/* We have to unlock this to avoid deadlock since other simulator
+		   functions (i.e. `move`, `turn`, `do_nothing`) can cause the
+		   simulator to step. This calls `send_step_response` which needs the
+		   client_state locks. */
+		cstate.lock.unlock();
+		response = sim.add_agent(new_agent_id, new_agent);
+
+		bool contains;
+		state.client_states_lock.lock();
+		cstate_ptr = state.client_states.get(client_id, contains);
+		if (!contains) {
+			/* the client was destroyed while we were adding the agent */
+			state.client_states_lock.unlock();
+			if (response == status::OK)
+				sim.remove_agent(new_agent_id);
+			return true;
+		}
+		if (response == status::OK) {
+			cstate_ptr->lock.lock();
+			state.client_states_lock.unlock();
+			if (!cstate_ptr->agent_ids.add(new_agent_id)) {
+				sim.remove_agent(new_agent_id);
+				cstate_ptr->lock.unlock();
+				response = status::SERVER_OUT_OF_MEMORY;
+			}
+		} else if (response == status::OUT_OF_MEMORY) {
+			state.client_states_lock.unlock();
+			response = status::SERVER_OUT_OF_MEMORY;
+		} else {
+			state.client_states_lock.unlock();
+		}
+	}
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(response) + sizeof(new_agent_id) + sizeof(*new_agent));
 	fixed_width_stream<memory_stream> out(mem_stream);
-	std::unique_lock<std::mutex> lock(new_agent->lock);
-	return write(message_type::ADD_AGENT_RESPONSE, out)
-		&& write(response, out)
-		&& (response != status::OK || (write(new_agent_id, out) && write(*new_agent, out, sim.get_config())))
-		&& send_message(connection, mem_stream.buffer, mem_stream.position);
+	if (response == status::OK) {
+		std::unique_lock<std::mutex> lock(new_agent->lock);
+		cstate_ptr->lock.unlock();
+		return write(message_type::ADD_AGENT_RESPONSE, out)
+			&& write(response, out)
+			&& write(new_agent_id, out)
+			&& write(*new_agent, out, sim.get_config())
+			&& send_message(connection, mem_stream.buffer, mem_stream.position);
+	} else {
+		return write(message_type::ADD_AGENT_RESPONSE, out)
+			&& write(response, out)
+			&& send_message(connection, mem_stream.buffer, mem_stream.position);
+	}
 }
 
+/* Precondition: `state.client_states_lock` must be held by the calling thread. */
 template<typename Stream, typename SimulatorData>
 inline bool receive_remove_agent(
 		Stream& in, socket_type& connection,
-		array<uint64_t>& agent_ids,
+		server_state& state, uint64_t client_id,
 		simulator<SimulatorData>& sim)
 {
+	client_state& cstate = *state.client_states.get(client_id);
+	cstate.lock.lock();
+	state.client_states_lock.unlock();
+
 	uint64_t agent_id = UINT64_MAX;
 	status response;
 	bool success = true;
+	client_state* cstate_ptr;
 	if (!read(agent_id, in)) {
+		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		unsigned int index = agent_ids.index_of(agent_id);
-		if (index == agent_ids.length) {
+		unsigned int index = cstate.agent_ids.index_of(agent_id);
+		if ((cstate.permissions & PERMISSION_REMOVE_AGENT) == 0) {
+			/* the client has no permission for this operation */
+			cstate.lock.unlock();
+			response = status::PERMISSION_ERROR;
+		} else if (index == cstate.agent_ids.length) {
+			cstate.lock.unlock();
 			response = status::INVALID_AGENT_ID;
 		} else {
-			agent_ids.remove(index);
+			/* We have to unlock this to avoid deadlock since other simulator
+			   functions (i.e. `move`, `turn`, `do_nothing`) can cause the
+			   simulator to step. This calls `send_step_response` which needs the
+			   client_state locks. */
+			cstate.lock.unlock();
+
 			response = sim.remove_agent(agent_id);
-			if (response != status::OK)
-				agent_ids[agent_ids.length++] = agent_id;
-			if (response == status::OUT_OF_MEMORY)
+
+			bool contains;
+			state.client_states_lock.lock();
+			cstate_ptr = state.client_states.get(client_id, contains);
+			if (!contains) {
+				/* the client was destroyed while we were removing the agent */
+				state.client_states_lock.unlock();
+				return true;
+			}
+			if (response == status::OK) {
+				cstate_ptr->lock.lock();
+				state.client_states_lock.unlock();
+				cstate.agent_ids.remove(index);
+				cstate_ptr->lock.unlock();
+			} else if (response == status::OUT_OF_MEMORY) {
+				state.client_states_lock.unlock();
 				response = status::SERVER_OUT_OF_MEMORY;
+			} else {
+				state.client_states_lock.unlock();
+			}
 		}
 	}
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(response));
@@ -301,6 +487,7 @@ inline bool receive_remove_agent(
 	return success;
 }
 
+/* Precondition: `state.client_states_lock` must be held by the calling thread. */
 template<typename Stream, typename SimulatorData>
 bool receive_remove_client(
 		Stream& in, socket_type& connection,
@@ -308,34 +495,55 @@ bool receive_remove_client(
 		simulator<SimulatorData>& sim)
 {
 	bool contains; unsigned int bucket;
-	array<uint64_t>& agent_ids = state.agent_ids.get(client_id, contains, bucket);
-	while (agent_ids.length > 0)
-		sim.remove_agent(agent_ids[--agent_ids.length]);
-	free(agent_ids);
-	state.agent_ids.remove_at(bucket);
+	client_state& cstate = *state.client_states.get(client_id, contains, bucket);
+	cstate.lock.lock();
+	if ((cstate.permissions & PERMISSION_REMOVE_CLIENT) == 0) {
+		/* the client has no permission for this operation */
+		return false;
+	}
+
+	while (cstate.agent_ids.length > 0)
+		sim.remove_agent(cstate.agent_ids[--cstate.agent_ids.length]);
+	cstate.lock.unlock();
+	free(cstate);
+	state.client_states.remove_at(bucket);
 
 	shutdown(connection.handle, 2);
+	state.client_states_lock.unlock();
 	return true;
 }
 
+/* Precondition: `state.client_states_lock` must be held by the calling thread. */
 template<typename Stream, typename SimulatorData>
 inline bool receive_move(
 		Stream& in, socket_type& connection,
-		const array<uint64_t>& agent_ids,
+		server_state& state, uint64_t client_id,
 		simulator<SimulatorData>& sim)
 {
+	client_state& cstate = *state.client_states.get(client_id);
+	cstate.lock.lock();
+	state.client_states_lock.unlock();
+
 	uint64_t agent_id = UINT64_MAX;
 	direction dir;
 	unsigned int num_steps;
 	status response;
 	bool success = true;
 	if (!read(agent_id, in) || !read(dir, in) || !read(num_steps, in)) {
+		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		if (!agent_ids.contains(agent_id)) {
+		if (!cstate.agent_ids.contains(agent_id)) {
+			cstate.lock.unlock();
 			response = status::INVALID_AGENT_ID;
 		} else {
+			/* We have to unlock this to avoid deadlock since other simulator
+			   functions (i.e. `move`, `turn`, `do_nothing`) can cause the
+			   simulator to step. This calls `send_step_response` which needs the
+			   client_state locks. */
+			cstate.lock.unlock();
+
 			response = sim.move(agent_id, dir, num_steps);
 			if (response == status::OUT_OF_MEMORY)
 				response = status::SERVER_OUT_OF_MEMORY;
@@ -351,23 +559,36 @@ inline bool receive_move(
 	return success;
 }
 
+/* Precondition: `state.client_states_lock` must be held by the calling thread. */
 template<typename Stream, typename SimulatorData>
 inline bool receive_turn(
 		Stream& in, socket_type& connection,
-		const array<uint64_t>& agent_ids,
+		server_state& state, uint64_t client_id,
 		simulator<SimulatorData>& sim)
 {
+	client_state& cstate = *state.client_states.get(client_id);
+	cstate.lock.lock();
+	state.client_states_lock.unlock();
+
 	uint64_t agent_id = UINT64_MAX;
 	direction dir;
 	status response;
 	bool success = true;
 	if (!read(agent_id, in) || !read(dir, in)) {
+		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		if (!agent_ids.contains(agent_id)) {
+		if (!cstate.agent_ids.contains(agent_id)) {
+			cstate.lock.unlock();
 			response = status::INVALID_AGENT_ID;
 		} else {
+			/* We have to unlock this to avoid deadlock since other simulator
+			   functions (i.e. `move`, `turn`, `do_nothing`) can cause the
+			   simulator to step. This calls `send_step_response` which needs the
+			   client_state locks. */
+			cstate.lock.unlock();
+
 			response = sim.turn(agent_id, dir);
 			if (response == status::OUT_OF_MEMORY)
 				response = status::SERVER_OUT_OF_MEMORY;
@@ -383,22 +604,35 @@ inline bool receive_turn(
 	return success;
 }
 
+/* Precondition: `state.client_states_lock` must be held by the calling thread. */
 template<typename Stream, typename SimulatorData>
 inline bool receive_do_nothing(
 		Stream& in, socket_type& connection,
-		const array<uint64_t>& agent_ids,
+		server_state& state, uint64_t client_id,
 		simulator<SimulatorData>& sim)
 {
+	client_state& cstate = *state.client_states.get(client_id);
+	cstate.lock.lock();
+	state.client_states_lock.unlock();
+
 	uint64_t agent_id = UINT64_MAX;
 	status response;
 	bool success = true;
 	if (!read(agent_id, in)) {
+		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		if (!agent_ids.contains(agent_id)) {
+		if (!cstate.agent_ids.contains(agent_id)) {
+			cstate.lock.unlock();
 			response = status::INVALID_AGENT_ID;
 		} else {
+			/* We have to unlock this to avoid deadlock since other simulator
+			   functions (i.e. `move`, `turn`, `do_nothing`) can cause the
+			   simulator to step. This calls `send_step_response` which needs the
+			   client_state locks. */
+			cstate.lock.unlock();
+
 			response = sim.do_nothing(agent_id);
 			if (response == status::OUT_OF_MEMORY)
 				response = status::SERVER_OUT_OF_MEMORY;
@@ -413,19 +647,31 @@ inline bool receive_do_nothing(
 	return success;
 }
 
+/* Precondition: `state.client_states_lock` must be held by the calling thread. */
 template<typename Stream, typename SimulatorData>
 inline bool receive_get_map(
 		Stream& in, socket_type& connection,
+		server_state& state, uint64_t client_id,
 		simulator<SimulatorData>& sim)
 {
+	client_state& cstate = *state.client_states.get(client_id);
+	cstate.lock.lock();
+	state.client_states_lock.unlock();
+
 	position bottom_left, top_right;
 	status response;
 	array<array<patch_state>> patches(32);
 	bool success = true;
 	if (!read(bottom_left, in) || !read(top_right, in)) {
+		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
+	} else if ((cstate.permissions & PERMISSION_GET_MAP) == 0) {
+		/* the client has no permission for this operation */
+		cstate.lock.unlock();
+		response = status::PERMISSION_ERROR;
 	} else {
+		cstate.lock.unlock();
 		response = sim.get_map(bottom_left, top_right, patches);
 		if (response != status::OK) {
 			for (array<patch_state>& row : patches) {
@@ -450,24 +696,76 @@ inline bool receive_get_map(
 	return success;
 }
 
+/* Precondition: `state.client_states_lock` must be held by the calling thread. */
+template<typename Stream, typename SimulatorData>
+inline bool receive_get_agent_ids(
+		Stream& in, socket_type& connection,
+		server_state& state, uint64_t client_id,
+		simulator<SimulatorData>& sim)
+{
+	client_state& cstate = *state.client_states.get(client_id);
+	cstate.lock.lock();
+	state.client_states_lock.unlock();
+
+	status response;
+	array<uint64_t> agent_ids(32);
+	bool success = true;
+	if ((cstate.permissions & PERMISSION_GET_AGENT_IDS) == 0) {
+		cstate.lock.unlock();
+		/* the client has no permission for this operation */
+		response = status::PERMISSION_ERROR;
+	} else {
+		cstate.lock.unlock();
+		response = sim.get_agent_ids(agent_ids);
+		if (response != status::OK) {
+			agent_ids.clear();
+			if (response == status::OUT_OF_MEMORY)
+				response = status::SERVER_OUT_OF_MEMORY;
+		}
+	}
+
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(response) + sizeof(size_t) + sizeof(uint64_t) * agent_ids.length);
+	fixed_width_stream<memory_stream> out(mem_stream);
+	success &= write(message_type::GET_AGENT_IDS_RESPONSE, out) && write(response, out)
+			&& write(agent_ids.length, out) && write(agent_ids.data, out, agent_ids.length)
+			&& send_message(connection, mem_stream.buffer, mem_stream.position);
+	return success;
+}
+
+/* Precondition: `state.client_states_lock` must be held by the calling thread. */
 template<typename Stream, typename SimulatorData>
 inline bool receive_set_active(
 		Stream& in, socket_type& connection,
-		const array<uint64_t>& agent_ids,
+		server_state& state, uint64_t client_id,
 		simulator<SimulatorData>& sim)
 {
+	client_state& cstate = *state.client_states.get(client_id);
+	cstate.lock.lock();
+	state.client_states_lock.unlock();
+
 	uint64_t agent_id = UINT64_MAX;
 	bool active, success = true;
 	status response;
 	if (!read(agent_id, in) || !read(active, in)) {
+		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
+	} else if ((cstate.permissions & PERMISSION_SET_ACTIVE) == 0) {
+		/* the client has no permission for this operation */
+		cstate.lock.unlock();
+		response = status::PERMISSION_ERROR;
 	} else {
-		if (!agent_ids.contains(agent_id)) {
+		if (!cstate.agent_ids.contains(agent_id)) {
+			cstate.lock.unlock();
 			response = status::INVALID_AGENT_ID;
 		} else {
-			sim.set_agent_active(agent_id, active);
-			response = status::OK;
+			/* We have to unlock this to avoid deadlock since other simulator
+			   functions (i.e. `move`, `turn`, `do_nothing`) can cause the
+			   simulator to step. This calls `send_step_response` which needs the
+			   client_state locks. */
+			cstate.lock.unlock();
+
+			response = sim.set_agent_active(agent_id, active);
 		}
 	}
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(response));
@@ -479,25 +777,37 @@ inline bool receive_set_active(
 	return success;
 }
 
+/* Precondition: `state.client_states_lock` must be held by the calling thread. */
 template<typename Stream, typename SimulatorData>
 inline bool receive_is_active(
 		Stream& in, socket_type& connection,
-		const array<uint64_t>& agent_ids,
+		server_state& state, uint64_t client_id,
 		simulator<SimulatorData>& sim)
 {
+	client_state& cstate = *state.client_states.get(client_id);
+	cstate.lock.lock();
+	state.client_states_lock.unlock();
+
 	bool active = false;
 	uint64_t agent_id = UINT64_MAX;
 	bool success = true;
 	status response;
 	if (!read(agent_id, in)) {
+		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		if (!agent_ids.contains(agent_id)) {
+		if (!cstate.agent_ids.contains(agent_id)) {
+			cstate.lock.unlock();
 			response = status::INVALID_AGENT_ID;
 		} else {
-			active = sim.is_agent_active(agent_id);
-			response = status::OK;
+			/* We have to unlock this to avoid deadlock since other simulator
+			   functions (i.e. `move`, `turn`, `do_nothing`) can cause the
+			   simulator to step. This calls `send_step_response` which needs the
+			   client_state locks. */
+			cstate.lock.unlock();
+
+			response = sim.is_agent_active(agent_id, active);
 		}
 	}
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(response) + sizeof(active));
@@ -521,26 +831,32 @@ void server_process_message(socket_type& connection,
 	connection_set_lock.lock();
 	uint64_t client_id = connections.get(connection).id;
 	connection_set_lock.unlock();
-	if (!read(type, in)) return;
+	state.client_states_lock.lock();
+	if (!read(type, in)) {
+		state.client_states_lock.unlock();
+		return;
+	}
 	switch (type) {
 		case message_type::ADD_AGENT:
-			receive_add_agent(in, connection, state.agent_ids.get(client_id), sim); return;
+			receive_add_agent(in, connection, state, client_id, sim); return;
 		case message_type::REMOVE_AGENT:
-			receive_remove_agent(in, connection, state.agent_ids.get(client_id), sim); return;
+			receive_remove_agent(in, connection, state, client_id, sim); return;
 		case message_type::REMOVE_CLIENT:
 			receive_remove_client(in, connection, state, client_id, sim); return;
 		case message_type::MOVE:
-			receive_move(in, connection, state.agent_ids.get(client_id), sim); return;
+			receive_move(in, connection, state, client_id, sim); return;
 		case message_type::TURN:
-			receive_turn(in, connection, state.agent_ids.get(client_id), sim); return;
+			receive_turn(in, connection, state, client_id, sim); return;
 		case message_type::DO_NOTHING:
-			receive_do_nothing(in, connection, state.agent_ids.get(client_id), sim); return;
+			receive_do_nothing(in, connection, state, client_id, sim); return;
 		case message_type::GET_MAP:
-			receive_get_map(in, connection, sim); return;
+			receive_get_map(in, connection, state, client_id, sim); return;
+		case message_type::GET_AGENT_IDS:
+			receive_get_agent_ids(in, connection, state, client_id, sim); return;
 		case message_type::SET_ACTIVE:
-			receive_set_active(in, connection, state.agent_ids.get(client_id), sim); return;
+			receive_set_active(in, connection, state, client_id, sim); return;
 		case message_type::IS_ACTIVE:
-			receive_is_active(in, connection, state.agent_ids.get(client_id), sim); return;
+			receive_is_active(in, connection, state, client_id, sim); return;
 
 		case message_type::ADD_AGENT_RESPONSE:
 		case message_type::REMOVE_AGENT_RESPONSE:
@@ -548,11 +864,13 @@ void server_process_message(socket_type& connection,
 		case message_type::TURN_RESPONSE:
 		case message_type::DO_NOTHING_RESPONSE:
 		case message_type::GET_MAP_RESPONSE:
+		case message_type::GET_AGENT_IDS_RESPONSE:
 		case message_type::SET_ACTIVE_RESPONSE:
 		case message_type::IS_ACTIVE_RESPONSE:
 		case message_type::STEP_RESPONSE:
 			break;
 	}
+	state.client_states_lock.unlock();
 	fprintf(stderr, "server_process_message WARNING: Received message with unrecognized type.\n");
 }
 
@@ -574,30 +892,33 @@ inline bool process_new_connection(
 	}
 
 	if (client_id == NEW_CLIENT_REQUEST) {
-		if (!state.agent_ids.check_size()) {
+		std::unique_lock<std::mutex> lock(state.client_states_lock);
+		if (!state.client_states.check_size()) {
 			memory_stream mem_stream = memory_stream(sizeof(status));
 			fixed_width_stream<memory_stream> out(mem_stream);
-			write(status::SERVER_PARSE_MESSAGE_ERROR, out);
+			write(status::SERVER_OUT_OF_MEMORY, out);
 			send_message(connection, mem_stream.buffer, mem_stream.position);
 			return false;
 		}
 
 		bool contains; unsigned int bucket;
 		new_client.id = state.client_id_counter++;
-		array<uint64_t>& agent_ids = state.agent_ids.get(new_client.id, contains, bucket);
+		client_state*& cstate = state.client_states.get(new_client.id, contains, bucket);
 #if !defined(NDEBUG)
 		if (contains)
 			fprintf(stderr, "process_new_connection WARNING: `new_client.id` already exists in `state.agent_ids`.\n");
 #endif
-		if (!array_init(agent_ids, 8)) {
+		cstate = (client_state*) malloc(sizeof(client_state));
+		if (cstate == nullptr || !init(*cstate, state.default_client_permissions)) {
+			if (cstate != nullptr) free(cstate);
 			memory_stream mem_stream = memory_stream(sizeof(status));
 			fixed_width_stream<memory_stream> out(mem_stream);
-			write(status::SERVER_PARSE_MESSAGE_ERROR, out);
+			write(status::SERVER_OUT_OF_MEMORY, out);
 			send_message(connection, mem_stream.buffer, mem_stream.position);
 			return false;
 		}
-		state.agent_ids.table.keys[bucket] = new_client.id;
-		state.agent_ids.table.size++;
+		state.client_states.table.keys[bucket] = new_client.id;
+		state.client_states.table.size++;
 
 		/* respond to the client */
 		memory_stream mem_stream = memory_stream(sizeof(status) + sizeof(uint64_t) + sizeof(sim.time) + sizeof(simulator_config));
@@ -611,14 +932,19 @@ inline bool process_new_connection(
 	} else {
 		/* first check if the requested client ID exists */
 		bool contains;
-		const array<uint64_t>& agent_ids = state.agent_ids.get(client_id, contains);
+		state.client_states_lock.lock();
+		client_state* cstate_ptr = state.client_states.get(client_id, contains);
 		if (!contains) {
+			state.client_states_lock.unlock();
 			memory_stream mem_stream = memory_stream(sizeof(status));
 			fixed_width_stream<memory_stream> out(mem_stream);
 			write(status::INVALID_AGENT_ID, out);
 			send_message(connection, mem_stream.buffer, mem_stream.position);
 			return false;
 		}
+		client_state& cstate = *cstate_ptr;
+		cstate.lock.lock();
+		state.client_states_lock.unlock();
 		new_client.id = client_id;
 
 		/* respond to the client */
@@ -626,27 +952,45 @@ inline bool process_new_connection(
 		fixed_width_stream<memory_stream> out(mem_stream);
 		const simulator_config& config = sim.get_config();
 		if (!write(status::OK, out)
-		 || !write(sim.time, out) || !write(config, out)
-		 || !write((unsigned int) agent_ids.length, out))
+		 || !write(sim.time, out) || !write(config, out))
 		{
+			cstate.lock.unlock();
 			fprintf(stderr, "process_new_connection ERROR: Error sending simulation time and configuration.\n");
 			return false;
 		}
 
-		if (agent_ids.length > 0) {
-			agent_state** agent_states = (agent_state**) malloc(sizeof(agent_state*) * agent_ids.length);
-			sim.get_agent_states(agent_states, agent_ids.data, (unsigned int) agent_ids.length);
+		if (cstate.agent_ids.length > 0) {
+			agent_state** agent_states = (agent_state**) malloc(sizeof(agent_state*) * cstate.agent_ids.length);
+			sim.get_agent_states(agent_states, cstate.agent_ids.data, (unsigned int) cstate.agent_ids.length);
+
+			/* get number of non-null agents */
+			unsigned int agent_count = 0;
+			for (unsigned int i = 0; i < cstate.agent_ids.length; i++) {
+				if (agent_states[i] != nullptr) agent_count++;
+			}
+
+			if (!write(agent_count, out)) {
+				cstate.lock.unlock();
+				fprintf(stderr, "process_new_connection ERROR: Error sending agent count.\n");
+				return false;
+			}
 
 			/* send the requested agent states to the client */
-			for (unsigned int i = 0; i < agent_ids.length; i++) {
+			for (unsigned int i = 0; i < cstate.agent_ids.length; i++) {
+				if (agent_states[i] == nullptr) continue;
 				std::unique_lock<std::mutex> lock(agent_states[i]->lock);
 				if (!write(*agent_states[i], out, config)) {
-					free(agent_states);
-					return false;
+					cstate.lock.unlock();
+					free(agent_states); return false;
 				}
 			}
 			free(agent_states);
+		} else if (!write((unsigned int) 0, out)) {
+			cstate.lock.unlock();
+			fprintf(stderr, "process_new_connection ERROR: Error sending agent count.\n");
+			return false;
 		}
+		cstate.lock.unlock();
 
 		return send_message(connection, mem_stream.buffer, mem_stream.position);
 	}
@@ -684,23 +1028,43 @@ inline bool send_step_response(
 	std::unique_lock<std::mutex> lock(server.connection_set_lock);
 	bool success = true;
 	for (const auto& client_connection : server.client_connections) {
-		const array<uint64_t>& agent_ids = server.state.agent_ids.get(client_connection.value.id);
+		server.state.client_states_lock.lock();
+		client_state& cstate = *server.state.client_states.get(client_connection.value.id);
+		cstate.lock.lock();
+		server.state.client_states_lock.unlock();
+		const array<uint64_t>& agent_ids = cstate.agent_ids;
 		memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(unsigned int) +
 				(unsigned int) agent_ids.length * (sizeof(uint64_t) + sizeof(agent_state)));
 		fixed_width_stream<memory_stream> out(mem_stream);
-		if (!write(message_type::STEP_RESPONSE, out)
-		 || !write(agent_ids, out)) {
+		if (!write(message_type::STEP_RESPONSE, out)) {
+			cstate.lock.unlock();
 			success = false;
 			continue;
 		}
 
-		bool client_success = true;
+		array<pair<uint64_t, const agent_state*>> agent_states(max((size_t) 1, agent_ids.length));
 		for (uint64_t agent_id : agent_ids) {
-			if (!write(*agents.get(agent_id), out, config)) {
-				client_success = false;
-				break;
+			bool contains;
+			const agent_state* agent_ptr = agents.get(agent_id, contains);
+			/* `remove_agent` could have been called and `agent_ids` has not yet been updated */
+			if (!contains) continue;
+			agent_states[agent_states.length++] = {agent_id, agent_ptr};
+		}
+
+		bool client_success = true;
+		if (!write(agent_states.length, out)) {
+			client_success = false;
+		} else {
+			for (const auto& entry : agent_states) {
+				if (!write(entry.key, out)
+				 || !write(*entry.value, out, config))
+				{
+					client_success = false;
+					break;
+				}
 			}
 		}
+		cstate.lock.unlock();
 		if (!client_success || !write_extra_data(out, std::forward<ExtraData>(extra_data)...)) {
 			success = false;
 			continue;
@@ -722,20 +1086,23 @@ inline bool send_step_response(
  * 		connections that can be handled by the server.
  * \param worker_count The number of worker threads to dispatch. They are
  * 		tasked with processing incoming message from clients.
+ * \param default_client_permissions The permissions of new clients.
  * \returns `true` if successful; `false` otherwise.
  */
 template<typename SimulatorData>
 bool init_server(async_server& new_server, simulator<SimulatorData>& sim,
-		uint16_t server_port, unsigned int connection_queue_capacity, unsigned int worker_count)
+		uint16_t server_port, unsigned int connection_queue_capacity,
+		unsigned int worker_count, uint64_t default_client_permissions)
 {
 	std::condition_variable cv; std::mutex lock;
 	auto dispatch = [&]() {
-		run_server(new_server.server_socket, server_port,
-				connection_queue_capacity, worker_count, new_server.status, cv, lock,
-				new_server.client_connections, new_server.connection_set_lock,
-				server_process_message<SimulatorData>, process_new_connection<SimulatorData>, sim, new_server.state);
+		run_server(new_server.server_socket, server_port, connection_queue_capacity,
+				worker_count, new_server.status, cv, lock, new_server.client_connections,
+				new_server.connection_set_lock, server_process_message<SimulatorData>,
+				process_new_connection<SimulatorData>, sim, new_server.state);
 	};
 	new_server.status = server_status::STARTING;
+	new_server.state.default_client_permissions = default_client_permissions;
 	new_server.server_thread = std::thread(dispatch);
 
 	std::unique_lock<std::mutex> lck(lock);
@@ -764,19 +1131,23 @@ bool init_server(async_server& new_server, simulator<SimulatorData>& sim,
  * 		connections that can be handled by the server.
  * \param worker_count The number of worker threads to dispatch. They are
  * 		tasked with processing incoming message from clients.
+ * \param default_client_permissions The permissions of new clients.
  * \returns `true` if successful; `false` otherwise.
  */
 template<typename SimulatorData>
 inline bool init_server(sync_server& new_server, simulator<SimulatorData>& sim,
-		uint16_t server_port, unsigned int connection_queue_capacity, unsigned int worker_count)
+		uint16_t server_port, unsigned int connection_queue_capacity,
+		unsigned int worker_count, uint64_t default_client_permissions)
 {
 	socket_type server_socket;
 	server_status dummy = server_status::STARTING;
+	new_server.state.default_client_permissions = default_client_permissions;
 	std::condition_variable cv; std::mutex lock;
 	return run_server(
-			server_socket, server_port, connection_queue_capacity, worker_count, dummy, cv, lock,
-			new_server.client_connections, new_server.connection_set_lock,
-			server_process_message<SimulatorData>, process_new_connection<SimulatorData>, sim, new_server.state);
+			server_socket, server_port, connection_queue_capacity,
+			worker_count, dummy, cv, lock, new_server.client_connections,
+			new_server.connection_set_lock, server_process_message<SimulatorData>,
+			process_new_connection<SimulatorData>, sim, new_server.state);
 }
 
 /**
@@ -924,8 +1295,8 @@ bool send_do_nothing(ClientType& c, uint64_t agent_id) {
 }
 
 /**
- * Sends an `get_map` message to the server from the client `c`. Once the
- * server responds, the function
+ * Sends a `get_map` message to the server from the client `c`. Once the server
+ * responds, the function
  * `on_get_map(ClientType&, status, hash_map<position, patch_state>*)` will be
  * invoked, where the first argument is `c`, and the second is the response (OK
  * if successful, and a different value if an error occurred), and the third is
@@ -949,7 +1320,25 @@ bool send_get_map(ClientType& c, position bottom_left, position top_right) {
 }
 
 /**
- * Sends an `set_active` message to the server from the client `c`. Once the
+ * Sends an `get_agent_ids` message to the server from the client `c`. Once the
+ * server responds, the function
+ * `on_get_agent_ids(ClientType&, status, uint64_t*, size_t)` will be
+ * invoked, where the first argument is `c`, and the second is the response (OK
+ * if successful, and a different value if an error occurred), the third is the
+ * number of agent IDs, and the fourth is the array of agent IDs.
+ *
+ * \returns `true` if the sending is successful; `false` otherwise.
+ */
+template<typename ClientType>
+bool send_get_agent_ids(ClientType& c) {
+	memory_stream mem_stream = memory_stream(sizeof(message_type));
+	fixed_width_stream<memory_stream> out(mem_stream);
+	return write(message_type::GET_AGENT_IDS, out)
+		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
+}
+
+/**
+ * Sends a `set_active` message to the server from the client `c`. Once the
  * server responds, the function
  * `on_set_active(ClientType&, uint64_t, status)` will be invoked, where the
  * first argument is `c`, the second is `agent_id`, and the third is the
@@ -1002,7 +1391,7 @@ inline bool receive_add_agent_response(ClientType& c) {
 		success = false;
 	}
 	on_add_agent(c, agent_id, response, state);
-	if (response != status::OK) free(state);
+	if (response == status::OK) free(state);
 	return success;
 }
 
@@ -1088,6 +1477,32 @@ inline bool receive_get_map_response(ClientType& c) {
 }
 
 template<typename ClientType>
+inline bool receive_get_agent_ids_response(ClientType& c) {
+	status response;
+	bool success = true;
+	size_t agent_count = 0;
+	uint64_t* agent_ids = nullptr;
+	fixed_width_stream<socket_type> in(c.connection);
+	if (!read(response, in) || !read(agent_count, in)) {
+		response = status::CLIENT_PARSE_MESSAGE_ERROR;
+		success = false;
+	} else if (agent_count > 0) {
+		agent_ids = (uint64_t*) malloc(sizeof(uint64_t) * agent_count);
+		if (agent_ids == nullptr) {
+			fprintf(stderr, "receive_get_agent_ids_response ERROR: Out of memory.\n");
+			response = status::CLIENT_OUT_OF_MEMORY;
+			success = false;
+		} else if (!read(agent_ids, in, agent_count)) {
+			response = status::CLIENT_PARSE_MESSAGE_ERROR;
+			free(agent_ids); success = false;
+		}
+	}
+	/* ownership of `agent_ids` is passed to the callee */
+	on_get_agent_ids(c, response, agent_ids, agent_count);
+	return success;
+}
+
+template<typename ClientType>
 inline bool receive_set_active_response(ClientType& c) {
 	status response;
 	uint64_t agent_id = 0;
@@ -1126,22 +1541,27 @@ inline bool receive_step_response(ClientType& c) {
 	array<uint64_t>& agent_ids = *((array<uint64_t>*) alloca(sizeof(array<uint64_t>)));
 
 	fixed_width_stream<socket_type> in(c.connection);
-	agent_state* agents = NULL;
-	if (!read(agent_ids, in)) {
+	agent_state* agents = nullptr;
+	if (!read(agent_ids.length, in)) {
 		response = status::CLIENT_PARSE_MESSAGE_ERROR;
-		agent_ids.data = NULL; success = false;
+		agent_ids.data = nullptr; success = false;
 	} else {
-		agents = (agent_state*) malloc(sizeof(agent_state) * agent_ids.length);
-		if (agents == NULL) {
+		agent_ids.data = (uint64_t*) malloc(max((size_t) 1, sizeof(uint64_t) * agent_ids.length));
+		agents = (agent_state*) malloc(max((size_t) 1, sizeof(agent_state) * agent_ids.length));
+		if (agents == nullptr || agent_ids.data == nullptr) {
 			fprintf(stderr, "receive_step_response ERROR: Out of memory.\n");
+			if (agent_ids.data == nullptr) free(agent_ids.data);
 			response = status::CLIENT_OUT_OF_MEMORY;
 			free(agent_ids); success = false;
 		} else {
+			agent_ids.capacity = agent_ids.length;
 			for (unsigned int i = 0; i < agent_ids.length; i++) {
-				if (!read(agents[i], in, c.config)) {
+				if (!read(agent_ids[i], in)
+				 || !read(agents[i], in, c.config))
+				{
 					for (unsigned int j = 0; j < i; j++) free(agents[j]);
 					response = status::CLIENT_PARSE_MESSAGE_ERROR;
-					free(agents); free(agent_ids); agents = NULL;
+					free(agents); free(agent_ids); agents = nullptr;
 					success = false; break;
 				}
 			}
@@ -1196,6 +1616,8 @@ void run_response_listener(ClientType& c) {
 			receive_do_nothing_response(c); continue;
 		case message_type::GET_MAP_RESPONSE:
 			receive_get_map_response(c); continue;
+		case message_type::GET_AGENT_IDS_RESPONSE:
+			receive_get_agent_ids_response(c); continue;
 		case message_type::SET_ACTIVE_RESPONSE:
 			receive_set_active_response(c); continue;
 		case message_type::IS_ACTIVE_RESPONSE:
@@ -1210,6 +1632,7 @@ void run_response_listener(ClientType& c) {
 		case message_type::TURN:
 		case message_type::DO_NOTHING:
 		case message_type::GET_MAP:
+		case message_type::GET_AGENT_IDS:
 		case message_type::SET_ACTIVE:
 		case message_type::IS_ACTIVE:
 			break;
@@ -1392,11 +1815,7 @@ uint64_t reconnect_client(
  * \param server_address A null-terminated string containing the server
  * 		address.
  * \param server_port The server port.
- * \param agent_ids An array of agent IDs governed by this client, of length
- * 		`agent_count`.
- * \param agent_states An array of length `agent_count` to which this function
- * 		will write the states of the agents whose IDs are given by the parallel
- * 		array `agent_ids`.
+ * \param client_id The ID assigned to this new client by the server.
  * \param agent_count The lengths of `agent_ids` and `agent_states`.
  * \returns The simulator time if successful; `UINT64_MAX` otherwise.
  */
@@ -1419,7 +1838,8 @@ uint64_t connect_client(client<ClientData>& new_client,
  * will be dispatched to listen for responses from the server. `stop_client`
  * should be used to disconnect from the server and stop the listener thread.
  *
- * \param new_client The client with which to attempt the connection.
+ * \param existing_client The client with which to attempt the connection.
+ * \param client_id The ID of the client.
  * \param server_address A null-terminated string containing the server
  * 		address.
  * \param server_port The server port.

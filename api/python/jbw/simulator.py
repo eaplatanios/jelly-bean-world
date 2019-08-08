@@ -410,6 +410,10 @@ class Simulator(object):
     """
     return simulator_c.is_active(self._handle, self._client_handle, agent._id)
 
+  def _agent_ids(self):
+    """Retrieves a list of the IDs of *all* agents in the simulation environment."""
+    return simulator_c.agent_ids(self._handle, self._client_handle)
+
   def _load_agents(self, load_filepath, load_time):
     with open(load_filepath + str(load_time) + '.agent_info', 'rb') as fin:
       self._client_id = int(fin.readline().decode('utf-8'))

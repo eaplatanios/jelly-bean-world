@@ -180,6 +180,11 @@ typedef struct SimulationClientInfo {
   unsigned int numAgents;
 } SimulationClientInfo;
 
+typedef struct AgentIDList {
+  uint64_t* agentIds;
+  unsigned int numAgents;
+} AgentIDList;
+
 void* simulatorCreate(
   const SimulatorConfig* config,
   OnStepCallback onStepCallback,
@@ -253,6 +258,11 @@ const SimulationMap simulatorMap(
   Position bottomLeftCorner,
   Position topRightCorner,
   JBW_Status* status);
+
+const AgentIDList simulatorAgentIds(
+  void* simulatorHandle,
+  void* clientHandle,
+  JBW_Status* jbwStatus);
 
 void* simulationServerStart(
   void* simulatorHandle,

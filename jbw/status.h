@@ -21,7 +21,7 @@ namespace jbw {
 
 typedef uint8_t status_type;
 
-enum class status : uint8_t {
+enum class status : status_type {
   OK = 0,
   OUT_OF_MEMORY,
   INVALID_AGENT_ID,

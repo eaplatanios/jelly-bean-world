@@ -35,6 +35,7 @@ constexpr SimulatorInfo EMPTY_SIM_INFO = { 0 };
 constexpr SimulationNewClientInfo EMPTY_NEW_CLIENT_INFO = { 0 };
 constexpr SimulationClientInfo EMPTY_CLIENT_INFO = { 0 };
 constexpr SimulationMap EMPTY_SIM_MAP = { 0 };
+constexpr AgentIDList EMPTY_AGENT_ID_LIST = { 0 };
 
 
 inline Direction to_Direction(direction dir) {
@@ -705,6 +706,7 @@ struct client_data {
     bool active;
     AgentSimulationState agent_state;
     array<array<patch_state>>* map;
+    pair<uint64_t*, size_t> agent_ids;
   } response_data;
 
   /* for synchronization */
@@ -955,6 +957,31 @@ void on_get_map(client<client_data>& c, status response, array<array<patch_state
   std::unique_lock<std::mutex> lck(c.data.lock);
   c.data.waiting_for_server = false;
   c.data.response_data.map = map;
+  c.data.server_response = response;
+  c.data.cv.notify_one();
+}
+
+
+/**
+ * The callback invoked when the client receives a get_agent_ids response from
+ * the server. This function moves the result into
+ * `c.data.response_data.agent_ids` and wakes up the parent thread (which
+ * should be waiting in the `simulatorAgentIds` function) so that it can return
+ * the response back.
+ *
+ * \param   c         The client that received the response.
+ * \param   response  The response from the server, containing information
+ *                    about any errors.
+ * \param   agent_ids The array containing the agent IDs.
+ * \param   count     The number of IDs in the array `agent_ids`.
+ */
+void on_get_agent_ids(
+  client<client_data>& c, status response,
+  uint64_t* agent_ids, size_t count)
+{
+  std::unique_lock<std::mutex> lck(c.data.lock);
+  c.data.waiting_for_server = false;
+  c.data.response_data.agent_ids = make_pair(agent_ids, count);
   c.data.server_response = response;
   c.data.cv.notify_one();
 }
@@ -1483,11 +1510,17 @@ void simulatorSetActive(
   JBW_Status* status
 ) {
   if (clientHandle == nullptr) {
-    /* the simulation is local, so call get_map directly */
+    /* the simulation is local, so call set_active directly */
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
-    sim_handle->set_agent_active(agentId, active);
+    status result = sim_handle->set_agent_active(agentId, active);
+    if (result != status::OK) {
+      /* TODO: translate status enum */
+      jbwStatus->code = JBW_UNKNOWN_ERROR;
+      jbwStatus->message = "Failed to perform a \"set active\" agent action.";
+      return;
+    }
   } else {
-    /* this is a client, so send a get_map message to the server */
+    /* this is a client, so send a set_active message to the server */
     client<client_data>* client_handle = (client<client_data>*) clientHandle;
     if (!client_handle->client_running) {
       status->code = JBW_LOST_CONNECTION;
@@ -1515,11 +1548,19 @@ bool simulatorIsActive(
   JBW_Status* status
 ) {
   if (clientHandle == nullptr) {
-    /* the simulation is local, so call get_map directly */
+    /* the simulation is local, so call is_active directly */
+    bool active;
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
-    return sim_handle->is_agent_active(agentId);
+    status result = sim_handle->is_agent_active(agentId, active);
+    if (result != status::OK) {
+      /* TODO: translate status enum */
+      jbwStatus->code = JBW_UNKNOWN_ERROR;
+      jbwStatus->message = "Failed to perform a \"set active\" agent action.";
+      return false;
+    }
+    return active;
   } else {
-    /* this is a client, so send a get_map message to the server */
+    /* this is a client, so send a is_active message to the server */
     client<client_data>* client_handle = (client<client_data>*) clientHandle;
     if (!client_handle->client_running) {
       status->code = JBW_LOST_CONNECTION;
@@ -1619,6 +1660,63 @@ const SimulationMap simulatorMap(
 }
 
 
+const AgentIDList simulatorAgentIds(
+  void* simulatorHandle,
+  void* clientHandle,
+  JBW_Status* jbwStatus
+) {
+  if (clientHandle == nullptr) {
+    /* the simulation is local, so call get_agent_ids directly */
+    simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
+    array<uint64_t>& agent_ids = *((array<uint64_t>*) alloca(sizeof(array<uint64_t>)));
+    if (!array_init(agent_ids, 16)) {
+      status->code = JBW_OUT_OF_MEMORY_ERROR;
+      status->message = "Insufficient memory while initializing array for agent IDs.";
+    }
+    status result = sim_handle->get_agent_ids(agent_ids);
+    if (result != status::OK) {
+      /* TODO: translate status enum */
+      jbwStatus->code = JBW_UNKNOWN_ERROR;
+      jbwStatus->message = "Failed to obtain the agent IDs.";
+      return EMPTY_AGENT_ID_LIST;
+    }
+
+    AgentIDList list;
+    list.agentIds = agent_ids.data;
+    list.numAgents = (unsigned int) agent_ids.length;
+    return list;
+  } else {
+    /* this is a client, so send a get_agent_ids message to the server */
+    client<client_data>* client_ptr = (client<client_data>*) clientHandle;
+    if (!client_ptr->client_running) {
+      jbwStatus->code = JBW_LOST_CONNECTION;
+      jbwStatus->message = "Connection to the simulation server was lost.";
+      return EMPTY_AGENT_ID_LIST;
+    }
+
+    client_ptr->data.waiting_for_server = true;
+    if (!send_get_agent_ids(*client_ptr)) {
+      jbwStatus->code = JBW_COMMUNICATION_ERROR;
+      jbwStatus->message = "Failed to send a \"get agent ids\" request.";
+      return EMPTY_AGENT_ID_LIST;
+    }
+
+    /* wait for response from server */
+    wait_for_server(*client_ptr);
+    AgentIDList list;
+    if (client_ptr->data.server_response != status::OK) {
+      /* TODO: translate status enum */
+      jbwStatus->code = JBW_UNKNOWN_ERROR;
+      jbwStatus->message = "Failed to obtain the agent IDs.";
+      return EMPTY_AGENT_ID_LIST;
+    }
+    list.agentIds = client_ptr->data.response_data.agent_ids.key;
+    list.numAgents = (unsigned int) client_ptr->data.response_data.agent_ids.value;
+    return list;
+  }
+}
+
+
 void* simulationServerStart(
   void* simulatorHandle,
   unsigned int port,
@@ -1628,7 +1726,7 @@ void* simulationServerStart(
 ) {
   simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
   async_server& server = sim_handle->get_data().server;
-  if (!init_server(server, *sim_handle, (uint16_t) port, connectionQueueCapacity, numWorkers)) {
+  if (!init_server(server, *sim_handle, (uint16_t) port, connectionQueueCapacity, numWorkers, ~0)) { /* TODO: get permissions from user */
     status->code = JBW_COMMUNICATION_ERROR;
     status->message = "Failed to initialize a simulation server.";
     return nullptr;

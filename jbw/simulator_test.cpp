@@ -329,6 +329,7 @@ bool test_multithreaded(const simulator_config& config)
 		clients[i] = std::thread([&,entry]() {
 			run_agent(sim, entry.key, *entry.value, move_count, simulation_running);
 		});
+		i++;
 	}
 
 	timer stopwatch;
@@ -353,8 +354,15 @@ bool test_multithreaded(const simulator_config& config)
 }
 
 struct client_data {
+	template<typename T>
+	struct fixed_array {
+		const T* data;
+		size_t length;
+	};
+
 	uint64_t client_id;
 	const array<array<patch_state>>* map;
+	fixed_array<uint64_t> agent_ids;
 	bool waiting_for_server;
 	std::mutex lock;
 	std::condition_variable condition;
@@ -431,6 +439,17 @@ void on_get_map(
 	std::unique_lock<std::mutex> lck(c.data.lock);
 	c.data.waiting_for_server = false;
 	c.data.map = map;
+	c.data.condition.notify_one();
+}
+
+void on_get_agent_ids(
+		client<client_data>& c, status response,
+		const uint64_t* agent_ids, size_t count)
+{
+	std::unique_lock<std::mutex> lck(c.data.lock);
+	c.data.waiting_for_server = false;
+	c.data.agent_ids.data = agent_ids;
+	c.data.agent_ids.length = count;
 	c.data.condition.notify_one();
 }
 
@@ -549,7 +568,7 @@ void cleanup_mpi(client<client_data>* clients,
 bool test_mpi(const simulator_config& config)
 {
 	simulator<empty_data> sim(config, empty_data());
-	if (!init_server(server, sim, 54353, 16, 4)) {
+	if (!init_server(server, sim, 54353, 16, 4, ~0)) {
 		fprintf(out, "ERROR: init_server returned false.\n");
 		return false;
 	}
