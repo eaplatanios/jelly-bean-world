@@ -90,7 +90,7 @@ an example with more types of items as well as a visualization using the
 It is straightforward to create the simulator in *server mode*, where other
 clients can connect to it:
 ```python
-sim = jbw.Simulator(sim_config=config, is_server=True)
+sim = jbw.Simulator(sim_config=config, is_server=True, default_client_permissions=jbw.GRANT_ALL_PERMISSIONS)
 ```
 
 To connect to existing server (i.e. create the simulator in *client mode*), for
@@ -272,14 +272,14 @@ To setup an MPI server for a simulator `sim`, the `init_server` function in
 ```c++
   /* NOTE: this blocks during the lifetime of the server */
   sync_server new_server;
-  if (!init_server(new_server, sim, 54353, 256, 8)) { /* process error */ }
+  if (!init_server(new_server, sim, 54353, 256, 8, permissions::grant_all())) { /* process error */ }
 ```
 
 To set up an asynchronous MPI server (where `init_server` will not block), the
 `async_server` class in [core/jbw/mpi.h](core/jbw/mpi.h) is used:
 ```c++
   async_server new_server;
-  if (!init_server(new_server, sim, 54353, 256, 8)) { /* process error */ }
+  if (!init_server(new_server, sim, 54353, 256, 8, permissions::grant_all())) { /* process error */ }
 ```
 
 To connect to an existing server, for example at `localhost:54353`, we use the

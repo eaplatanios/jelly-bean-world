@@ -29,7 +29,7 @@ def on_step():
 
 # create new simulator server
 config = make_config()
-sim = jbw.Simulator(sim_config=config, is_server=True, on_step_callback=on_step)
+sim = jbw.Simulator(sim_config=config, is_server=True, on_step_callback=on_step, default_client_permissions=jbw.GRANT_ALL_PERMISSIONS)
 
 # add agents to simulator
 agents = []

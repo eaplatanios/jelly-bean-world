@@ -58,6 +58,15 @@ typedef enum ActionPolicy {
   ActionPolicyIgnored
 } ActionPolicy;
 
+typedef struct Permissions {
+  bool addAgent;
+  bool removeAgent;
+  bool removeClient;
+  bool setActive;
+  bool getMap;
+  bool getAgentIds;
+};
+
 typedef struct Position {
   int64_t x;
   int64_t y;
@@ -269,10 +278,20 @@ void* simulationServerStart(
   unsigned int port,
   unsigned int connectionQueueCapacity,
   unsigned int numWorkers,
+  Permissions perms,
   JBW_Status* status);
 
 void simulationServerStop(
   void* serverHandle);
+
+Permissions simulationGetPermissions(
+  void* serverHandle,
+  uint64_t clientId);
+
+void simulationSetPermissions(
+  void* serverHandle,
+  uint64_t clientId,
+  Permissions perms);
 
 SimulationNewClientInfo simulationClientConnect(
   const char* serverAddress,
@@ -286,7 +305,7 @@ SimulationClientInfo simulationClientReconnect(
   unsigned int serverPort,
   OnStepCallback onStepCallback,
   LostConnectionCallback lostConnectionCallback,
-  uint64_t clientIds,
+  uint64_t clientId,
   JBW_Status* status);
 
 void simulationClientStop(

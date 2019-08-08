@@ -1003,6 +1003,22 @@ static PyObject* simulator_delete(PyObject *self, PyObject *args) {
     return Py_None;
 }
 
+inline bool parse_permission(bool& permission,
+    PyObject* py_permissions, const char* permission_name)
+{
+    PyObject* py_permission = PyObject_GetAttrString(py_permissions, permission_name);
+    if (py_permission == Py_True) {
+        permission = true;
+        return true;
+    } else if (py_permission == Py_False) {
+        permission = false;
+        return true;
+    } else {
+        fprintf(stderr, "`default_client_permissions.%s` must be either True or False.\n", permission_name);
+        return false;
+    }
+}
+
 /**
  * Starts the simulator server.
  *
@@ -1012,6 +1028,8 @@ static PyObject* simulator_delete(PyObject *self, PyObject *args) {
  *                  - (int) Server port.
  *                  - (int) Maximum number of new simultaneous connections.
  *                  - (int) Number of threads to process server messages.
+ *                  - A permissions instance describing the default permissions
+ *                    of new clients that connect to this server.
  * \returns Handle to the simulator server.
  */
 static PyObject* simulator_start_server(PyObject *self, PyObject *args)
@@ -1020,15 +1038,25 @@ static PyObject* simulator_start_server(PyObject *self, PyObject *args)
     unsigned int port;
     unsigned int connection_queue_capacity;
     unsigned int num_workers;
-    if (!PyArg_ParseTuple(args, "OIII", &py_sim_handle, &port, &connection_queue_capacity, &num_workers)) {
+    PyObject* py_permissions;
+    if (!PyArg_ParseTuple(args, "OIIIO", &py_sim_handle, &port, &connection_queue_capacity, &num_workers, &py_permissions)) {
         fprintf(stderr, "Invalid argument types in the call to 'simulator_c.start_server'.\n");
         return NULL;
     }
 
+    permissions perms; bool success = true;
+    success &= parse_permission(perms.add_agent, py_permissions, "add_agent");
+    success &= parse_permission(perms.remove_agent, py_permissions, "remove_agent");
+    success &= parse_permission(perms.remove_client, py_permissions, "remove_client");
+    success &= parse_permission(perms.set_active, py_permissions, "set_active");
+    success &= parse_permission(perms.get_map, py_permissions, "get_map");
+    success &= parse_permission(perms.get_agent_ids, py_permissions, "get_agent_ids");
+    if (!success) return NULL;
+
     simulator<py_simulator_data>* sim_handle =
             (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
     async_server& server = sim_handle->get_data().server;
-    if (!init_server(server, *sim_handle, (uint16_t) port, connection_queue_capacity, num_workers, ~0)) { /* TODO: get permissions from user */
+    if (!init_server(server, *sim_handle, (uint16_t) port, connection_queue_capacity, num_workers, perms)) {
         PyErr_SetString(PyExc_RuntimeError, "Unable to initialize MPI server.");
         return NULL;
     }
@@ -1240,6 +1268,73 @@ static PyObject* simulator_remove_client(PyObject *self, PyObject *args)
 
     PyObject* py_result = (result ? Py_True : Py_False);
     Py_INCREF(py_result); return py_result;
+}
+
+/**
+ * Retrieves the Permissions of a given client.
+ *
+ * \param   self    Pointer to the Python object calling this method.
+ * \param   args    Arguments:
+ *                  - Handle to the native simulator server object as a PyLong.
+ *                  - (int) The ID of the client.
+ * \returns A tuple containing the boolean values of the permissions, parallel
+ *          to the fields in the `Permissions` class.
+ */
+static PyObject* simulator_get_permissions(PyObject *self, PyObject *args)
+{
+    PyObject* py_server_handle;
+    unsigned long long client_id;
+    if (!PyArg_ParseTuple(args, "OK", &py_server_handle, &client_id)) {
+        fprintf(stderr, "Invalid argument types in the call to 'simulator_c.get_permissions'.\n");
+        return NULL;
+    }
+
+    async_server* server = (async_server*) PyLong_AsVoidPtr(py_server_handle);
+    permissions perms = get_permissions(*server, client_id);
+    return Py_BuildValue("(OOOOOO)",
+            perms.add_agent ? Py_True : Py_False,
+            perms.remove_agent ? Py_True : Py_False,
+            perms.remove_client ? Py_True : Py_False,
+            perms.set_active ? Py_True : Py_False,
+            perms.get_map ? Py_True : Py_False,
+            perms.get_agent_ids ? Py_True : Py_False);
+}
+
+/**
+ * Sets the Permissions of a given client.
+ *
+ * \param   self    Pointer to the Python object calling this method.
+ * \param   args    Arguments:
+ *                  - Handle to the native simulator server object as a PyLong.
+ *                  - (int) The ID of the client.
+ *                  - A Permissions instance that describes the new permissions
+ *                    for this client.
+ * \returns A tuple containing the boolean values of the permissions, parallel
+ *          to the fields in the `Permissions` class.
+ */
+static PyObject* simulator_set_permissions(PyObject *self, PyObject *args)
+{
+    PyObject* py_server_handle;
+    unsigned long long client_id;
+    PyObject* py_permissions;
+    if (!PyArg_ParseTuple(args, "OKO", &py_server_handle, &client_id, &py_permissions)) {
+        fprintf(stderr, "Invalid argument types in the call to 'simulator_c.set_permissions'.\n");
+        return NULL;
+    }
+
+    permissions perms; bool success = true;
+    success &= parse_permission(perms.add_agent, py_permissions, "add_agent");
+    success &= parse_permission(perms.remove_agent, py_permissions, "remove_agent");
+    success &= parse_permission(perms.remove_client, py_permissions, "remove_client");
+    success &= parse_permission(perms.set_active, py_permissions, "set_active");
+    success &= parse_permission(perms.get_map, py_permissions, "get_map");
+    success &= parse_permission(perms.get_agent_ids, py_permissions, "get_agent_ids");
+    if (!success) return NULL;
+
+    async_server* server = (async_server*) PyLong_AsVoidPtr(py_server_handle);
+    set_permissions(*server, client_id, perms);
+    Py_INCREF(Py_None);
+    return Py_None;
 }
 
 /** 
@@ -1915,6 +2010,8 @@ static PyMethodDef SimulatorMethods[] = {
     {"reconnect_client",  jbw::simulator_reconnect_client, METH_VARARGS, "Reconnects an existing client to a server."},
     {"stop_client",  jbw::simulator_stop_client, METH_VARARGS, "Stops the simulator client but does not remove it from the server."},
     {"remove_client",  jbw::simulator_remove_client, METH_VARARGS, "Stops the simulator client and removes it from the server."},
+    {"get_permissions",  jbw::simulator_get_permissions, METH_VARARGS, "Retreives the Permissions of a given client."},
+    {"set_permissions",  jbw::simulator_set_permissions, METH_VARARGS, "Sets the Permissions of a given client."},
     {"add_agent",  jbw::simulator_add_agent, METH_VARARGS, "Adds an agent to the simulator and returns its ID."},
     {"remove_agent",  jbw::simulator_remove_agent, METH_VARARGS, "Removes an agent from the simulator."},
     {"move",  jbw::simulator_move, METH_VARARGS, "Attempts to move the agent in the simulation environment."},

@@ -17,6 +17,7 @@ from __future__ import absolute_import, division, print_function
 from enum import Enum
 from pydoc import locate
 from jbw import simulator_c
+from jbw.permissions import Permissions
 from .direction import Direction
 import os
 
@@ -116,6 +117,7 @@ class Simulator(object):
   def __init__(
       self, on_step_callback=None, sim_config=None,
       is_server=False, server_address=None, port=54353,
+      default_client_permissions=None,
       conn_queue_capacity=256, num_workers=8,
 	    on_lost_connection_callback=None, save_frequency=1000,
       save_filepath=None, load_filepath=None, load_time=-1):
@@ -156,6 +158,9 @@ class Simulator(object):
       server_address      (client mode) The address of the simulator server to
                           connect to.
       port                (server mode) The port of the simulator server.
+      default_client_permissions (server mode) The Permissions of new clients
+                          that connect to this server. This must not be None if
+                          is_server is True.
       conn_queue_capacity (server mode) The maximum number of simultaneous
                           connection attempts that the server will attempt to
                           process.
@@ -226,7 +231,7 @@ class Simulator(object):
         sim_config.diffusion_param, sim_config.deleted_item_lifetime, self._step_callback)
       if is_server:
         self._server_handle = simulator_c.start_server(
-          self._handle, port, conn_queue_capacity, num_workers)
+          self._handle, port, conn_queue_capacity, num_workers, default_client_permissions)
       self._time = 0
     elif server_address != None:
       if load_filepath != None:
@@ -255,7 +260,7 @@ class Simulator(object):
         (agent._position, agent._direction, agent._scent, agent._vision, agent._items) = (position, Direction(direction), scent, vision, items)
       if is_server:
         self._server_handle = simulator_c.start_server(
-          self._handle, port, conn_queue_capacity, num_workers)
+          self._handle, port, conn_queue_capacity, num_workers, default_client_permissions)
 
   def __del__(self):
     """Deletes this simulator and deallocates all
@@ -351,6 +356,20 @@ class Simulator(object):
     """Retrieves a list of the agents governed by this Simulator. This does not
     include the agents governed by other clients."""
     return list(self.agents.values())
+
+  def get_permissions(self, client_id):
+    """Retrieves the Permissions of a given client connected to this server."""
+    if self._server_handle == None:
+      raise RuntimeError("`get_permissions` requires that the Simulator be a server.")
+    perm = Permissions()
+    (perm.add_agent, perm.remove_agent, perm.remove_client, perm.set_active, perm.get_map, perm.get_agent_ids) = simulator_c.get_permissions(self._server_handle, client_id)
+    return perm
+
+  def set_permissions(self, client_id, permissions):
+    """Retrieves the Permissions of a given client connected to this server."""
+    if self._server_handle == None:
+      raise RuntimeError("`get_permissions` requires that the Simulator be a server.")
+    simulator_c.set_permissions(self._server_handle, client_id, permissions)
 
   def _step_callback(self, agent_states):
     """The callback invoked when the simulator has advanced time.

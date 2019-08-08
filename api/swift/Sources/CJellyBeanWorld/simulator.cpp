@@ -132,6 +132,30 @@ inline action_policy to_action_policy(ActionPolicy policy) {
 }
 
 
+inline Permissions to_Permissions(const permissions& src) {
+  Permissions perms;
+  perms.addAgent = src.add_agent;
+  perms.removeAgent = src.remove_agent;
+  perms.removeClient = src.remove_client;
+  perms.setActive = src.set_active;
+  perms.getMap = src.get_map;
+  perms.getAgentIds = src.get_agent_ids;
+  return perms;
+}
+
+
+inline permissions to_permissions(const Permissions& src) {
+  permissions perms;
+  perms.add_agent = src.addAgent;
+  perms.remove_agent = src.removeAgent;
+  perms.remove_client = src.removeClient;
+  perms.set_active = src.setActive;
+  perms.get_map = src.getMap;
+  perms.get_agent_ids = src.getAgentIds;
+  return perms;
+}
+
+
 inline void init(
   energy_function<intensity_function>& function,
   const IntensityFunction& src,
@@ -1722,11 +1746,12 @@ void* simulationServerStart(
   unsigned int port,
   unsigned int connectionQueueCapacity,
   unsigned int numWorkers,
+  Permissions perms,
   JBW_Status* status
 ) {
   simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
   async_server& server = sim_handle->get_data().server;
-  if (!init_server(server, *sim_handle, (uint16_t) port, connectionQueueCapacity, numWorkers, ~0)) { /* TODO: get permissions from user */
+  if (!init_server(server, *sim_handle, (uint16_t) port, connectionQueueCapacity, numWorkers, to_permissions(perms))) {
     status->code = JBW_COMMUNICATION_ERROR;
     status->message = "Failed to initialize a simulation server.";
     return nullptr;
@@ -1738,6 +1763,18 @@ void* simulationServerStart(
 void simulationServerStop(void* serverHandle) {
   async_server* server = (async_server*) serverHandle;
   stop_server(*server);
+}
+
+
+Permissions simulationGetPermissions(void* serverHandle, uint64_t clientId) {
+  async_server* server = (async_server*) serverHandle;
+  return to_Permissions(get_permissions(*server, clientId));
+}
+
+
+void simulationSetPermissions(void* serverHandle, uint64_t clientId, Permissions perms) {
+  async_server* server = (async_server*) serverHandle;
+  set_permissions(*server, clientId, to_permissions(perms));
 }
 
 

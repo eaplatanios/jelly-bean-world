@@ -112,17 +112,57 @@ inline bool init(client_info& info) {
 	return true;
 }
 
-constexpr uint64_t PERMISSION_ADD_AGENT = (1 << 0);
-constexpr uint64_t PERMISSION_REMOVE_AGENT = (1 << 1);
-constexpr uint64_t PERMISSION_REMOVE_CLIENT = (1 << 2);
-constexpr uint64_t PERMISSION_GET_MAP = (1 << 3);
-constexpr uint64_t PERMISSION_GET_AGENT_IDS = (1 << 4);
-constexpr uint64_t PERMISSION_SET_ACTIVE = (1 << 5);
+struct permissions {
+	bool add_agent;
+	bool remove_agent;
+	bool remove_client;
+	bool set_active;
+	bool get_map;
+	bool get_agent_ids;
+
+	permissions() { }
+	constexpr permissions(bool value) :
+		add_agent(value), remove_agent(value), remove_client(value),
+		set_active(value), get_map(value), get_agent_ids(value)
+	{ }
+
+	static inline void swap(permissions& first, permissions& second) {
+		core::swap(first.add_agent, second.add_agent);
+		core::swap(first.remove_agent, second.remove_agent);
+		core::swap(first.remove_client, second.remove_client);
+		core::swap(first.set_active, second.set_active);
+		core::swap(first.get_map, second.get_map);
+		core::swap(first.get_agent_ids, second.get_agent_ids);
+	}
+
+	static constexpr permissions grant_all() { return permissions(true); }
+	static constexpr permissions deny_all() { return permissions(false); }
+};
+
+template<typename Stream>
+bool read(permissions& perms, Stream& in) {
+	return read(perms.add_agent, in)
+		&& read(perms.remove_agent, in)
+		&& read(perms.remove_client, in)
+		&& read(perms.set_active, in)
+		&& read(perms.get_map, in)
+		&& read(perms.get_agent_ids, in);
+}
+
+template<typename Stream>
+bool write(const permissions& perms, Stream& out) {
+	return write(perms.add_agent, out)
+		&& write(perms.remove_agent, out)
+		&& write(perms.remove_client, out)
+		&& write(perms.set_active, out)
+		&& write(perms.get_map, out)
+		&& write(perms.get_agent_ids, out);
+}
 
 struct client_state {
 	std::mutex lock;
 	array<uint64_t> agent_ids;
-	uint64_t permissions;
+	permissions perms;
 
 	static inline void free(client_state& cstate) {
 		cstate.lock.~mutex();
@@ -130,8 +170,8 @@ struct client_state {
 	}
 };
 
-inline bool init(client_state& cstate, uint64_t permissions) {
-	cstate.permissions = permissions;
+inline bool init(client_state& cstate, const permissions& perms) {
+	cstate.perms = perms;
 	if (!array_init(cstate.agent_ids, 8)) return false;
 	new (&cstate.lock) std::mutex();
 	return true;
@@ -139,16 +179,15 @@ inline bool init(client_state& cstate, uint64_t permissions) {
 
 template<typename Stream>
 bool read(client_state& cstate, Stream& in) {
-	if (!read(cstate.permissions, in)
+	if (!read(cstate.perms, in)
 	 || !read(cstate.agent_ids, in)) return false;
 	new (&cstate.lock) std::mutex();
 	return true;
 }
 
-/* **NOTE:** this function assumes the variables in the simulator are not modified during writing. */
 template<typename Stream>
 bool write(const client_state& cstate, Stream& out) {
-	return write(cstate.permissions, out)
+	return write(cstate.perms, out)
 		&& write(cstate.agent_ids, out);
 }
 
@@ -158,10 +197,10 @@ bool write(const client_state& cstate, Stream& out) {
 struct server_state {
 	std::mutex client_states_lock;
 	hash_map<uint64_t, client_state*> client_states;
-	uint64_t default_client_permissions;
+	permissions default_client_permissions;
 	uint64_t client_id_counter;
 
-	server_state() : client_states(16), default_client_permissions(0), client_id_counter(1) { }
+	server_state() : client_states(16), client_id_counter(1) { default_client_permissions = { 0 }; }
 	~server_state() { free_helper(); }
 
 	static inline void swap(server_state& first, server_state& second) {
@@ -187,7 +226,7 @@ private:
 
 bool init(server_state& state) {
 	state.client_id_counter = 1;
-	state.default_client_permissions = 0;
+	state.default_client_permissions = { 0 };
 	new (&state.client_states_lock) std::mutex();
 	return hash_map_init(state.client_states, 16);
 }
@@ -326,23 +365,23 @@ inline bool init(async_server& new_server) {
 }
 
 template<typename ServerType>
-inline void grant_permission(ServerType& server,
-		uint64_t client_id, uint64_t permission)
+inline void set_permissions(ServerType& server,
+		uint64_t client_id, const permissions& perms)
 {
 	std::unique_lock<std::mutex> lock(server.state.client_states_lock);
-	client_state& cstate = server.state.client_states.get(client_id);
+	client_state& cstate = *server.state.client_states.get(client_id);
 	std::unique_lock<std::mutex> cstate_lock(cstate.lock);
-	cstate.permissions ^= permission;
+	cstate.perms = perms;
 }
 
 template<typename ServerType>
-inline void revoke_permission(ServerType& server,
-		uint64_t client_id, uint64_t permission)
+inline permissions get_permissions(
+		ServerType& server, uint64_t client_id)
 {
 	std::unique_lock<std::mutex> lock(server.state.client_states_lock);
-	client_state& cstate = server.state.client_states.get(client_id);
+	client_state& cstate = *server.state.client_states.get(client_id);
 	std::unique_lock<std::mutex> cstate_lock(cstate.lock);
-	cstate.permissions &= ~permission;
+	return cstate.perms;
 }
 
 /**
@@ -366,7 +405,7 @@ inline bool receive_add_agent(
 	status response;
 	client_state* cstate_ptr;
 	uint64_t new_agent_id = 0; agent_state* new_agent = nullptr;
-	if ((cstate.permissions & PERMISSION_ADD_AGENT) == 0) {
+	if (!cstate.perms.add_agent) {
 		/* the client has no permission for this operation */
 		cstate.lock.unlock();
 		response = status::PERMISSION_ERROR;
@@ -441,7 +480,7 @@ inline bool receive_remove_agent(
 		success = false;
 	} else {
 		unsigned int index = cstate.agent_ids.index_of(agent_id);
-		if ((cstate.permissions & PERMISSION_REMOVE_AGENT) == 0) {
+		if (!cstate.perms.remove_agent) {
 			/* the client has no permission for this operation */
 			cstate.lock.unlock();
 			response = status::PERMISSION_ERROR;
@@ -497,7 +536,7 @@ bool receive_remove_client(
 	bool contains; unsigned int bucket;
 	client_state& cstate = *state.client_states.get(client_id, contains, bucket);
 	cstate.lock.lock();
-	if ((cstate.permissions & PERMISSION_REMOVE_CLIENT) == 0) {
+	if (!cstate.perms.remove_client) {
 		/* the client has no permission for this operation */
 		return false;
 	}
@@ -666,7 +705,7 @@ inline bool receive_get_map(
 		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
-	} else if ((cstate.permissions & PERMISSION_GET_MAP) == 0) {
+	} else if (!cstate.perms.get_map) {
 		/* the client has no permission for this operation */
 		cstate.lock.unlock();
 		response = status::PERMISSION_ERROR;
@@ -710,7 +749,7 @@ inline bool receive_get_agent_ids(
 	status response;
 	array<uint64_t> agent_ids(32);
 	bool success = true;
-	if ((cstate.permissions & PERMISSION_GET_AGENT_IDS) == 0) {
+	if (!cstate.perms.get_agent_ids) {
 		cstate.lock.unlock();
 		/* the client has no permission for this operation */
 		response = status::PERMISSION_ERROR;
@@ -750,7 +789,7 @@ inline bool receive_set_active(
 		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
-	} else if ((cstate.permissions & PERMISSION_SET_ACTIVE) == 0) {
+	} else if (!cstate.perms.set_active) {
 		/* the client has no permission for this operation */
 		cstate.lock.unlock();
 		response = status::PERMISSION_ERROR;
@@ -1092,7 +1131,7 @@ inline bool send_step_response(
 template<typename SimulatorData>
 bool init_server(async_server& new_server, simulator<SimulatorData>& sim,
 		uint16_t server_port, unsigned int connection_queue_capacity,
-		unsigned int worker_count, uint64_t default_client_permissions)
+		unsigned int worker_count, const permissions& default_client_permissions)
 {
 	std::condition_variable cv; std::mutex lock;
 	auto dispatch = [&]() {

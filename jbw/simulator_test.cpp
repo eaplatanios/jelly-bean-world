@@ -545,10 +545,6 @@ void run_mpi_agent(uint64_t agent_id,
 		std::atomic_uint& move_count)
 {
 	while (c.client_running) {
-		if (rand() % 100 == 0 && agent_states.table.size > 4) {
-			if (send_remove_agent(c, agent_id)) break;
-		}
-
 		c.data.waiting_for_step = true;
 		if (mpi_try_move(c, agent_id, agent.agent_position, agent.direction_flag)) {
 			move_count++;
@@ -568,7 +564,7 @@ void cleanup_mpi(client<client_data>* clients,
 bool test_mpi(const simulator_config& config)
 {
 	simulator<empty_data> sim(config, empty_data());
-	if (!init_server(server, sim, 54353, 16, 4, ~0)) {
+	if (!init_server(server, sim, 54353, 16, 4, permissions::grant_all())) {
 		fprintf(out, "ERROR: init_server returned false.\n");
 		return false;
 	}
