@@ -2006,10 +2006,8 @@ static PyObject* simulator_agent_states(PyObject *self, PyObject *args) {
         PyObject* py_states = PyList_New(agent_count);
         if (py_states == NULL) {
             fprintf(stderr, "simulator_agent_states ERROR: PyList_New returned NULL.\n");
-            for (size_t i = 0; i < client_handle->data.response_data.agent_states.length; i++) {
-                client_handle->data.response_data.agent_states.states[i].lock.unlock();
+            for (size_t i = 0; i < client_handle->data.response_data.agent_states.length; i++)
                 free(client_handle->data.response_data.agent_states.states[i]);
-            }
             free(agent_ids);
             free(client_handle->data.response_data.agent_states.ids);
             free(client_handle->data.response_data.agent_states.states);
@@ -2025,7 +2023,6 @@ static PyObject* simulator_agent_states(PyObject *self, PyObject *args) {
                 PyList_SetItem(py_states, i, Py_None);
             } else {
                 PyList_SetItem(py_states, i, build_py_agent(client_handle->data.response_data.agent_states.states[next_index], config, agent_ids[i]));
-                client_handle->data.response_data.agent_states.states[next_index].lock.unlock();
                 free(client_handle->data.response_data.agent_states.states[next_index]);
                 next_index++;
             }

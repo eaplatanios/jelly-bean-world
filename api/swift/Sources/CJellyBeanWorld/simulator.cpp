@@ -1854,10 +1854,8 @@ const AgentSimulationState* simulatorAgentStates(
       max((size_t) 1, sizeof(AgentSimulationState) * numAgents));
     if (agent_simulation_states == nullptr) {
       fprintf(stderr, "simulatorAgentStates ERROR: Insufficient memory for `agent_simulation_states`.\n");
-      for (size_t i = 0; i < client_ptr->data.response_data.agent_states.length; i++) {
-        client_ptr->data.response_data.agent_states.states[i].lock.unlock();
+      for (size_t i = 0; i < client_ptr->data.response_data.agent_states.length; i++)
         free(client_ptr->data.response_data.agent_states.states[i]);
-      }
       free(client_ptr->data.response_data.agent_states.ids);
       free(client_ptr->data.response_data.agent_states.states);
       return nullptr;
@@ -1875,16 +1873,13 @@ const AgentSimulationState* simulatorAgentStates(
         // TODO: Propagate this to Swift.
         if (status->code != JBW_OK) {
           fprintf(stderr, "simulatorAgentStates ERROR: Insufficient memory for agent state.\n");
-          for (size_t j = i; j < numAgents; j++) {
-            client_ptr->data.response_data.agent_states.states[j].lock.unlock();
+          for (size_t j = i; j < numAgents; j++)
             free(client_ptr->data.response_data.agent_states.states[j]);
-          }
           free(client_ptr->data.response_data.agent_states.ids);
           free(client_ptr->data.response_data.agent_states.states);
           free(agent_simulation_states);
           return nullptr;
         }
-        client_ptr->data.response_data.agent_states.states[i].lock.unlock();
         free(client_ptr->data.response_data.agent_states.states[i]);
         next_index++;
       }
