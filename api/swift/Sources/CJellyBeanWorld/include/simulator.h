@@ -65,7 +65,7 @@ typedef struct Permissions {
   bool setActive;
   bool getMap;
   bool getAgentIds;
-};
+} Permissions;
 
 typedef struct Position {
   int64_t x;
