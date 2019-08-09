@@ -710,14 +710,14 @@ inline bool receive_get_map(
 	status response;
 	array<array<patch_state>> patches(32);
 	bool success = true;
-	if (!cstate.perms.get_map) {
-		/* the client has no permission for this operation */
-		cstate.lock.unlock();
-		response = status::PERMISSION_ERROR;
-	} else if (!read(bottom_left, in) || !read(top_right, in)) {
+	if (!read(bottom_left, in) || !read(top_right, in)) {
 		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
+	} else if (!cstate.perms.get_map) {
+		/* the client has no permission for this operation */
+		cstate.lock.unlock();
+		response = status::PERMISSION_ERROR;
 	} else {
 		cstate.lock.unlock();
 		response = sim.get_map(bottom_left, top_right, patches);
@@ -833,29 +833,31 @@ inline bool receive_get_agent_states(
 	agent_state** agent_states;
 	size_t agent_state_count;
 	bool success = true;
-	if (!cstate.perms.get_agent_states) {
-		/* the client has no permission for this operation */
-		cstate.lock.unlock();
-		response = status::PERMISSION_ERROR;
-	} else if (!read(agent_state_count, in)) {
+	if (!read(agent_state_count, in)) {
 		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		cstate.lock.unlock();
-
 		agent_ids = (uint64_t*) malloc(max((size_t) 1, sizeof(uint64_t) * agent_state_count));
 		agent_states = (agent_state**) malloc(max((size_t) 1, sizeof(agent_state*) * agent_state_count));
 		if (agent_ids == nullptr || agent_states == nullptr) {
+			cstate.lock.unlock();
 			if (agent_ids != nullptr) free(agent_ids);
 			response = status::SERVER_OUT_OF_MEMORY;
 			success = false;
 		} else if (!read(agent_ids, in, agent_state_count)) {
+			cstate.lock.unlock();
 			free(agent_ids);
 			free(agent_states);
 			response = status::SERVER_PARSE_MESSAGE_ERROR;
 			success = false;
+		} else if (!cstate.perms.get_agent_states) {
+			/* the client has no permission for this operation */
+			cstate.lock.unlock();
+			response = status::PERMISSION_ERROR;
 		} else {
+			cstate.lock.unlock();
+
 			/* make sure the agent IDs are valid */
 			response = status::OK;
 			for (size_t i = 0; i < agent_state_count; i++) {
