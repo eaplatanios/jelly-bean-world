@@ -18,6 +18,49 @@ inline void on_framebuffer_resize(GLFWwindow* window, int width, int height) {
 }
 
 template<typename SimulatorData>
+inline void cursor_position_callback(GLFWwindow* window, double x, double y)
+{
+	visualizer<SimulatorData>* v = (visualizer<SimulatorData>*) glfwGetWindowUserPointer(window);
+	if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_RELEASE) {
+		v->left_mouse_button_pressed = false;
+		return;
+	}
+
+	if (!v->left_mouse_button_pressed) {
+		v->left_mouse_button_pressed = true;
+	} else {
+		v->camera_position[0] += (v->last_cursor_x - x) / v->pixel_density;
+		v->camera_position[1] -= (v->last_cursor_y - y) / v->pixel_density;
+	}
+
+	v->last_cursor_x = x;
+	v->last_cursor_y = y;
+}
+
+template<typename SimulatorData>
+inline void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
+{
+	visualizer<SimulatorData>* v = (visualizer<SimulatorData>*) glfwGetWindowUserPointer(window);
+
+	if (action == GLFW_PRESS) {
+		if (key == GLFW_KEY_MINUS) {
+			if (v->target_pixel_density / 1.3 <= 1.0f) {
+				/* TODO: handle the case where the pixel density is smaller than 1 (we segfault currently since the texture for the scent visualization could become too small) */
+				fprintf(stderr, "Zoom beyond the point where the pixel density is smaller than 1 is unsupported.\n");
+			} else {
+				v->zoom_animation_start_time = milliseconds();
+				v->zoom_start_pixel_density = v->pixel_density;
+				v->target_pixel_density /= 1.3;
+			}
+		} else if (key == GLFW_KEY_EQUAL) {
+			v->zoom_animation_start_time = milliseconds();
+			v->zoom_start_pixel_density = v->pixel_density;
+			v->target_pixel_density *= 1.3;
+		}
+	}
+}
+
+template<typename SimulatorData>
 class visualizer
 {
 	struct vertex {
@@ -38,10 +81,18 @@ class visualizer
 		float projection[16];
 	};
 
+	struct uniform_buffer_data {
+		model_view_matrix mvp;
+		float pixel_density;
+		float patch_size;
+	};
+
 	GLFWwindow* window;
 	bool resized;
 	uint32_t width;
 	uint32_t height;
+	uint32_t texture_width;
+	uint32_t texture_height;
 	float camera_position[2];
 	float pixel_density;
 
@@ -56,12 +107,19 @@ class visualizer
 	descriptor_pool pool;
 	descriptor_set set;
 	uniform_buffer ub;
-	dynamic_texture_image texture;
+	dynamic_texture_image scent_map_texture;
 	sampler tex_sampler;
 	vertex_buffer scent_quad_buffer;
-	model_view_matrix transform;
+	uniform_buffer_data uniform_data;
 	binding_description binding;
 	attribute_descriptions<2> attributes;
+
+	bool left_mouse_button_pressed;
+	double last_cursor_x, last_cursor_y;
+
+	float zoom_start_pixel_density;
+	float target_pixel_density;
+	unsigned long long zoom_animation_start_time;
 
 public:
 	visualizer(simulator<SimulatorData>& sim, uint32_t window_width, uint32_t window_height) :
@@ -70,8 +128,11 @@ public:
 		camera_position[0] = 0.0f;
 		camera_position[1] = 0.0f;
 		pixel_density = 6.0f;
-		transform = { 0 };
-		make_identity(transform.model);
+		target_pixel_density = pixel_density;
+		zoom_start_pixel_density = pixel_density;
+		zoom_animation_start_time = milliseconds();
+		uniform_data = { 0 };
+		make_identity(uniform_data.mvp.model);
 
 		size_t vertex_shader_size = 0;
 		char* vertex_shader_src = read_file<true>("vert.spv", vertex_shader_size);
@@ -90,6 +151,8 @@ public:
 		window = glfwCreateWindow(window_width, window_height, "Renderer Test", nullptr, nullptr);
 		glfwSetWindowUserPointer(window, this);
 		glfwSetFramebufferSizeCallback(window, on_framebuffer_resize<SimulatorData>);
+		glfwSetCursorPosCallback(window, cursor_position_callback<SimulatorData>);
+		glfwSetKeyCallback(window, key_callback<SimulatorData>);
 
 		uint32_t extension_count = 0;
 		const char** required_extensions = glfwGetRequiredInstanceExtensions(&extension_count);
@@ -126,7 +189,7 @@ public:
 		uint32_t binding_indices[] = { 0, 1 };
 		descriptor_type types[] = { descriptor_type::UNIFORM_BUFFER, descriptor_type::COMBINED_IMAGE_SAMPLER };
 		uint32_t descriptor_counts[] = { 1, 1 };
-		shader_stage visibilities[] = { shader_stage::VERTEX, shader_stage::FRAGMENT };
+		shader_stage visibilities[] = { shader_stage::ALL, shader_stage::FRAGMENT };
 		if (!renderer.create_descriptor_set_layout(layout, binding_indices, types, descriptor_counts, visibilities, 2)) {
 			renderer.delete_vertex_buffer(scent_quad_buffer);
 			renderer.delete_shader(vertex_shader);
@@ -135,21 +198,23 @@ public:
 			throw new std::runtime_error("visualizer ERROR: Failed to create descriptor_set_layout.");
 		}
 
-		size_t image_size = sizeof(pixel) * window_width * window_height;
-		if (!renderer.create_dynamic_texture_image(texture, image_size, window_width, window_height)) {
+		texture_width = window_width + 2 * sim.get_config().patch_size;
+		texture_height = window_height + 2 * sim.get_config().patch_size;
+		size_t image_size = sizeof(pixel) * texture_width * texture_height;
+		if (!renderer.create_dynamic_texture_image(scent_map_texture, image_size, texture_width, texture_height, image_format::R8G8B8A8_UNORM)) {
 			renderer.delete_descriptor_set_layout(layout);
 			renderer.delete_vertex_buffer(scent_quad_buffer);
 			renderer.delete_shader(vertex_shader);
 			renderer.delete_shader(fragment_shader);
 			glfwDestroyWindow(window); glfwTerminate();
-			throw new std::runtime_error("visualizer ERROR: Failed to create texture.");
+			throw new std::runtime_error("visualizer ERROR: Failed to create `scent_map_texture`.");
 		}
 
 		if (!renderer.create_sampler(tex_sampler, filter::NEAREST, filter::NEAREST,
 				sampler_address_mode::CLAMP_TO_EDGE, sampler_address_mode::CLAMP_TO_EDGE,
 				sampler_address_mode::CLAMP_TO_EDGE, false, 1.0f))
 		{
-			renderer.delete_dynamic_texture_image(texture);
+			renderer.delete_dynamic_texture_image(scent_map_texture);
 			renderer.delete_descriptor_set_layout(layout);
 			renderer.delete_vertex_buffer(scent_quad_buffer);
 			renderer.delete_shader(vertex_shader);
@@ -160,7 +225,7 @@ public:
 
 		if (!setup_renderer()) {
 			renderer.delete_sampler(tex_sampler);
-			renderer.delete_dynamic_texture_image(texture);
+			renderer.delete_dynamic_texture_image(scent_map_texture);
 			renderer.delete_descriptor_set_layout(layout);
 			renderer.delete_vertex_buffer(scent_quad_buffer);
 			renderer.delete_shader(vertex_shader);
@@ -173,7 +238,7 @@ public:
 	~visualizer() {
 		renderer.wait_until_idle();
 		renderer.delete_sampler(tex_sampler);
-		renderer.delete_dynamic_texture_image(texture);
+		renderer.delete_dynamic_texture_image(scent_map_texture);
 		renderer.delete_descriptor_set_layout(layout);
 		renderer.delete_vertex_buffer(scent_quad_buffer);
 		cleanup_renderer();
@@ -191,23 +256,27 @@ public:
 	{
 		glfwPollEvents();
 
+		/* compute `pixel_density` according to the zoom animation */
+		float animation_t = max(0.0f, min(1.0f, (milliseconds() - zoom_animation_start_time) / 300.0f));
+		float easing = animation_t * (2 - animation_t);
+		pixel_density = easing * target_pixel_density + (1.0f - easing) * zoom_start_pixel_density;
+
 		float left = camera_position[0] - 0.5f * (width / pixel_density);
 		float right = camera_position[0] + 0.5f * (width / pixel_density);
 		float bottom = camera_position[1] - 0.5f * (height / pixel_density);
 		float top = camera_position[1] + 0.5f * (height / pixel_density);
 
 		array<array<patch_state>> patches(64);
-		if (!sim.get_map({(int64_t) left, (int64_t) bottom}, {(int64_t) ceil(right), (int64_t) ceil(top)}, patches)) {
+		if (sim.get_map({(int64_t) left, (int64_t) bottom}, {(int64_t) ceil(right), (int64_t) ceil(top)}, patches) != status::OK) {
 			fprintf(stderr, "visualizer.draw_frame ERROR: Unable to get map from simulator.\n");
 			return false;
 		}
 
-		pixel* texture_data = (pixel*) texture.mapped_memory;
+		pixel* scent_map_texture_data = (pixel*) scent_map_texture.mapped_memory;
 		unsigned int patch_size = sim.get_config().patch_size;
 		unsigned int scent_dimension = sim.get_config().scent_dimension;
 		if (patches.length > 0) {
 			/* find position of the bottom-left corner and the top-right corner */
-			/* TODO: do we need the top-right corner? */
 			position bottom_left_corner(0, 0), top_right_corner(0, 0);
 			bottom_left_corner.y = patches[0][0].patch_position.y;
 			top_right_corner.y = patches.last().last().patch_position.y;
@@ -216,19 +285,25 @@ public:
 				top_right_corner.x = max(top_right_corner.x, row.last().patch_position.x);
 			}
 
-			unsigned int texture_width = (unsigned int) (top_right_corner.x - bottom_left_corner.x) * patch_size;
-			unsigned int texture_height = (unsigned int) (top_right_corner.y - bottom_left_corner.y) * patch_size;
+			unsigned int texture_width_cells = (unsigned int) (top_right_corner.x - bottom_left_corner.x + 1) * patch_size;
+			unsigned int texture_height_cells = (unsigned int) (top_right_corner.y - bottom_left_corner.y + 1) * patch_size;
 
 			unsigned int y_index = 0;
 			for (int64_t y = bottom_left_corner.y; y <= top_right_corner.y; y++) {
-				if (y != patches[y_index][0].patch_position.y) {
+				if (y_index == patches.length || y != patches[y_index][0].patch_position.y) {
 					/* fill the patches in this row with empty pixels */
-					const int64_t offset_y = (y - bottom_left_corner.y) * patch_size;
+					const int64_t patch_offset_y = y - bottom_left_corner.y;
+					for (unsigned int a = 0; a <= top_right_corner.x - bottom_left_corner.x; a++) {
+						pixel& p = scent_map_texture_data[patch_offset_y * texture_width + a];
+						p.a = 255;
+					}
+
+					const int64_t offset_y = patch_offset_y * patch_size;
 					for (unsigned int b = 0; b < patch_size; b++) {
-						for (unsigned int a = 0; a < texture_width; a++) {
+						for (unsigned int a = 0; a < texture_width_cells; a++) {
 							position texture_position = position(a, b + offset_y);
-							pixel& p = texture_data[texture_position.y * width + texture_position.x];
-							p.r = 255; p.g = 255; p.b = 255; p.a = 255;
+							pixel& p = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
+							p.r = 255; p.g = 255; p.b = 255;
 						}
 					}
 					continue;
@@ -237,38 +312,49 @@ public:
 
 				unsigned int x_index = 0;
 				for (int64_t x = bottom_left_corner.x; x <= top_right_corner.x; x++) {
-					const position offset = (position(x, y) - bottom_left_corner) * patch_size;
-					if (x != row[x_index].patch_position.x) {
+					const position patch_offset = position(x, y) - bottom_left_corner;
+					const position offset = patch_offset * patch_size;
+					if (x_index == row.length || x != row[x_index].patch_position.x) {
 						/* fill this patch with empty pixels */
+						pixel& p = scent_map_texture_data[patch_offset.y * texture_width + patch_offset.x];
+						p.a = 255;
+
 						for (unsigned int b = 0; b < patch_size; b++) {
 							for (unsigned int a = 0; a < patch_size; a++) {
 								position texture_position = position(a, b) + offset;
-								pixel& p = texture_data[texture_position.y * width + texture_position.x];
-								p.r = 255; p.g = 255; p.b = 255; p.a = 255;
+								pixel& p = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
+								p.r = 255; p.g = 255; p.b = 255;
 							}
 						}
 						continue;
 					}
 					const patch_state& patch = row[x_index++];
 
+					pixel& p = scent_map_texture_data[patch_offset.y * texture_width + patch_offset.x];
+					if (patch.fixed) {
+						p.a = 178;
+					} else {
+						p.a = 229;
+					}
+
 					for (unsigned int b = 0; b < patch_size; b++) {
 						for (unsigned int a = 0; a < patch_size; a++) {
 							position texture_position = position(a, b) + offset;
-							pixel& current_pixel = texture_data[texture_position.y * width + texture_position.x];
+							pixel& current_pixel = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
 
 							float* cell_scent = patch.scent + ((a*patch_size + b)*scent_dimension);
-							current_pixel = scent_to_color(cell_scent);
+							scent_to_color(cell_scent, current_pixel);
 						}
 					}
 				}
 			}
-			renderer.transfer_dynamic_texture_image(texture);
+			renderer.transfer_dynamic_texture_image(scent_map_texture, image_format::R8G8B8A8_UNORM);
 
 			vertex vertices[] = {
-				{{(float) bottom_left_corner.x * patch_size, (float) bottom_left_corner.y * patch_size}, {(float) texture_width / width, 0.0f}},
-				{{(float) bottom_left_corner.x * patch_size, (float) top_right_corner.y * patch_size}, {(float) texture_width / width, (float) texture_height / height}},
-				{{(float) top_right_corner.x * patch_size, (float) bottom_left_corner.x * patch_size}, {0.0f, 0.0f}},
-				{{(float) top_right_corner.x * patch_size, (float) top_right_corner.y * patch_size}, {0.0f, (float) texture_height / height}}
+				{{(float) bottom_left_corner.x * patch_size, (float) bottom_left_corner.y * patch_size}, {0.0f, 0.0f}},
+				{{(float) bottom_left_corner.x * patch_size, (float) (top_right_corner.y + 1) * patch_size}, {0.0f, (float) texture_height_cells / texture_height}},
+				{{(float) (top_right_corner.x + 1) * patch_size, (float) bottom_left_corner.y * patch_size}, {(float) texture_width_cells / texture_width, 0.0f}},
+				{{(float) (top_right_corner.x + 1) * patch_size, (float) (top_right_corner.y + 1) * patch_size}, {(float) texture_width_cells / texture_width, (float) texture_height_cells / texture_height}}
 			};
 			renderer.fill_vertex_buffer(scent_quad_buffer, vertices, sizeof(vertex) * 4);
 
@@ -291,13 +377,25 @@ public:
 		/* construct the model view matrix */
 		float up[] = { 0.0f, 1.0f, 0.0f };
 		float forward[] = { 0.0f, 0.0f, -1.0f };
-		float camera_position[] = { 0.0f, 0.0f, 2.0f };
-		make_identity(transform.model);
-		make_view_matrix(transform.view, forward, up, camera_position);
-		make_orthographic_projection(transform.projection, left, right, bottom, top, -100.0f, 100.0f);
+		float camera_pos[] = { camera_position[0], camera_position[1], 2.0f };
+		make_identity(uniform_data.mvp.model);
+		make_view_matrix(uniform_data.mvp.view, forward, up, camera_pos);
+		make_orthographic_projection(uniform_data.mvp.projection,
+				-0.5f * (width / pixel_density), 0.5f * (width / pixel_density),
+				-0.5f * (height / pixel_density), 0.5f * (height / pixel_density), -100.0f, 100.0f);
+		uniform_data.pixel_density = pixel_density;
+		uniform_data.patch_size = patch_size;
 
 		auto reset_command_buffers = [&]() {
 			cleanup_renderer();
+			renderer.delete_dynamic_texture_image(scent_map_texture);
+
+			texture_width = width + 2 * sim.get_config().patch_size;
+			texture_height = height + 2 * sim.get_config().patch_size;
+			size_t image_size = sizeof(pixel) * texture_width * texture_height;
+			if (!renderer.create_dynamic_texture_image(scent_map_texture, image_size, texture_width, texture_height, image_format::R8G8B8A8_UNORM))
+				return false;
+
 			return setup_renderer();
 		};
 
@@ -310,8 +408,8 @@ public:
 			height = out_height;
 		};
 
-		void* transform_data = (void*) &transform;
-		return renderer.draw_frame(cb, resized, reset_command_buffers, get_window_dimensions, &ub, &transform_data, 1);
+		void* pv_uniform_data = (void*) &uniform_data;
+		return renderer.draw_frame(cb, resized, reset_command_buffers, get_window_dimensions, &ub, &pv_uniform_data, 1);
 	}
 
 private:
@@ -319,15 +417,16 @@ private:
 		float clear_color[] = { 1.0f, 1.0f, 1.0f, 1.0f };
 		vertex_buffer vertex_buffers[] = { scent_quad_buffer };
 		uint64_t offsets[] = { 0 };
+		dynamic_texture_image dynamic_textures[] = { scent_map_texture };
+		uint32_t texture_bindings[] = { 1 };
 		uint32_t ub_binding = 0;
-		uint32_t texture_binding = 1;
 		descriptor_type pool_types[] = { descriptor_type::UNIFORM_BUFFER, descriptor_type::COMBINED_IMAGE_SAMPLER };
 		if (!renderer.create_graphics_pipeline(pipeline, vertex_shader, "main", fragment_shader, "main", primitive_topology::TRIANGLE_STRIP, binding, attributes, &layout, 1)) {
 			return false;
 		} else if (!renderer.create_frame_buffer(fb, pipeline)) {
 			renderer.delete_graphics_pipeline(pipeline);
 			return false;
-		} else if (!renderer.create_uniform_buffer(ub, sizeof(model_view_matrix))) {
+		} else if (!renderer.create_uniform_buffer(ub, sizeof(uniform_buffer_data))) {
 			renderer.delete_frame_buffer(fb);
 			renderer.delete_graphics_pipeline(pipeline);
 			return false;
@@ -336,7 +435,7 @@ private:
 			renderer.delete_frame_buffer(fb);
 			renderer.delete_graphics_pipeline(pipeline);
 			return false;
-		} else if (!renderer.create_descriptor_set(set, &ub, &ub_binding, 1, nullptr, nullptr, 0, &texture, &texture_binding, 1, tex_sampler, layout, pool)
+		} else if (!renderer.create_descriptor_set(set, &ub, &ub_binding, 1, nullptr, nullptr, 0, dynamic_textures, texture_bindings, 1, &tex_sampler, layout, pool)
 				|| !renderer.create_command_buffer(cb))
 		{
 			renderer.delete_uniform_buffer(ub);
@@ -355,22 +454,20 @@ private:
 	{
 		renderer.delete_command_buffer(cb);
 		renderer.delete_uniform_buffer(ub);
+		renderer.delete_descriptor_set(set);
 		renderer.delete_descriptor_pool(pool);
 		renderer.delete_frame_buffer(fb);
 		renderer.delete_graphics_pipeline(pipeline);
 	}
 
-	static inline pixel scent_to_color(const float* cell_scent) {
+	static inline void scent_to_color(const float* cell_scent, pixel& out) {
 		float x = max(0.0f, min(1.0f, log(pow(cell_scent[0], 0.4f) + 1.0f) / 0.9f));
 		float y = max(0.0f, min(1.0f, log(pow(cell_scent[1], 0.4f) + 1.0f) / 0.9f));
 		float z = max(0.0f, min(1.0f, log(pow(cell_scent[2], 0.4f) + 1.0f) / 0.9f));
 
-		pixel out;
 		out.r = 255 - (uint8_t) (255 * ((y + z) / 2));
 		out.g = 255 - (uint8_t) (255 * ((x + z) / 2));
 		out.b = 255 - (uint8_t) (255 * ((x + y) / 2));
-		out.a = 255;
-		return out;
 	}
 
 	static inline void cross(float (&out)[3],
@@ -418,6 +515,8 @@ private:
 	}
 
 	template<typename A> friend void on_framebuffer_resize(GLFWwindow*, int, int);
+	template<typename A> friend void cursor_position_callback(GLFWwindow*, double, double);
+	template<typename A> friend void key_callback(GLFWwindow*, int, int, int, int);
 };
 
 } /* namespace jbw */

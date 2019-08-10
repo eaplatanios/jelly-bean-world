@@ -1,4 +1,6 @@
 #include "visualizer.h"
+#include <thread>
+#include <condition_variable>
 
 using namespace jbw;
 
@@ -132,39 +134,69 @@ int main(int argc, const char** argv)
 	set_interaction_args(config.item_types.data, 3, 3, cross_interaction_fn, {10.0f, 15.0f, 20.0f, -200.0f, -20.0f, 1.0f});
 
 	simulator<empty_data>& sim = *((simulator<empty_data>*) alloca(sizeof(simulator<empty_data>)));
-	if (!init(sim, config, empty_data())) {
+	if (init(sim, config, empty_data()) != status::OK) {
 		fprintf(stderr, "ERROR: Unable to initialize simulator.\n");
 		return false;
 	}
 
-	pair<uint64_t, agent_state*> agent = sim.add_agent();
-	if (agent.value == NULL) {
+	uint64_t agent_id; agent_state* agent;
+	if (sim.add_agent(agent_id, agent) != status::OK) {
 		fprintf(stderr, "ERROR: Unable to add new agent.\n");
 		return EXIT_FAILURE;
 	}
 
-	timer stopwatch;
 	unsigned int move_count = 0;
-	unsigned long long elapsed = 0;
-	visualizer<empty_data> visualizer(sim, 800, 800);
-	for (unsigned int t = 0; t < 1000000; t++)
-	{
-		if (!visualizer.is_window_closed())
-			visualizer.draw_frame();
+	bool simulation_running = true;
+	std::mutex lock;
+	std::condition_variable cv;
+	unsigned int max_steps_per_frame = 1;
+	unsigned int steps_in_current_frame = 0;
+	std::thread simulation_worker = std::thread([&]() {
+		for (unsigned int t = 0; simulation_running && t < 1000000; t++)
+		{
+			if (sim.move(agent_id, (rand() % 2 == 0) ? direction::UP : direction::RIGHT, 1) != status::OK) {
+				fprintf(stderr, "ERROR: Unable to move agent.\n");
+				break;
+			}
+			move_count++;
+			steps_in_current_frame++;
 
-		if (!sim.move(agent.key, direction::UP, 1)) {
-			fprintf(stderr, "ERROR: Unable to move agent.\n");
-			break;
+			std::unique_lock<std::mutex> lck(lock);
+			while (steps_in_current_frame == max_steps_per_frame) cv.wait(lck);
 		}
-		move_count++;
+	});
+
+	timer stopwatch;
+	unsigned long long elapsed = 0;
+	unsigned int frame_count = 0;
+	visualizer<empty_data> visualizer(sim, 800, 800);
+	while (simulation_running) {
+		if (visualizer.is_window_closed())
+			break;
+
+		visualizer.draw_frame();
+		frame_count++;
+
+		lock.lock();
+		steps_in_current_frame = 0;
+		cv.notify_one();
+		lock.unlock();
+
 		if (stopwatch.milliseconds() >= 1000) {
 			elapsed += stopwatch.milliseconds();
-			printf("Completed %u moves: %lf simulation steps per second.\n", move_count, ((double) sim.time / elapsed) * 1000);
+			printf("Completed %u moves: %lf simulation steps per second. (%lf fps)\n", move_count, ((double) sim.time / elapsed) * 1000, ((double) frame_count / elapsed) * 1000);
 			stopwatch.start();
 		}
 	}
 	elapsed += stopwatch.milliseconds();
-	printf("Completed %u moves: %lf simulation steps per second.\n", move_count, ((double) sim.time / elapsed) * 1000);
+	printf("Completed %u moves: %lf simulation steps per second. (%lf fps)\n", move_count, ((double) sim.time / elapsed) * 1000, ((double) frame_count / elapsed) * 1000);
+	simulation_running = false;
+	cv.notify_one();
+	if (simulation_worker.joinable()) {
+		try {
+			simulation_worker.join();
+		} catch (...) { }
+	}
 	free(sim);
 
 	return EXIT_SUCCESS;

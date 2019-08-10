@@ -63,7 +63,8 @@ enum class descriptor_type {
 enum class shader_stage : uint32_t {
 	VERTEX = VK_SHADER_STAGE_VERTEX_BIT,
 	FRAGMENT = VK_SHADER_STAGE_FRAGMENT_BIT,
-	GEOMETRY = VK_SHADER_STAGE_GEOMETRY_BIT
+	GEOMETRY = VK_SHADER_STAGE_GEOMETRY_BIT,
+	ALL = VK_SHADER_STAGE_ALL
 };
 
 enum class filter {
@@ -77,6 +78,11 @@ enum class sampler_address_mode {
 	CLAMP_TO_EDGE = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
 	MIRROR_CLAMP_TO_EDGE = VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE,
 	CLAMP_TO_BORDER = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER
+};
+
+enum class image_format {
+	R8_UNORM = VK_FORMAT_R8_UNORM,
+	R8G8B8A8_UNORM = VK_FORMAT_R8G8B8A8_UNORM
 };
 
 class shader {
@@ -710,7 +716,7 @@ public:
 			uint32_t* uniform_buffer_bindings, uint32_t uniform_buffer_count,
 			const texture_image* texture_images, uint32_t* texture_image_bindings, uint32_t texture_image_count,
 			const dynamic_texture_image* dyn_texture_images, uint32_t* dyn_texture_image_bindings, uint32_t dyn_texture_image_count,
-			const sampler& tex_sampler, const descriptor_set_layout& layout, const descriptor_pool& pool)
+			const sampler* tex_sampler, const descriptor_set_layout& layout, const descriptor_pool& pool)
 	{
 		ds.sets = (VkDescriptorSet*) malloc(sizeof(VkDescriptorSet) * swap_chain_image_count);
 		if (ds.sets == nullptr) {
@@ -763,7 +769,7 @@ public:
 			for (size_t j = 0; j < texture_image_count; j++) {
 				image_info_array[j].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 				image_info_array[j].imageView = texture_images[j].view;
-				image_info_array[j].sampler = tex_sampler.vk_sampler;
+				image_info_array[j].sampler = tex_sampler->vk_sampler;
 
 				descriptorWrites[uniform_buffer_count + j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 				descriptorWrites[uniform_buffer_count + j].dstSet = ds.sets[i];
@@ -776,7 +782,7 @@ public:
 			for (size_t j = 0; j < dyn_texture_image_count; j++) {
 				image_info_array[texture_image_count + j].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 				image_info_array[texture_image_count + j].imageView = dyn_texture_images[j].view;
-				image_info_array[texture_image_count + j].sampler = tex_sampler.vk_sampler;
+				image_info_array[texture_image_count + j].sampler = tex_sampler->vk_sampler;
 
 				descriptorWrites[uniform_buffer_count + texture_image_count + j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 				descriptorWrites[uniform_buffer_count + texture_image_count + j].dstSet = ds.sets[i];
@@ -795,9 +801,14 @@ public:
 		return true;
 	}
 
+	inline void delete_descriptor_set(descriptor_set& ds) {
+		free(ds.sets);
+	}
+
 	inline bool create_texture_image(texture_image& image,
 			const void* pixels, uint64_t image_size_in_bytes,
-			uint32_t image_width, uint32_t image_height)
+			uint32_t image_width, uint32_t image_height,
+			image_format format)
 	{
 		VkBuffer stagingBuffer;
 		VkDeviceMemory stagingBufferMemory;
@@ -813,7 +824,7 @@ public:
 		memcpy(data, pixels, (size_t) image_size_in_bytes);
 		vkUnmapMemory(logical_device, stagingBufferMemory);
 
-		if (!create_image(image_width, image_height, VK_FORMAT_R8G8B8A8_UNORM,
+		if (!create_image(image_width, image_height, (VkFormat) format,
 				VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
 				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, image.image, image.memory))
 		{
@@ -822,14 +833,14 @@ public:
 			return false;
 		}
 
-		transition_image_layout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(image.image, VK_FORMAT_R8G8B8A8_UNORM);
+		transition_image_layout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(image.image, (VkFormat) format);
 		copy_buffer_to_image(stagingBuffer, image.image, image_width, image_height);
-		transition_image_layout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(image.image, VK_FORMAT_R8G8B8A8_UNORM);
+		transition_image_layout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(image.image, (VkFormat) format);
 
 		vkDestroyBuffer(logical_device, stagingBuffer, nullptr);
 		vkFreeMemory(logical_device, stagingBufferMemory, nullptr);
 
-		if (!create_image_view(image.view, image.image, VK_FORMAT_R8G8B8A8_UNORM)) {
+		if (!create_image_view(image.view, image.image, (VkFormat) format)) {
 			vkDestroyImage(logical_device, image.image, nullptr);
 			vkFreeMemory(logical_device, image.memory, nullptr);
 			return false;
@@ -846,7 +857,8 @@ public:
 	inline bool create_dynamic_texture_image(
 			dynamic_texture_image& image,
 			uint64_t image_size_in_bytes,
-			uint32_t image_width, uint32_t image_height)
+			uint32_t image_width, uint32_t image_height,
+			image_format format)
 	{
 		if (!create_buffer(image.staging_buffer, image.staging_buffer_memory, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, image_size_in_bytes))
@@ -857,7 +869,7 @@ public:
 
 		vkMapMemory(logical_device, image.staging_buffer_memory, 0, image_size_in_bytes, 0, &image.mapped_memory);
 
-		if (!create_image(image_width, image_height, VK_FORMAT_R8G8B8A8_UNORM,
+		if (!create_image(image_width, image_height, (VkFormat) format,
 				VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
 				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, image.image, image.memory))
 		{
@@ -866,7 +878,7 @@ public:
 			return false;
 		}
 
-		if (!create_image_view(image.view, image.image, VK_FORMAT_R8G8B8A8_UNORM)) {
+		if (!create_image_view(image.view, image.image, (VkFormat) format)) {
 			vkDestroyImage(logical_device, image.image, nullptr);
 			vkFreeMemory(logical_device, image.memory, nullptr);
 			return false;
@@ -876,14 +888,16 @@ public:
 		return true;
 	}
 
-	inline void transfer_dynamic_texture_image(dynamic_texture_image& image)
+	inline void transfer_dynamic_texture_image(dynamic_texture_image& image, image_format format)
 	{
-		transition_image_layout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(image.image, VK_FORMAT_R8G8B8A8_UNORM);
+		transition_image_layout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(image.image, (VkFormat) format);
 		copy_buffer_to_image(image.staging_buffer, image.image, image.width, image.height);
-		transition_image_layout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(image.image, VK_FORMAT_R8G8B8A8_UNORM);
+		transition_image_layout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(image.image, (VkFormat) format);
 	}
 
 	inline void delete_dynamic_texture_image(dynamic_texture_image& image) {
+		vkDestroyBuffer(logical_device, image.staging_buffer, nullptr);
+		vkFreeMemory(logical_device, image.staging_buffer_memory, nullptr);
 		vkDestroyImageView(logical_device, image.view, nullptr);
 		vkDestroyImage(logical_device, image.image, nullptr);
 		vkFreeMemory(logical_device, image.memory, nullptr);
@@ -1908,6 +1922,7 @@ private:
 	inline void free_swap_chain() {
 		for (uint32_t i = 0; i < swap_chain_image_count; i++)
 			vkDestroyImageView(logical_device, swap_chain_image_views[i], nullptr);
+		free(swap_chain_image_views);
 		free(swap_chain_images);
 		vkDestroySwapchainKHR(logical_device, swap_chain, nullptr);
 	}

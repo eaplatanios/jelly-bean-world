@@ -54,10 +54,12 @@ inline void cleanup_renderer(
 		frame_buffer& fb,
 		command_buffer& cb,
 		uniform_buffer& ub,
+		descriptor_set& set,
 		descriptor_pool& pool)
 {
 	renderer.delete_command_buffer(cb);
 	renderer.delete_uniform_buffer(ub);
+	renderer.delete_descriptor_set(set);
 	renderer.delete_descriptor_pool(pool);
 	renderer.delete_frame_buffer(fb);
 	renderer.delete_graphics_pipeline(pipeline);
@@ -148,16 +150,21 @@ bool setup_renderer(vulkan_renderer& renderer,
 		renderer.delete_frame_buffer(fb);
 		renderer.delete_graphics_pipeline(pipeline);
 		return false;
-	} else if (!renderer.create_descriptor_set(ub_set, &ub, &ub_binding, 1, nullptr, nullptr, 0, &texture, &texture_binding, 1, sampler, layout, pool)
-			|| !renderer.create_command_buffer(cb))
-	{
+	} else if (!renderer.create_descriptor_set(ub_set, &ub, &ub_binding, 1, nullptr, nullptr, 0, &texture, &texture_binding, 1, &sampler, layout, pool)) {
 		renderer.delete_uniform_buffer(ub);
 		renderer.delete_descriptor_pool(pool);
 		renderer.delete_frame_buffer(fb);
 		renderer.delete_graphics_pipeline(pipeline);
 		return false;
+	} else if (!renderer.create_command_buffer(cb)) {
+		renderer.delete_uniform_buffer(ub);
+		renderer.delete_descriptor_set(ub_set);
+		renderer.delete_descriptor_pool(pool);
+		renderer.delete_frame_buffer(fb);
+		renderer.delete_graphics_pipeline(pipeline);
+		return false;
 	} else if (!renderer.record_command_buffer(cb, fb, pipeline, clear_color, 4, 0, vertex_buffers, offsets, &ub_set, 1)) {
-		cleanup_renderer(renderer, pipeline, fb, cb, ub, pool);
+		cleanup_renderer(renderer, pipeline, fb, cb, ub, ub_set, pool);
 		return false;
 	}
 	return true;
@@ -261,7 +268,7 @@ int main(int argc, const char** argv)
 	}
 
 	auto reset_command_buffers = [&]() {
-		cleanup_renderer(renderer, pipeline, fb, cb, ub, pool);
+		cleanup_renderer(renderer, pipeline, fb, cb, ub, ub_set, pool);
 		return setup_renderer(renderer, vertex_shader, fragment_shader, pipeline, fb, cb, ub, vb, pool, ub_set, binding, attributes, layout, texture, sampler);
 	};
 
@@ -277,7 +284,7 @@ int main(int argc, const char** argv)
 	if (!setup_renderer(renderer, vertex_shader, fragment_shader, pipeline, fb, cb, ub, vb, pool, ub_set, binding, attributes, layout, texture, sampler)) {
 		renderer.delete_descriptor_set_layout(layout);
 		renderer.delete_vertex_buffer(vb);
-		cleanup_renderer(renderer, pipeline, fb, cb, ub, pool);
+		cleanup_renderer(renderer, pipeline, fb, cb, ub, ub_set, pool);
 		return EXIT_FAILURE;
 	}
 
@@ -309,7 +316,7 @@ int main(int argc, const char** argv)
 		/* construct the view matrix */
 		float up[] = { 0.0f, 1.0f, 0.0f };
 		float forward[] = { 0.0f, 0.0f, -1.0f };
-		float camera_position[] = { 0.0f, 0.0f, 2.0f };
+		float camera_position[] = { 2.0f, 0.0f, 2.0f };
 		make_view_matrix(transform.view, forward, up, camera_position);
 
 		make_orthographic_projection(transform.projection,
@@ -333,7 +340,7 @@ int main(int argc, const char** argv)
 	renderer.delete_dynamic_texture_image(texture);
 	renderer.delete_descriptor_set_layout(layout);
 	renderer.delete_vertex_buffer(vb);
-	cleanup_renderer(renderer, pipeline, fb, cb, ub, pool);
+	cleanup_renderer(renderer, pipeline, fb, cb, ub, ub_set, pool);
 	cleanup(window, renderer, vertex_shader, fragment_shader);
 	return EXIT_SUCCESS;
 }

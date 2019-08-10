@@ -1,13 +1,24 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
-layout(binding = 1) uniform sampler2D texSampler;
+layout(binding = 0) uniform UniformBufferObject {
+    mat4 model;
+    mat4 view;
+    mat4 proj;
+    float pixel_density;
+    float patch_size;
+} ubo;
 
-layout(location = 0) in vec3 fragColor;
-layout(location = 1) in vec2 fragTexCoord;
+layout(binding = 1) uniform sampler2D tex_sampler;
 
-layout(location = 0) out vec4 outColor;
+layout(location = 0) in vec2 uv;
+layout(location = 1) in vec2 frag_tex_coord;
+
+layout(location = 0) out vec4 out_color;
 
 void main() {
-    outColor = texture(texSampler, fragTexCoord);
+    vec2 coord = uv;
+    vec2 grid = abs(fract(coord + 0.1f)) / fwidth(coord);
+    float line_weight = clamp(min(grid.x, grid.y) - (0.2f * ubo.pixel_density - 1.0f), texture(tex_sampler, frag_tex_coord / ubo.patch_size).w, 1.0f);
+    out_color = (1.0f - line_weight) * vec4(0.0f, 0.0f, 0.0f, 1.0f) + line_weight * vec4(texture(tex_sampler, frag_tex_coord).xyz, 1.0);
 }
