@@ -68,6 +68,12 @@ class visualizer
 		float tex_coord[2];
 	};
 
+	struct item_vertex {
+		float position[2];
+		float color[3];
+		float tex_coord[2];
+	};
+
 	struct pixel {
 		uint8_t r;
 		uint8_t g;
@@ -99,8 +105,10 @@ class visualizer
 	simulator<SimulatorData>& sim;
 
 	vulkan_renderer renderer;
-	shader vertex_shader, fragment_shader;
-	graphics_pipeline pipeline;
+	shader background_vertex_shader, background_fragment_shader;
+	shader item_vertex_shader, item_fragment_shader;
+	render_pass pass;
+	graphics_pipeline scent_map_pipeline, item_pipeline;
 	frame_buffer fb;
 	command_buffer cb;
 	descriptor_set_layout layout;
@@ -110,9 +118,13 @@ class visualizer
 	dynamic_texture_image scent_map_texture;
 	sampler tex_sampler;
 	vertex_buffer scent_quad_buffer;
+	dynamic_vertex_buffer item_quad_buffer;
+	size_t item_quad_buffer_capacity;
 	uniform_buffer_data uniform_data;
-	binding_description binding;
-	attribute_descriptions<2> attributes;
+	binding_description background_binding;
+	attribute_descriptions<2> background_shader_attributes;
+	binding_description item_binding;
+	attribute_descriptions<3> item_shader_attributes;
 
 	bool left_mouse_button_pressed;
 	double last_cursor_x, last_cursor_y;
@@ -123,7 +135,8 @@ class visualizer
 
 public:
 	visualizer(simulator<SimulatorData>& sim, uint32_t window_width, uint32_t window_height) :
-			resized(false), width(window_width), height(window_height), sim(sim), binding(0, sizeof(vertex))
+			resized(false), width(window_width), height(window_height), sim(sim),
+			background_binding(0, sizeof(vertex)), item_binding(0, sizeof(item_vertex))
 	{
 		camera_position[0] = 0.0f;
 		camera_position[1] = 0.0f;
@@ -131,16 +144,16 @@ public:
 		target_pixel_density = pixel_density;
 		zoom_start_pixel_density = pixel_density;
 		zoom_animation_start_time = milliseconds();
-		uniform_data = { 0 };
+		uniform_data = {{{0},{0},{0}}, 0};
 		make_identity(uniform_data.mvp.model);
 
 		size_t vertex_shader_size = 0;
-		char* vertex_shader_src = read_file<true>("vert.spv", vertex_shader_size);
+		char* vertex_shader_src = read_file<true>("background_vertex_shader.spv", vertex_shader_size);
 		if (vertex_shader_src == nullptr)
 			throw new std::runtime_error("visualizer ERROR: Failed to load vertex shader from file.");
 
 		size_t fragment_shader_size = 0;
-		char* fragment_shader_src = read_file<true>("frag.spv", fragment_shader_size);
+		char* fragment_shader_src = read_file<true>("background_fragment_shader.spv", fragment_shader_size);
 		if (fragment_shader_src == nullptr) {
 			free(vertex_shader_src);
 			throw new std::runtime_error("visualizer ERROR: Failed to load fragment shader from file.");
@@ -156,32 +169,81 @@ public:
 
 		uint32_t extension_count = 0;
 		const char** required_extensions = glfwGetRequiredInstanceExtensions(&extension_count);
-		if (!init(renderer, "Renderer Test", 0, "no engine", 0,
+		if (!init(renderer, "JBW Visualizer", 0, "no engine", 0,
 				required_extensions, extension_count, device_selector::FIRST_ANY,
-				glfw_surface(window), window_width, window_height, 2, false))
+				glfw_surface(window), window_width, window_height, 2, false, false, true))
 		{
 			free(vertex_shader_src); free(fragment_shader_src);
 			throw new std::runtime_error("visualizer ERROR: Failed to initializer renderer.");
 		}
 
-		if (!renderer.create_shader(vertex_shader, vertex_shader_src, vertex_shader_size)) {
+		if (!renderer.create_shader(background_vertex_shader, vertex_shader_src, vertex_shader_size)) {
 			free(vertex_shader_src); free(fragment_shader_src);
 			glfwDestroyWindow(window); glfwTerminate();
 			throw new std::runtime_error("visualizer ERROR: Failed to create vertex shader.");
-		} if (!renderer.create_shader(fragment_shader, fragment_shader_src, fragment_shader_size)) {
-			renderer.delete_shader(vertex_shader);
+		} if (!renderer.create_shader(background_fragment_shader, fragment_shader_src, fragment_shader_size)) {
+			renderer.delete_shader(background_vertex_shader);
 			free(vertex_shader_src); free(fragment_shader_src);
 			glfwDestroyWindow(window); glfwTerminate();
 			throw new std::runtime_error("visualizer ERROR: Failed to create fragment shader.");
 		}
 		free(vertex_shader_src); free(fragment_shader_src);
 
-		attributes.set<0>(0, 0, attribute_type::FLOAT2, offsetof(vertex, position));
-		attributes.set<1>(0, 1, attribute_type::FLOAT2, offsetof(vertex, tex_coord));
+		background_shader_attributes.set<0>(0, 0, attribute_type::FLOAT2, offsetof(vertex, position));
+		background_shader_attributes.set<1>(0, 1, attribute_type::FLOAT2, offsetof(vertex, tex_coord));
+
+		vertex_shader_src = read_file<true>("item_vertex_shader.spv", vertex_shader_size);
+		if (vertex_shader_src == nullptr) {
+			renderer.delete_shader(background_vertex_shader);
+			renderer.delete_shader(background_fragment_shader);
+			glfwDestroyWindow(window); glfwTerminate();
+			throw new std::runtime_error("visualizer ERROR: Failed to load vertex shader from file.");
+		}
+
+		fragment_shader_src = read_file<true>("item_fragment_shader.spv", fragment_shader_size);
+		if (fragment_shader_src == nullptr) {
+			free(vertex_shader_src);
+			renderer.delete_shader(background_vertex_shader);
+			renderer.delete_shader(background_fragment_shader);
+			glfwDestroyWindow(window); glfwTerminate();
+			throw new std::runtime_error("visualizer ERROR: Failed to load fragment shader from file.");
+		}
+
+		if (!renderer.create_shader(item_vertex_shader, vertex_shader_src, vertex_shader_size)) {
+			free(vertex_shader_src); free(fragment_shader_src);
+			renderer.delete_shader(background_vertex_shader);
+			renderer.delete_shader(background_fragment_shader);
+			glfwDestroyWindow(window); glfwTerminate();
+			throw new std::runtime_error("visualizer ERROR: Failed to create vertex shader.");
+		} if (!renderer.create_shader(item_fragment_shader, fragment_shader_src, fragment_shader_size)) {
+			free(vertex_shader_src); free(fragment_shader_src);
+			renderer.delete_shader(item_vertex_shader);
+			renderer.delete_shader(background_vertex_shader);
+			renderer.delete_shader(background_fragment_shader);
+			glfwDestroyWindow(window); glfwTerminate();
+			throw new std::runtime_error("visualizer ERROR: Failed to create fragment shader.");
+		}
+		free(vertex_shader_src); free(fragment_shader_src);
+
+		item_shader_attributes.set<0>(0, 0, attribute_type::FLOAT2, offsetof(item_vertex, position));
+		item_shader_attributes.set<1>(0, 1, attribute_type::FLOAT3, offsetof(item_vertex, color));
+		item_shader_attributes.set<2>(0, 2, attribute_type::FLOAT2, offsetof(item_vertex, tex_coord));
 
 		if (!renderer.create_vertex_buffer(scent_quad_buffer, sizeof(vertex) * 4)) {
-			renderer.delete_shader(vertex_shader);
-			renderer.delete_shader(fragment_shader);
+			renderer.delete_shader(item_vertex_shader);
+			renderer.delete_shader(item_fragment_shader);
+			renderer.delete_shader(background_vertex_shader);
+			renderer.delete_shader(background_fragment_shader);
+			glfwDestroyWindow(window); glfwTerminate();
+			throw new std::runtime_error("visualizer ERROR: Failed to vertex buffer for scent textured quad.");
+		}
+
+		item_quad_buffer_capacity = 4 * width * height;
+		if (!renderer.create_dynamic_vertex_buffer(item_quad_buffer, item_quad_buffer_capacity * sizeof(item_vertex))) {
+			renderer.delete_shader(item_vertex_shader);
+			renderer.delete_shader(item_fragment_shader);
+			renderer.delete_shader(background_vertex_shader);
+			renderer.delete_shader(background_fragment_shader);
 			glfwDestroyWindow(window); glfwTerminate();
 			throw new std::runtime_error("visualizer ERROR: Failed to vertex buffer for scent textured quad.");
 		}
@@ -192,8 +254,11 @@ public:
 		shader_stage visibilities[] = { shader_stage::ALL, shader_stage::FRAGMENT };
 		if (!renderer.create_descriptor_set_layout(layout, binding_indices, types, descriptor_counts, visibilities, 2)) {
 			renderer.delete_vertex_buffer(scent_quad_buffer);
-			renderer.delete_shader(vertex_shader);
-			renderer.delete_shader(fragment_shader);
+			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
+			renderer.delete_shader(item_vertex_shader);
+			renderer.delete_shader(item_fragment_shader);
+			renderer.delete_shader(background_vertex_shader);
+			renderer.delete_shader(background_fragment_shader);
 			glfwDestroyWindow(window); glfwTerminate();
 			throw new std::runtime_error("visualizer ERROR: Failed to create descriptor_set_layout.");
 		}
@@ -204,8 +269,11 @@ public:
 		if (!renderer.create_dynamic_texture_image(scent_map_texture, image_size, texture_width, texture_height, image_format::R8G8B8A8_UNORM)) {
 			renderer.delete_descriptor_set_layout(layout);
 			renderer.delete_vertex_buffer(scent_quad_buffer);
-			renderer.delete_shader(vertex_shader);
-			renderer.delete_shader(fragment_shader);
+			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
+			renderer.delete_shader(item_vertex_shader);
+			renderer.delete_shader(item_fragment_shader);
+			renderer.delete_shader(background_vertex_shader);
+			renderer.delete_shader(background_fragment_shader);
 			glfwDestroyWindow(window); glfwTerminate();
 			throw new std::runtime_error("visualizer ERROR: Failed to create `scent_map_texture`.");
 		}
@@ -217,8 +285,11 @@ public:
 			renderer.delete_dynamic_texture_image(scent_map_texture);
 			renderer.delete_descriptor_set_layout(layout);
 			renderer.delete_vertex_buffer(scent_quad_buffer);
-			renderer.delete_shader(vertex_shader);
-			renderer.delete_shader(fragment_shader);
+			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
+			renderer.delete_shader(item_vertex_shader);
+			renderer.delete_shader(item_fragment_shader);
+			renderer.delete_shader(background_vertex_shader);
+			renderer.delete_shader(background_fragment_shader);
 			glfwDestroyWindow(window); glfwTerminate();
 			throw new std::runtime_error("visualizer ERROR: Failed to initialize texture sampler.");
 		}
@@ -228,8 +299,11 @@ public:
 			renderer.delete_dynamic_texture_image(scent_map_texture);
 			renderer.delete_descriptor_set_layout(layout);
 			renderer.delete_vertex_buffer(scent_quad_buffer);
-			renderer.delete_shader(vertex_shader);
-			renderer.delete_shader(fragment_shader);
+			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
+			renderer.delete_shader(item_vertex_shader);
+			renderer.delete_shader(item_fragment_shader);
+			renderer.delete_shader(background_vertex_shader);
+			renderer.delete_shader(background_fragment_shader);
 			glfwDestroyWindow(window); glfwTerminate();
 			throw new std::runtime_error("visualizer ERROR: Failed to initialize rendering pipeline.");
 		}
@@ -241,9 +315,12 @@ public:
 		renderer.delete_dynamic_texture_image(scent_map_texture);
 		renderer.delete_descriptor_set_layout(layout);
 		renderer.delete_vertex_buffer(scent_quad_buffer);
+		renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
 		cleanup_renderer();
-		renderer.delete_shader(vertex_shader);
-		renderer.delete_shader(fragment_shader);
+		renderer.delete_shader(item_vertex_shader);
+		renderer.delete_shader(item_fragment_shader);
+		renderer.delete_shader(background_vertex_shader);
+		renderer.delete_shader(background_fragment_shader);
 		glfwDestroyWindow(window);
 		glfwTerminate();
 	}
@@ -272,23 +349,45 @@ public:
 			return false;
 		}
 
+		unsigned int item_vertex_count = 0;
 		pixel* scent_map_texture_data = (pixel*) scent_map_texture.mapped_memory;
-		unsigned int patch_size = sim.get_config().patch_size;
-		unsigned int scent_dimension = sim.get_config().scent_dimension;
+		const unsigned int patch_size = sim.get_config().patch_size;
+		const unsigned int scent_dimension = sim.get_config().scent_dimension;
+		const array<item_properties>& item_types = sim.get_config().item_types;
+		const float* agent_color = sim.get_config().agent_color;
 		if (patches.length > 0) {
 			/* find position of the bottom-left corner and the top-right corner */
-			position bottom_left_corner(0, 0), top_right_corner(0, 0);
+			size_t required_item_vertices = 0;
+			position bottom_left_corner(INT64_MAX, INT64_MAX), top_right_corner(INT64_MIN, INT64_MIN);
 			bottom_left_corner.y = patches[0][0].patch_position.y;
 			top_right_corner.y = patches.last().last().patch_position.y;
 			for (const array<patch_state>& row : patches) {
 				bottom_left_corner.x = min(bottom_left_corner.x, row[0].patch_position.x);
 				top_right_corner.x = max(top_right_corner.x, row.last().patch_position.x);
+				for (const patch_state& patch : row)
+					required_item_vertices += 6 * patch.item_count + 3 * patch.agent_count;
+			}
+
+			if (required_item_vertices > item_quad_buffer_capacity) {
+				size_t new_capacity = 2 * item_quad_buffer_capacity;
+				while (required_item_vertices > new_capacity)
+					new_capacity *= 2;
+				renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
+				if (!renderer.create_dynamic_vertex_buffer(item_quad_buffer, new_capacity * sizeof(item_vertex))) {
+					fprintf(stderr, "visualizer.draw_frame ERROR: Unable to expand `item_quad_buffer`.\n");
+					for (array<patch_state>& row : patches) {
+						for (patch_state& patch : row) free(patch);
+						free(row);
+					}
+					return false;
+				}
 			}
 
 			unsigned int texture_width_cells = (unsigned int) (top_right_corner.x - bottom_left_corner.x + 1) * patch_size;
 			unsigned int texture_height_cells = (unsigned int) (top_right_corner.y - bottom_left_corner.y + 1) * patch_size;
 
 			unsigned int y_index = 0;
+			item_vertex* item_vertices = (item_vertex*) item_quad_buffer.mapped_memory;
 			for (int64_t y = bottom_left_corner.y; y <= top_right_corner.y; y++) {
 				if (y_index == patches.length || y != patches[y_index][0].patch_position.y) {
 					/* fill the patches in this row with empty pixels */
@@ -346,17 +445,113 @@ public:
 							scent_to_color(cell_scent, current_pixel);
 						}
 					}
+
+					/* iterate over all items in this patch, creating a quad
+					   for each (we use a triangle list so we need two triangles) */
+					for (unsigned int i = 0; i < patch.item_count; i++) {
+						const item& it = patch.items[i];
+						const item_properties& item_props = item_types[it.item_type];
+						item_vertices[item_vertex_count].position[0] = it.location.x + 0.5f - 0.4f;
+						item_vertices[item_vertex_count].position[1] = it.location.y + 0.5f - 0.4f;
+						if (item_props.blocks_movement) {
+							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j] + 2.0f;
+						} else {
+							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j];
+						}
+						item_vertices[item_vertex_count].tex_coord[0] = 0.0f;
+						item_vertices[item_vertex_count++].tex_coord[1] = 0.0f;
+
+						item_vertices[item_vertex_count].position[0] = it.location.x + 0.5f - 0.4f;
+						item_vertices[item_vertex_count].position[1] = it.location.y + 0.5f + 0.4f;
+						if (item_props.blocks_movement) {
+							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j] + 2.0f;
+						} else {
+							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j];
+						}
+						item_vertices[item_vertex_count].tex_coord[0] = 0.0f;
+						item_vertices[item_vertex_count++].tex_coord[1] = 1.0f;
+
+						item_vertices[item_vertex_count].position[0] = it.location.x + 0.5f + 0.4f;
+						item_vertices[item_vertex_count].position[1] = it.location.y + 0.5f - 0.4f;
+						if (item_props.blocks_movement) {
+							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j] + 2.0f;
+						} else {
+							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j];
+						}
+						item_vertices[item_vertex_count].tex_coord[0] = 1.0f;
+						item_vertices[item_vertex_count++].tex_coord[1] = 0.0f;
+
+						item_vertices[item_vertex_count].position[0] = it.location.x + 0.5f + 0.4f;
+						item_vertices[item_vertex_count].position[1] = it.location.y + 0.5f + 0.4f;
+						if (item_props.blocks_movement) {
+							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j] + 2.0f;
+						} else {
+							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j];
+						}
+						item_vertices[item_vertex_count].tex_coord[0] = 1.0f;
+						item_vertices[item_vertex_count++].tex_coord[1] = 1.0f;
+
+						item_vertices[item_vertex_count].position[0] = it.location.x + 0.5f + 0.4f;
+						item_vertices[item_vertex_count].position[1] = it.location.y + 0.5f - 0.4f;
+						if (item_props.blocks_movement) {
+							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j] + 2.0f;
+						} else {
+							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j];
+						}
+						item_vertices[item_vertex_count].tex_coord[0] = 1.0f;
+						item_vertices[item_vertex_count++].tex_coord[1] = 0.0f;
+
+						item_vertices[item_vertex_count].position[0] = it.location.x + 0.5f - 0.4f;
+						item_vertices[item_vertex_count].position[1] = it.location.y + 0.5f + 0.4f;
+						if (item_props.blocks_movement) {
+							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j] + 2.0f;
+						} else {
+							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j];
+						}
+						item_vertices[item_vertex_count].tex_coord[0] = 0.0f;
+						item_vertices[item_vertex_count++].tex_coord[1] = 1.0f;
+					}
+
+					/* iterate over all agents in this patch, creating an oriented triangle for each */
+					for (unsigned int i = 0; i < patch.agent_count; i++) {
+						float first[2] = {0};
+						float second[2] = {0};
+						float third[2] = {0};
+						get_triangle_coords(patch.agent_directions[i], first, second, third);
+
+						item_vertices[item_vertex_count].position[0] = patch.agent_positions[i].x + 0.5f + first[0];
+						item_vertices[item_vertex_count].position[1] = patch.agent_positions[i].y + 0.5f + first[1];
+						for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = agent_color[j] + 4.0f;
+						item_vertices[item_vertex_count].tex_coord[0] = 0.0f;
+						item_vertices[item_vertex_count++].tex_coord[1] = 0.0f;
+
+						item_vertices[item_vertex_count].position[0] = patch.agent_positions[i].x + 0.5f + second[0];
+						item_vertices[item_vertex_count].position[1] = patch.agent_positions[i].y + 0.5f + second[1];
+						for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = agent_color[j] + 4.0f;
+						item_vertices[item_vertex_count].tex_coord[0] = 1.0f;
+						item_vertices[item_vertex_count++].tex_coord[1] = 0.0f;
+
+						item_vertices[item_vertex_count].position[0] = patch.agent_positions[i].x + 0.5f + third[0];
+						item_vertices[item_vertex_count].position[1] = patch.agent_positions[i].y + 0.5f + third[1];
+						for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = agent_color[j] + 4.0f;
+						item_vertices[item_vertex_count].tex_coord[0] = 0.0f;
+						item_vertices[item_vertex_count++].tex_coord[1] = 1.0f;
+					}
 				}
 			}
 			renderer.transfer_dynamic_texture_image(scent_map_texture, image_format::R8G8B8A8_UNORM);
 
+			/* position the background quad */
 			vertex vertices[] = {
 				{{(float) bottom_left_corner.x * patch_size, (float) bottom_left_corner.y * patch_size}, {0.0f, 0.0f}},
 				{{(float) bottom_left_corner.x * patch_size, (float) (top_right_corner.y + 1) * patch_size}, {0.0f, (float) texture_height_cells / texture_height}},
 				{{(float) (top_right_corner.x + 1) * patch_size, (float) bottom_left_corner.y * patch_size}, {(float) texture_width_cells / texture_width, 0.0f}},
 				{{(float) (top_right_corner.x + 1) * patch_size, (float) (top_right_corner.y + 1) * patch_size}, {(float) texture_width_cells / texture_width, (float) texture_height_cells / texture_height}}
 			};
+
+			/* transfer all data to GPU */
 			renderer.fill_vertex_buffer(scent_quad_buffer, vertices, sizeof(vertex) * 4);
+			renderer.transfer_dynamic_vertex_buffer(item_quad_buffer, sizeof(item_vertex) * item_vertex_count);
 
 		} else {
 			/* no patches are visible, so move the quad outside the view */
@@ -408,32 +603,69 @@ public:
 			height = out_height;
 		};
 
+		draw_call<1, 0, 1> draw_scent_map;
+		draw_scent_map.pipeline = scent_map_pipeline;
+		draw_scent_map.first_vertex = 0;
+		draw_scent_map.vertex_count = 4;
+		draw_scent_map.vertex_buffers[0] = scent_quad_buffer;
+		draw_scent_map.vertex_buffer_offsets[0] = 0;
+		draw_scent_map.descriptor_sets[0] = set;
+
+		draw_call<0, 1, 0> draw_items;
+		draw_items.pipeline = item_pipeline;
+		draw_items.first_vertex = 0;
+		draw_items.vertex_count = item_vertex_count;
+		draw_items.dynamic_vertex_buffers[0] = item_quad_buffer;
+		draw_items.dynamic_vertex_buffer_offsets[0] = 0;
+
+		float clear_color[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+		if (!renderer.record_command_buffer(cb, fb, clear_color, pass, draw_scent_map, draw_items)) {
+			cleanup_renderer();
+			return false;
+		}
+
 		void* pv_uniform_data = (void*) &uniform_data;
 		return renderer.draw_frame(cb, resized, reset_command_buffers, get_window_dimensions, &ub, &pv_uniform_data, 1);
 	}
 
 private:
 	bool setup_renderer() {
-		float clear_color[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-		vertex_buffer vertex_buffers[] = { scent_quad_buffer };
-		uint64_t offsets[] = { 0 };
 		dynamic_texture_image dynamic_textures[] = { scent_map_texture };
 		uint32_t texture_bindings[] = { 1 };
 		uint32_t ub_binding = 0;
 		descriptor_type pool_types[] = { descriptor_type::UNIFORM_BUFFER, descriptor_type::COMBINED_IMAGE_SAMPLER };
-		if (!renderer.create_graphics_pipeline(pipeline, vertex_shader, "main", fragment_shader, "main", primitive_topology::TRIANGLE_STRIP, binding, attributes, &layout, 1)) {
+		if (!renderer.create_render_pass(pass)) {
 			return false;
-		} else if (!renderer.create_frame_buffer(fb, pipeline)) {
-			renderer.delete_graphics_pipeline(pipeline);
+		} else if (!renderer.create_graphics_pipeline(scent_map_pipeline, pass,
+				background_vertex_shader, "main", background_fragment_shader, "main",
+				primitive_topology::TRIANGLE_STRIP, false, 1.0f, background_binding, background_shader_attributes, &layout, 1))
+		{
+			renderer.delete_render_pass(pass);
+			return false;
+		} else if (!renderer.create_graphics_pipeline(item_pipeline, pass,
+				item_vertex_shader, "main", item_fragment_shader, "main",
+				primitive_topology::TRIANGLE_LIST, false, 1.0f, item_binding, item_shader_attributes, &layout, 1))
+		{
+			renderer.delete_graphics_pipeline(scent_map_pipeline);
+			renderer.delete_render_pass(pass);
+			return false;
+		} else if (!renderer.create_frame_buffer(fb, pass)) {
+			renderer.delete_graphics_pipeline(scent_map_pipeline);
+			renderer.delete_graphics_pipeline(item_pipeline);
+			renderer.delete_render_pass(pass);
 			return false;
 		} else if (!renderer.create_uniform_buffer(ub, sizeof(uniform_buffer_data))) {
 			renderer.delete_frame_buffer(fb);
-			renderer.delete_graphics_pipeline(pipeline);
+			renderer.delete_graphics_pipeline(scent_map_pipeline);
+			renderer.delete_graphics_pipeline(item_pipeline);
+			renderer.delete_render_pass(pass);
 			return false;
 		} else if (!renderer.create_descriptor_pool(pool, pool_types, 2)) {
 			renderer.delete_uniform_buffer(ub);
 			renderer.delete_frame_buffer(fb);
-			renderer.delete_graphics_pipeline(pipeline);
+			renderer.delete_graphics_pipeline(scent_map_pipeline);
+			renderer.delete_graphics_pipeline(item_pipeline);
+			renderer.delete_render_pass(pass);
 			return false;
 		} else if (!renderer.create_descriptor_set(set, &ub, &ub_binding, 1, nullptr, nullptr, 0, dynamic_textures, texture_bindings, 1, &tex_sampler, layout, pool)
 				|| !renderer.create_command_buffer(cb))
@@ -441,10 +673,9 @@ private:
 			renderer.delete_uniform_buffer(ub);
 			renderer.delete_descriptor_pool(pool);
 			renderer.delete_frame_buffer(fb);
-			renderer.delete_graphics_pipeline(pipeline);
-			return false;
-		} else if (!renderer.record_command_buffer(cb, fb, pipeline, clear_color, 4, 0, vertex_buffers, offsets, &set, 1)) {
-			cleanup_renderer();
+			renderer.delete_graphics_pipeline(scent_map_pipeline);
+			renderer.delete_graphics_pipeline(item_pipeline);
+			renderer.delete_render_pass(pass);
 			return false;
 		}
 		return true;
@@ -457,7 +688,9 @@ private:
 		renderer.delete_descriptor_set(set);
 		renderer.delete_descriptor_pool(pool);
 		renderer.delete_frame_buffer(fb);
-		renderer.delete_graphics_pipeline(pipeline);
+		renderer.delete_graphics_pipeline(scent_map_pipeline);
+		renderer.delete_graphics_pipeline(item_pipeline);
+		renderer.delete_render_pass(pass);
 	}
 
 	static inline void scent_to_color(const float* cell_scent, pixel& out) {
@@ -512,6 +745,29 @@ private:
 		proj[13] = (fBottom + fTop) / (fBottom - fTop);
 		proj[14] = (fNear + fFar) / (fNear - fFar);
 		proj[15] = 1.0f;
+	}
+
+	inline void get_triangle_coords(direction dir, float (&first)[2], float (&second)[2], float(&third)[2])
+	{
+		switch (dir) {
+		case direction::UP:
+			first[0] = 0.0f;			first[1] = 0.5f - 0.1f;
+			second[0] = 0.43301f;		second[1] = -0.25f - 0.1f;
+			third[0] = -0.43301f;		third[1] = -0.25f - 0.1f; return;
+		case direction::DOWN:
+			first[0] = 0.0f;			first[1] = -0.5f + 0.1f;
+			second[0] = -0.43301f;		second[1] = 0.25f + 0.1f;
+			third[0] = 0.43301f;		third[1] = 0.25f + 0.1f; return;
+		case direction::LEFT:
+			first[0] = -0.5f + 0.1f;	first[1] = 0.0f;
+			second[0] = 0.25f + 0.1f;	second[1] = 0.43301f;
+			third[0] = 0.25f + 0.1f;	third[1] = -0.43301f; return;
+		case direction::RIGHT:
+			first[0] = 0.5f - 0.1f;		first[1] = 0.0f;
+			second[0] = -0.25f - 0.1f;	second[1] = -0.43301f;
+			third[0] = -0.25f - 0.1f;	third[1] = 0.43301f; return;
+		case direction::COUNT: break;
+		}
 	}
 
 	template<typename A> friend void on_framebuffer_resize(GLFWwindow*, int, int);

@@ -17,8 +17,7 @@ layout(location = 1) in vec2 frag_tex_coord;
 layout(location = 0) out vec4 out_color;
 
 void main() {
-    vec2 coord = uv;
-    vec2 grid = abs(fract(coord + 0.1f)) / fwidth(coord);
+    vec2 grid = abs(fract(uv + 0.1f)) / fwidth(uv);
     float line_weight = clamp(min(grid.x, grid.y) - (0.2f * ubo.pixel_density - 1.0f), texture(tex_sampler, frag_tex_coord / ubo.patch_size).w, 1.0f);
     out_color = (1.0f - line_weight) * vec4(0.0f, 0.0f, 0.0f, 1.0f) + line_weight * vec4(texture(tex_sampler, frag_tex_coord).xyz, 1.0);
 }

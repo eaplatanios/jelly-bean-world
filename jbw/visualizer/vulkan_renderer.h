@@ -91,8 +91,13 @@ class shader {
 	friend class vulkan_renderer;
 };
 
+class render_pass {
+	VkRenderPass rp;
+
+	friend class vulkan_renderer;
+};
+
 class graphics_pipeline {
-	VkRenderPass render_pass;
 	VkPipelineLayout layout;
 	VkPipeline pipeline;
 
@@ -148,6 +153,19 @@ class vertex_buffer {
 	VkDeviceMemory memory;
 
 	friend class vulkan_renderer;
+	template<size_t A, size_t B> friend class vk_draw_call;
+};
+
+class dynamic_vertex_buffer {
+	VkBuffer buffer;
+	VkDeviceMemory memory;
+	VkBuffer staging_buffer;
+	VkDeviceMemory staging_buffer_memory;
+
+public:
+	void* mapped_memory;
+
+	friend class vulkan_renderer;
 };
 
 class uniform_buffer {
@@ -177,6 +195,7 @@ class descriptor_set {
 	VkDescriptorSet* sets;
 
 	friend class vulkan_renderer;
+	template<size_t A, size_t B> friend class vk_draw_call;
 };
 
 class texture_image {
@@ -206,6 +225,18 @@ class sampler {
 	VkSampler vk_sampler;
 
 	friend class vulkan_renderer;
+};
+
+template<size_t VertexBufferCount, size_t DynamicVertexBufferCount, size_t DescriptorSetCount>
+struct draw_call {
+	graphics_pipeline pipeline;
+	uint32_t vertex_count;
+	uint32_t first_vertex;
+	vertex_buffer vertex_buffers[VertexBufferCount == 0 ? 1 : VertexBufferCount];
+	uint64_t vertex_buffer_offsets[VertexBufferCount == 0 ? 1 : VertexBufferCount];
+	dynamic_vertex_buffer dynamic_vertex_buffers[DynamicVertexBufferCount == 0 ? 1 : DynamicVertexBufferCount];
+	uint64_t dynamic_vertex_buffer_offsets[DynamicVertexBufferCount == 0 ? 1 : DynamicVertexBufferCount];
+	descriptor_set descriptor_sets[DescriptorSetCount == 0 ? 1 : DescriptorSetCount];
 };
 
 
@@ -310,12 +341,15 @@ public:
 			device_selector device_selection, const SurfaceType& window,
 			uint32_t window_width, uint32_t window_height,
 			unsigned int max_frames_in_flight,
-			bool require_anisotropic_filtering) :
+			bool require_anisotropic_filtering,
+			bool require_sample_shading,
+			bool resettable_command_pool) :
 		max_frames_in_flight(max_frames_in_flight)
 	{
 		if (!init_helper(application_name, application_version, engine_name, engine_version,
 					enabled_extensions, extension_count, device_selection, window,
-					window_width, window_height, require_anisotropic_filtering))
+					window_width, window_height, require_anisotropic_filtering,
+					require_sample_shading, resettable_command_pool))
 		{
 			throw new std::runtime_error("Failed to initialize vulkan_renderer.");
 		}
@@ -357,10 +391,60 @@ public:
 		vkDestroyShaderModule(logical_device, shader.module, nullptr);
 	}
 
-	inline bool create_graphics_pipeline(graphics_pipeline& pipeline,
+	inline bool create_render_pass(render_pass& pass)
+	{
+		VkAttachmentDescription colorAttachment = {};
+		colorAttachment.format = swap_chain_image_format;
+		colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+		VkAttachmentReference colorAttachmentRef = {};
+		colorAttachmentRef.attachment = 0;
+		colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+		VkSubpassDescription subpass = {};
+		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		subpass.colorAttachmentCount = 1;
+		subpass.pColorAttachments = &colorAttachmentRef;
+
+		VkSubpassDependency dependency = {};
+		dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+		dependency.dstSubpass = 0;
+		dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependency.srcAccessMask = 0;
+		dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+		VkRenderPassCreateInfo renderPassInfo = {};
+		renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+		renderPassInfo.attachmentCount = 1;
+		renderPassInfo.pAttachments = &colorAttachment;
+		renderPassInfo.subpassCount = 1;
+		renderPassInfo.pSubpasses = &subpass;
+		renderPassInfo.dependencyCount = 1;
+		renderPassInfo.pDependencies = &dependency;
+		if (vkCreateRenderPass(logical_device, &renderPassInfo, nullptr, &pass.rp) != VK_SUCCESS) {
+			fprintf(stderr, "vulkan_renderer.create_render_pass ERROR: Failed to create render pass.\n");
+			return false;
+		}
+		return true;
+	}
+
+	inline void delete_render_pass(render_pass& pass) {
+		vkDestroyRenderPass(logical_device, pass.rp, nullptr);
+	}
+
+	inline bool create_graphics_pipeline(
+			graphics_pipeline& pipeline, const render_pass& pass,
 			shader& vertex_shader, const char* vertex_shader_entry_point,
 			shader& fragment_shader, const char* fragment_shader_entry_point,
-			primitive_topology topology)
+			primitive_topology topology, bool enable_sample_shading,
+			float min_sample_shading)
 	{
 		VkPipelineShaderStageCreateInfo vertShaderStageInfo = {};
 		vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -375,14 +459,16 @@ public:
 		fragShaderStageInfo.pName = fragment_shader_entry_point;
 
 		VkPipelineShaderStageCreateInfo shaders[] = {vertShaderStageInfo, fragShaderStageInfo};
-		return create_graphics_pipeline(pipeline, shaders, topology);
+		return create_graphics_pipeline(pipeline, pass, shaders, topology, enable_sample_shading, min_sample_shading);
 	}
 
 	template<size_t N>
-	inline bool create_graphics_pipeline(graphics_pipeline& pipeline,
+	inline bool create_graphics_pipeline(
+			graphics_pipeline& pipeline, const render_pass& pass,
 			shader& vertex_shader, const char* vertex_shader_entry_point,
 			shader& fragment_shader, const char* fragment_shader_entry_point,
-			primitive_topology topology, const binding_description& binding,
+			primitive_topology topology, bool enable_sample_shading,
+			float min_sample_shading, const binding_description& binding,
 			const attribute_descriptions<N>& attributes)
 	{
 		VkPipelineShaderStageCreateInfo vertShaderStageInfo = {};
@@ -398,14 +484,18 @@ public:
 		fragShaderStageInfo.pName = fragment_shader_entry_point;
 
 		VkPipelineShaderStageCreateInfo shaders[] = {vertShaderStageInfo, fragShaderStageInfo};
-		return create_graphics_pipeline(pipeline, shaders, topology, binding.description, attributes.descriptions);
+		return create_graphics_pipeline(pipeline,
+				pass, shaders, topology, enable_sample_shading, min_sample_shading,
+				binding.description, attributes.descriptions);
 	}
 
 	template<size_t N>
-	inline bool create_graphics_pipeline(graphics_pipeline& pipeline,
+	inline bool create_graphics_pipeline(
+			graphics_pipeline& pipeline, const render_pass& pass,
 			shader& vertex_shader, const char* vertex_shader_entry_point,
 			shader& fragment_shader, const char* fragment_shader_entry_point,
-			primitive_topology topology, const binding_description& binding,
+			primitive_topology topology, bool enable_sample_shading,
+			float min_sample_shading, const binding_description& binding,
 			const attribute_descriptions<N>& attributes,
 			const descriptor_set_layout* layouts, uint32_t layout_count)
 	{
@@ -422,16 +512,17 @@ public:
 		fragShaderStageInfo.pName = fragment_shader_entry_point;
 
 		VkPipelineShaderStageCreateInfo shaders[] = {vertShaderStageInfo, fragShaderStageInfo};
-		return create_graphics_pipeline(pipeline, shaders, topology, binding.description, attributes.descriptions, layouts, layout_count);
+		return create_graphics_pipeline(pipeline,
+				pass, shaders, topology, enable_sample_shading, min_sample_shading,
+				binding.description, attributes.descriptions, layouts, layout_count);
 	}
 
 	inline void delete_graphics_pipeline(graphics_pipeline& pipeline) {
 		vkDestroyPipeline(logical_device, pipeline.pipeline, nullptr);
 		vkDestroyPipelineLayout(logical_device, pipeline.layout, nullptr);
-		vkDestroyRenderPass(logical_device, pipeline.render_pass, nullptr);
 	}
 
-	inline bool create_frame_buffer(frame_buffer& buffer, const graphics_pipeline& pipeline) {
+	inline bool create_frame_buffer(frame_buffer& buffer, const render_pass& pass) {
 		buffer.swap_chain_framebuffers = (VkFramebuffer*) malloc(sizeof(VkFramebuffer) * swap_chain_image_count);
 		if (buffer.swap_chain_framebuffers == nullptr) {
 			fprintf(stderr, "vulkan_renderer.create_frame_buffer ERROR: Out of memory.\n");
@@ -443,7 +534,7 @@ public:
 
 			VkFramebufferCreateInfo framebufferInfo = {};
 			framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-			framebufferInfo.renderPass = pipeline.render_pass;
+			framebufferInfo.renderPass = pass.rp;
 			framebufferInfo.attachmentCount = 1;
 			framebufferInfo.pAttachments = attachments;
 			framebufferInfo.width = swap_chain_extent.width;
@@ -491,18 +582,17 @@ public:
 		free(buffer.command_buffers);
 	}
 
-	inline bool record_command_buffer(
-			command_buffer& cb, frame_buffer& fb,
-			graphics_pipeline& pipeline, float (&clear_color)[4],
-			uint32_t vertex_count, uint32_t first_vertex)
+	template<size_t VertexBufferCount, size_t DynamicVertexBufferCount, size_t DescriptorSetCount>
+	inline bool record_command_buffer(command_buffer& cb, frame_buffer& fb,
+			float (&clear_color)[4], const render_pass& pass,
+			const draw_call<VertexBufferCount, DynamicVertexBufferCount, DescriptorSetCount>& draw)
 	{
 		for (uint32_t i = 0; i < swap_chain_image_count; i++)
 		{
-			if (!begin_render_pass(cb.command_buffers[i], fb.swap_chain_framebuffers[i], pipeline, clear_color))
+			if (!begin_render_pass(cb.command_buffers[i], fb.swap_chain_framebuffers[i], pass, clear_color))
 				return false;
 
-			vkCmdBindPipeline(cb.command_buffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.pipeline);
-			vkCmdDraw(cb.command_buffers[i], vertex_count, 1, first_vertex, 0);
+			make_draw_calls(cb.command_buffers[i], make_vk_draw_call(draw, i));
 
 			if (!end_render_pass(cb.command_buffers[i]))
 				return false;
@@ -510,25 +600,19 @@ public:
 		return true;
 	}
 
-	template<size_t N>
+	template<typename... DrawCallTypes>
 	inline bool record_command_buffer(
 			command_buffer& cb, frame_buffer& fb,
-			graphics_pipeline& pipeline, float (&clear_color)[4],
-			uint32_t vertex_count, uint32_t first_vertex,
-			const vertex_buffer (&vertex_buffers)[N],
-			const uint64_t (&offsets)[N])
+			float (&clear_color)[4],
+			const render_pass& pass,
+			DrawCallTypes&&... draw_calls)
 	{
-		VkBuffer vbs[N];
-		for (unsigned int j = 0; j < N; j++)
-			vbs[j] = vertex_buffers[j].buffer;
 		for (uint32_t i = 0; i < swap_chain_image_count; i++)
 		{
-			if (!begin_render_pass(cb.command_buffers[i], fb.swap_chain_framebuffers[i], pipeline, clear_color))
+			if (!begin_render_pass(cb.command_buffers[i], fb.swap_chain_framebuffers[i], pass, clear_color))
 				return false;
 
-			vkCmdBindPipeline(cb.command_buffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.pipeline);
-			vkCmdBindVertexBuffers(cb.command_buffers[i], 0, N, vbs, offsets);
-			vkCmdDraw(cb.command_buffers[i], vertex_count, 1, first_vertex, 0);
+			make_draw_calls(cb.command_buffers[i], make_vk_draw_call(draw_calls, i)...);
 
 			if (!end_render_pass(cb.command_buffers[i]))
 				return false;
@@ -536,47 +620,56 @@ public:
 		return true;
 	}
 
-	template<size_t N>
-	inline bool record_command_buffer(
-			command_buffer& cb, frame_buffer& fb,
-			graphics_pipeline& pipeline, float (&clear_color)[4],
-			uint32_t vertex_count, uint32_t first_vertex,
-			const vertex_buffer (&vertex_buffers)[N],
-			const uint64_t (&offsets)[N],
-			const descriptor_set* descriptor_sets,
-			uint32_t descriptor_set_count)
-	{
-		VkDescriptorSet* sets = (VkDescriptorSet*) malloc(max((size_t) 1, sizeof(VkDescriptorSet) * descriptor_set_count));
-		if (sets == nullptr) {
-			fprintf(stderr, "vulkan_renderer.record_command_buffer ERROR: Insufficient memory for VkDescriptorSet array.\n");
-			return false;
-		}
+private:
+	template<size_t VertexBufferCount, size_t DescriptorSetCount>
+	struct vk_draw_call {
+		graphics_pipeline pipeline;
+		uint32_t vertex_count;
+		uint32_t first_vertex;
+		VkBuffer vertex_buffers[VertexBufferCount == 0 ? 1 : VertexBufferCount];
+		uint64_t vertex_buffer_offsets[VertexBufferCount == 0 ? 1 : VertexBufferCount];
+		VkDescriptorSet descriptor_sets[DescriptorSetCount == 0 ? 1 : DescriptorSetCount];
 
-		VkBuffer vbs[N];
-		for (unsigned int j = 0; j < N; j++)
-			vbs[j] = vertex_buffers[j].buffer;
-		for (uint32_t i = 0; i < swap_chain_image_count; i++)
+		template<size_t SrcVertexBufferCount>
+		vk_draw_call(const draw_call<SrcVertexBufferCount, VertexBufferCount - SrcVertexBufferCount, DescriptorSetCount>& src, size_t swap_chain_index) :
+			pipeline(src.pipeline), vertex_count(src.vertex_count), first_vertex(src.first_vertex)
 		{
-			if (!begin_render_pass(cb.command_buffers[i], fb.swap_chain_framebuffers[i], pipeline, clear_color)) {
-				free(sets); return false;
-			}
-
-			for (uint32_t j = 0; j < descriptor_set_count; j++)
-				sets[j] = descriptor_sets[j].sets[i];
-
-			vkCmdBindPipeline(cb.command_buffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.pipeline);
-			vkCmdBindVertexBuffers(cb.command_buffers[i], 0, N, vbs, offsets);
-			vkCmdBindDescriptorSets(cb.command_buffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout, 0, descriptor_set_count, sets, 0, nullptr);
-			vkCmdDraw(cb.command_buffers[i], vertex_count, 1, first_vertex, 0);
-
-			if (!end_render_pass(cb.command_buffers[i])) {
-				free(sets); return false;
-			}
+			for (size_t i = 0; i < SrcVertexBufferCount; i++) {
+				vertex_buffers[i] = src.vertex_buffers[i].buffer;
+				vertex_buffer_offsets[i] = src.vertex_buffer_offsets[i];
+			} for (size_t i = 0; i < VertexBufferCount - SrcVertexBufferCount; i++) {
+				vertex_buffers[SrcVertexBufferCount + i] = src.dynamic_vertex_buffers[i].buffer;
+				vertex_buffer_offsets[SrcVertexBufferCount + i] = src.dynamic_vertex_buffer_offsets[i];
+			} for (size_t i = 0; i < DescriptorSetCount; i++)
+				descriptor_sets[i] = src.descriptor_sets[i].sets[swap_chain_index];
 		}
-		free(sets);
-		return true;
+	};
+
+	template<size_t VertexBufferCount, size_t DynamicVertexBufferCount, size_t DescriptorSetCount>
+	inline vk_draw_call<VertexBufferCount + DynamicVertexBufferCount, DescriptorSetCount> make_vk_draw_call(
+			const draw_call<VertexBufferCount, DynamicVertexBufferCount, DescriptorSetCount>& src, size_t swap_chain_index)
+	{
+		return vk_draw_call<VertexBufferCount + DynamicVertexBufferCount, DescriptorSetCount>(src, swap_chain_index);
 	}
 
+	inline void make_draw_calls(VkCommandBuffer command) { }
+
+	template<size_t VertexBufferCount, size_t DescriptorSetCount, typename... DrawCallTypes>
+	inline void make_draw_calls(VkCommandBuffer command,
+			const vk_draw_call<VertexBufferCount, DescriptorSetCount>& draw,
+			const DrawCallTypes&&... draw_calls)
+	{
+		vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, draw.pipeline.pipeline);
+		if (VertexBufferCount > 0)
+			vkCmdBindVertexBuffers(command, 0, VertexBufferCount, draw.vertex_buffers, draw.vertex_buffer_offsets);
+		if (DescriptorSetCount > 0)
+			vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS, draw.pipeline.layout, 0, DescriptorSetCount, draw.descriptor_sets, 0, nullptr);
+		vkCmdDraw(command, draw.vertex_count, 1, draw.first_vertex, 0);
+
+		make_draw_calls(command, draw_calls...);
+	}
+
+public:
 	inline bool create_vertex_buffer(vertex_buffer& vb, uint64_t size_in_bytes)
 	{
 		return create_buffer(vb.buffer, vb.memory,
@@ -610,6 +703,33 @@ public:
 		vkDestroyBuffer(logical_device, staging_buffer, nullptr);
 		vkFreeMemory(logical_device, staging_buffer_memory, nullptr);
 		return true;
+	}
+
+	inline bool create_dynamic_vertex_buffer(dynamic_vertex_buffer& vb, uint64_t size_in_bytes)
+	{
+		if (!create_buffer(vb.staging_buffer, vb.staging_buffer_memory, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, size_in_bytes))
+		{
+			fprintf(stderr, "vulkan_renderer.create_dynamic_vertex_buffer ERROR: Unable to create staging buffer.\n");
+			return false;
+		}
+
+		vkMapMemory(logical_device, vb.staging_buffer_memory, 0, size_in_bytes, 0, &vb.mapped_memory);
+
+		return create_buffer(vb.buffer, vb.memory,
+				VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, size_in_bytes);
+	}
+
+	inline void delete_dynamic_vertex_buffer(dynamic_vertex_buffer& vb) {
+		vkDestroyBuffer(logical_device, vb.staging_buffer, nullptr);
+		vkFreeMemory(logical_device, vb.staging_buffer_memory, nullptr);
+		vkDestroyBuffer(logical_device, vb.buffer, nullptr);
+		vkFreeMemory(logical_device, vb.memory, nullptr);
+	}
+
+	inline void transfer_dynamic_vertex_buffer(dynamic_vertex_buffer& vb, uint64_t num_bytes) {
+		copy_buffer(vb.staging_buffer, vb.buffer, num_bytes);
 	}
 
 	inline bool create_uniform_buffer(uniform_buffer& ub, uint64_t size_in_bytes)
@@ -1001,7 +1121,8 @@ private:
 			const char* const* enabled_extensions, uint32_t extension_count,
 			device_selector device_selection, const SurfaceType& window,
 			uint32_t window_width, uint32_t window_height,
-			bool require_anisotropic_filtering)
+			bool require_anisotropic_filtering,
+			bool require_sample_shading, bool resettable_command_pool)
 	{
 		VkApplicationInfo appInfo = { };
 		appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -1093,7 +1214,7 @@ private:
 		uint32_t queue_index = 0; swap_chain_details swap_chain_info;
 		physical_device = VK_NULL_HANDLE;
 		for (uint32_t i = 0; i < device_count; i++) {
-			if (is_device_suitable(devices[i], swap_chain_info, device_selection, requested_extensions, require_anisotropic_filtering, queue_index)) {
+			if (is_device_suitable(devices[i], swap_chain_info, device_selection, requested_extensions, require_anisotropic_filtering, require_sample_shading, queue_index)) {
 				physical_device = devices[i]; break;
 			}
 		}
@@ -1116,6 +1237,7 @@ private:
 
 		VkPhysicalDeviceFeatures deviceFeatures = {};
 		deviceFeatures.samplerAnisotropy = (VkBool32) require_anisotropic_filtering;
+		deviceFeatures.sampleRateShading = (require_sample_shading ? VK_TRUE : VK_FALSE);
 
 		VkDeviceCreateInfo device_create_info = {};
 		device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -1151,6 +1273,8 @@ private:
 		poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
 		poolInfo.queueFamilyIndex = queue_index;
 		poolInfo.flags = 0;
+		if (resettable_command_pool)
+			poolInfo.flags |= VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 		if (vkCreateCommandPool(logical_device, &poolInfo, nullptr, &command_pool) != VK_SUCCESS) {
 			fprintf(stderr, "vulkan_renderer.init_helper ERROR: Failed to create command pool.\n");
 			free_swap_chain();
@@ -1282,7 +1406,8 @@ private:
 
 	inline bool begin_render_pass(
 			VkCommandBuffer cb, VkFramebuffer fb,
-			graphics_pipeline& pipeline, float (&clear_color)[4])
+			const render_pass& pass,
+			float (&clear_color)[4])
 	{
 		VkCommandBufferBeginInfo beginInfo = {};
 		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -1296,7 +1421,7 @@ private:
 
 		VkRenderPassBeginInfo render_pass_info = {};
 		render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-		render_pass_info.renderPass = pipeline.render_pass;
+		render_pass_info.renderPass = pass.rp;
 		render_pass_info.framebuffer = fb;
 		render_pass_info.renderArea.offset = {0, 0};
 		render_pass_info.renderArea.extent = swap_chain_extent;
@@ -1580,9 +1705,11 @@ private:
 	}
 
 	template<size_t N>
-	inline bool create_graphics_pipeline(graphics_pipeline& pipeline,
+	inline bool create_graphics_pipeline(
+			graphics_pipeline& pipeline, const render_pass& pass,
 			VkPipelineShaderStageCreateInfo (&shaders)[N],
-			primitive_topology topology)
+			primitive_topology topology,
+			bool enable_sample_shading, float min_sample_shading)
 	{
 		if (!create_pipeline_layout(pipeline)) return false;
 
@@ -1592,7 +1719,7 @@ private:
 		vertexInputInfo.pVertexBindingDescriptions = nullptr;
 		vertexInputInfo.vertexAttributeDescriptionCount = 0;
 		vertexInputInfo.pVertexAttributeDescriptions = nullptr;
-		if (!create_graphics_pipeline(pipeline, shaders, topology, vertexInputInfo)) {
+		if (!create_graphics_pipeline(pipeline, pass, shaders, topology, vertexInputInfo, enable_sample_shading, min_sample_shading)) {
 			vkDestroyPipelineLayout(logical_device, pipeline.layout, nullptr);
 			return false;
 		}
@@ -1600,9 +1727,11 @@ private:
 	}
 
 	template<size_t N, size_t M>
-	inline bool create_graphics_pipeline(graphics_pipeline& pipeline,
+	inline bool create_graphics_pipeline(
+			graphics_pipeline& pipeline, const render_pass& pass,
 			VkPipelineShaderStageCreateInfo (&shaders)[N],
 			primitive_topology topology,
+			bool enable_sample_shading, float min_sample_shading,
 			const VkVertexInputBindingDescription binding,
 			const VkVertexInputAttributeDescription (&attributes)[M])
 	{
@@ -1614,7 +1743,7 @@ private:
 		vertexInputInfo.pVertexBindingDescriptions = &binding;
 		vertexInputInfo.vertexAttributeDescriptionCount = (uint32_t) M;
 		vertexInputInfo.pVertexAttributeDescriptions = attributes;
-		if (!create_graphics_pipeline(pipeline, shaders, topology, vertexInputInfo)) {
+		if (!create_graphics_pipeline(pipeline, pass, shaders, topology, vertexInputInfo, enable_sample_shading, min_sample_shading)) {
 			vkDestroyPipelineLayout(logical_device, pipeline.layout, nullptr);
 			return false;
 		}
@@ -1622,9 +1751,11 @@ private:
 	}
 
 	template<size_t N, size_t M>
-	inline bool create_graphics_pipeline(graphics_pipeline& pipeline,
+	inline bool create_graphics_pipeline(
+			graphics_pipeline& pipeline, const render_pass& pass,
 			VkPipelineShaderStageCreateInfo (&shaders)[N],
 			primitive_topology topology,
+			bool enable_sample_shading, float min_sample_shading,
 			const VkVertexInputBindingDescription binding,
 			const VkVertexInputAttributeDescription (&attributes)[M],
 			const descriptor_set_layout* layouts,
@@ -1638,7 +1769,7 @@ private:
 		vertexInputInfo.pVertexBindingDescriptions = &binding;
 		vertexInputInfo.vertexAttributeDescriptionCount = (uint32_t) M;
 		vertexInputInfo.pVertexAttributeDescriptions = attributes;
-		if (!create_graphics_pipeline(pipeline, shaders, topology, vertexInputInfo)) {
+		if (!create_graphics_pipeline(pipeline, pass, shaders, topology, vertexInputInfo, enable_sample_shading, min_sample_shading)) {
 			vkDestroyPipelineLayout(logical_device, pipeline.layout, nullptr);
 			return false;
 		}
@@ -1647,10 +1778,12 @@ private:
 
 	/* NOTE: this function assumes `pipeline.layout` is initialized */
 	template<size_t N>
-	bool create_graphics_pipeline(graphics_pipeline& pipeline,
+	bool create_graphics_pipeline(
+			graphics_pipeline& pipeline, const render_pass& pass,
 			VkPipelineShaderStageCreateInfo (&shaders)[N],
 			primitive_topology topology,
-			VkPipelineVertexInputStateCreateInfo vertexInputInfo)
+			VkPipelineVertexInputStateCreateInfo vertexInputInfo,
+			bool enable_sample_shading, float min_sample_shading)
 	{
 		VkPipelineInputAssemblyStateCreateInfo inputAssembly = {};
 		inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -1691,18 +1824,18 @@ private:
 
 		VkPipelineMultisampleStateCreateInfo multisampling = {};
 		multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-		multisampling.sampleShadingEnable = VK_FALSE;
+		multisampling.sampleShadingEnable = (enable_sample_shading ? VK_TRUE : VK_FALSE);
 		multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-		multisampling.minSampleShading = 1.0f;
+		multisampling.minSampleShading = min_sample_shading;
 		multisampling.pSampleMask = nullptr;
 		multisampling.alphaToCoverageEnable = VK_FALSE;
 		multisampling.alphaToOneEnable = VK_FALSE;
 
 		VkPipelineColorBlendAttachmentState colorBlendAttachment = {};
 		colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-		colorBlendAttachment.blendEnable = VK_FALSE;
-		colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-		colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+		colorBlendAttachment.blendEnable = VK_TRUE;
+		colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+		colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
 		colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
 		colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
 		colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
@@ -1719,46 +1852,6 @@ private:
 		colorBlending.blendConstants[2] = 0.0f;
 		colorBlending.blendConstants[3] = 0.0f;
 
-		VkAttachmentDescription colorAttachment = {};
-		colorAttachment.format = swap_chain_image_format;
-		colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-		colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-		colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-		colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
-		VkAttachmentReference colorAttachmentRef = {};
-		colorAttachmentRef.attachment = 0;
-		colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-		VkSubpassDescription subpass = {};
-		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-		subpass.colorAttachmentCount = 1;
-		subpass.pColorAttachments = &colorAttachmentRef;
-
-		VkSubpassDependency dependency = {};
-		dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-		dependency.dstSubpass = 0;
-		dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-		dependency.srcAccessMask = 0;
-		dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-		dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-		VkRenderPassCreateInfo renderPassInfo = {};
-		renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-		renderPassInfo.attachmentCount = 1;
-		renderPassInfo.pAttachments = &colorAttachment;
-		renderPassInfo.subpassCount = 1;
-		renderPassInfo.pSubpasses = &subpass;
-		renderPassInfo.dependencyCount = 1;
-		renderPassInfo.pDependencies = &dependency;
-		if (vkCreateRenderPass(logical_device, &renderPassInfo, nullptr, &pipeline.render_pass) != VK_SUCCESS) {
-			fprintf(stderr, "vulkan_renderer.create_render_pipeline ERROR: Failed to create render pass.\n");
-			return false;
-		}
-
 		VkGraphicsPipelineCreateInfo pipelineInfo = {};
 		pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 		pipelineInfo.stageCount = N;
@@ -1772,13 +1865,13 @@ private:
 		pipelineInfo.pColorBlendState = &colorBlending;
 		pipelineInfo.pDynamicState = nullptr;
 		pipelineInfo.layout = pipeline.layout;
-		pipelineInfo.renderPass = pipeline.render_pass;
+		pipelineInfo.renderPass = pass.rp;
 		pipelineInfo.subpass = 0;
 		pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
 		pipelineInfo.basePipelineIndex = -1;
 		if (vkCreateGraphicsPipelines(logical_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline.pipeline) != VK_SUCCESS) {
 			fprintf(stderr, "vulkan_renderer.create_render_pipeline ERROR: Failed to create graphics pipeline.\n");
-			vkDestroyRenderPass(logical_device, pipeline.render_pass, nullptr);
+			vkDestroyRenderPass(logical_device, pass.rp, nullptr);
 			return false;
 		}
 		return true;
@@ -1952,6 +2045,7 @@ private:
 			device_selector device_selection,
 			const char* const (&requested_extensions)[N],
 			bool require_anisotropic_filtering,
+			bool require_sample_shading,
 			uint32_t& queue_index)
 	{
 		/* check that the device properties are suitable */
@@ -2011,12 +2105,12 @@ private:
 		}
 		free(available_extensions);
 
-		if (require_anisotropic_filtering) {
-			VkPhysicalDeviceFeatures supportedFeatures;
-			vkGetPhysicalDeviceFeatures(device, &supportedFeatures);
-			if (supportedFeatures.samplerAnisotropy == VK_FALSE)
-				return false;
-		}
+		VkPhysicalDeviceFeatures supportedFeatures;
+		vkGetPhysicalDeviceFeatures(device, &supportedFeatures);
+		if (require_anisotropic_filtering && supportedFeatures.samplerAnisotropy == VK_FALSE)
+			return false;
+		if (require_sample_shading && supportedFeatures.sampleRateShading == VK_FALSE)
+			return false;
 
 		/* check that swap chain support is adequate */
 		return get_swap_chain_info(device, swap_chain);
@@ -2201,7 +2295,7 @@ private:
 
 	template<typename A> friend bool init(vulkan_renderer&,
 			const char*, uint32_t, const char*, uint32_t, const char* const*, uint32_t,
-			device_selector, const A&, uint32_t, uint32_t, unsigned int, bool);
+			device_selector, const A&, uint32_t, uint32_t, unsigned int, bool, bool, bool);
 };
 
 template<typename SurfaceType>
@@ -2211,14 +2305,15 @@ inline bool init(vulkan_renderer& renderer,
 		const char* const* enabled_extensions, uint32_t extension_count,
 		device_selector device_selection, const SurfaceType& window,
 		uint32_t window_width, uint32_t window_height,
-		unsigned int max_frames_in_flight,
-		bool require_anisotropic_filtering)
+		unsigned int max_frames_in_flight, bool require_anisotropic_filtering,
+		bool require_sample_shading, bool resettable_command_pool)
 {
 	renderer.max_frames_in_flight = max_frames_in_flight;
 	return renderer.init_helper(application_name, application_version,
 			engine_name, engine_version, enabled_extensions, extension_count,
 			device_selection, window, window_width, window_height,
-			require_anisotropic_filtering);
+			require_anisotropic_filtering, require_sample_shading,
+			resettable_command_pool);
 }
 
 } /* namespace mirage */

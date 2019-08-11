@@ -40,7 +40,7 @@ int main(int argc, const char** argv)
 		config.allowed_movement_directions[i] = action_policy::ALLOWED;
 	for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
 		config.allowed_rotations[i] = action_policy::ALLOWED;
-	config.no_op_allowed = false;
+	config.no_op_allowed = true;
 	config.patch_size = 32;
 	config.mcmc_iterations = 4000;
 	config.agent_color = (float*) calloc(config.color_dimension, sizeof(float));
@@ -88,7 +88,7 @@ int main(int argc, const char** argv)
 	config.item_types[3].color[1] = 0.5f;
 	config.item_types[3].color[2] = 0.5f;
 	config.item_types[3].required_item_counts[3] = 1;
-	config.item_types[3].blocks_movement = false;
+	config.item_types[3].blocks_movement = true;
 	config.item_types.length = item_type_count;
 
 	config.item_types[0].intensity_fn.fn = constant_intensity_fn;
@@ -136,7 +136,7 @@ int main(int argc, const char** argv)
 	simulator<empty_data>& sim = *((simulator<empty_data>*) alloca(sizeof(simulator<empty_data>)));
 	if (init(sim, config, empty_data()) != status::OK) {
 		fprintf(stderr, "ERROR: Unable to initialize simulator.\n");
-		return false;
+		return EXIT_FAILURE;
 	}
 
 	uint64_t agent_id; agent_state* agent;
@@ -162,7 +162,7 @@ int main(int argc, const char** argv)
 			steps_in_current_frame++;
 
 			std::unique_lock<std::mutex> lck(lock);
-			while (steps_in_current_frame == max_steps_per_frame) cv.wait(lck);
+			while (simulation_running && steps_in_current_frame == max_steps_per_frame) cv.wait(lck);
 		}
 	});
 
