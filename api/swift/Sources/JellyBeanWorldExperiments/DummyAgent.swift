@@ -45,7 +45,7 @@ struct DummyAgent: Agent {
   }
 }
 
-public func runDummy() {
+public func runDummy() throws {
   let logger = Logger(label: "Jelly Bean World - Dummy Agent")
 
   PythonLibrary.useVersion(3, 7)
@@ -123,7 +123,7 @@ public func runDummy() {
     scentDecay: 0.4,
     scentDiffusion: 0.14,
     removedItemLifetime: 2000)
-  let simulator = Simulator(using: configuration)
+  let simulator = try Simulator(using: configuration)
 
   // Create the agents.
   print("Creating agents.")
@@ -131,7 +131,7 @@ public func runDummy() {
   var agents = [Agent]()
   while agents.count < numAgents {
     let agent = DummyAgent()
-    simulator.add(agent: agent)
+    try simulator.add(agent: agent)
     agents.append(agent)
   }
 
@@ -145,7 +145,7 @@ public func runDummy() {
   var elapsed = Float(0.0)
   let simulationStartTime = simulator.time
   for _ in 0..<100000000 {
-    simulator.step()
+    try simulator.step()
     let interval = Date().timeIntervalSince1970 - startTime
     if interval > 1.0 {
       elapsed += Float(interval)
@@ -153,6 +153,6 @@ public func runDummy() {
       logger.info("\(speed) simulation steps per second.")
       startTime = Date().timeIntervalSince1970
     }
-    painter.draw()
+    try painter.draw()
   }
 }

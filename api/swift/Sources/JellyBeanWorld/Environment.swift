@@ -56,13 +56,12 @@ public final class Environment: ReinforcementLearning.Environment {
   /// Updates the environment according to the provided action.
   @inlinable
   @discardableResult
-  public func step(taking action: Tensor<Int32>) -> Step<Observation, Tensor<Float>> {
+  public func step(taking action: Tensor<Int32>) throws -> Step<Observation, Tensor<Float>> {
     let actions = action.unstacked()
-    step = Step<Observation, Tensor<Float>>.stack(states.indices.map { i in
+    step = Step<Observation, Tensor<Float>>.stack(try states.indices.map { i in
       let previousAgentState = states[i].simulator.agentStates.values.first!
       states[i].agent.nextAction = Int(actions[i].scalarized())
-      // TODO: !!!! Handle this better.
-      try! states[i].simulator.step()
+      try states[i].simulator.step()
       let agentState = states[i].simulator.agentStates.values.first!
       let observation = Observation(
         vision: Tensor<Float>(agentState.vision),
@@ -79,13 +78,11 @@ public final class Environment: ReinforcementLearning.Environment {
   /// Resets the environment.
   @inlinable
   @discardableResult
-  public func reset() -> Step<Observation, Tensor<Float>> {
-    states = configurations.map { configuration -> State in
-      // TODO: !!!! Handle this better.
-      let simulator = try! Simulator(using: configuration.simulatorConfiguration)
+  public func reset() throws -> Step<Observation, Tensor<Float>> {
+    states = try configurations.map { configuration -> State in
+      let simulator = try Simulator(using: configuration.simulatorConfiguration)
       let agent = Agent()
-      // TODO: !!!! Handle this better.
-      try! simulator.add(agent: agent)
+      try simulator.add(agent: agent)
       return State(simulator: simulator, agent: agent)
     }
     let observation = Observation.stack(states.map { state in
@@ -104,9 +101,8 @@ public final class Environment: ReinforcementLearning.Environment {
 
   /// Returns a copy of this environment that is reset before being returned.
   @inlinable
-  public func copy() -> Environment {
-    // TODO: !!!! Handle this better.
-    try! Environment(configurations: configurations)
+  public func copy() throws -> Environment {
+    try Environment(configurations: configurations)
   }
 }
 

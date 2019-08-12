@@ -17,7 +17,7 @@
 #include "include/status.h"
 
 JBW_Status* JBW_NewStatus() {
-  return new JBW_Status { JBW_OK, "" };
+  return new JBW_Status { JBW_OK };
 }
 
 void JBW_DeleteStatus(JBW_Status* status) {

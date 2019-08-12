@@ -17,18 +17,41 @@ import Foundation
 import TensorFlow
 
 public enum JellyBeanWorldError: Error {
-  case NativeError(String) // TODO: This is temporary.
-  /// Failure while trying to save the simulator state at the specified path.
-  case SimulatorSaveFailure(URL)
+  case OutOfMemory
+  case InvalidAgentID
+  case ViolatedPermissions
+  case AgentAlreadyActed
+  case AgentAlreadyExists
+  case ServerMessageParsingFailure
+  case ClientMessageParsingFailure
+  case ServerOutOfMemory
+  case ClientOutOfMemory
+  case IOError
+  case LostConnection
+  case InvalidSimulatorConfiguration
+  case MPIError
+  case UnknownNativeError
 }
 
 @usableFromInline
 internal func checkStatus(_ status: UnsafeMutablePointer<JBW_Status>?) throws {
   let status = status!.pointee
-  let message = String(cString: status.message)
   switch status.code {
   case JBW_OK: ()
-  case _: throw JellyBeanWorldError.NativeError(message)
+  case JBW_OUT_OF_MEMORY: throw JellyBeanWorldError.OutOfMemory
+  case JBW_INVALID_AGENT_ID: throw JellyBeanWorldError.InvalidAgentID
+  case JBW_VIOLATED_PERMISSIONS: throw JellyBeanWorldError.ViolatedPermissions
+  case JBW_AGENT_ALREADY_ACTED: throw JellyBeanWorldError.AgentAlreadyActed
+  case JBW_AGENT_ALREADY_EXISTS: throw JellyBeanWorldError.AgentAlreadyExists
+  case JBW_SERVER_PARSE_MESSAGE_ERROR: throw JellyBeanWorldError.ServerMessageParsingFailure
+  case JBW_CLIENT_PARSE_MESSAGE_ERROR: throw JellyBeanWorldError.ClientMessageParsingFailure
+  case JBW_SERVER_OUT_OF_MEMORY: throw JellyBeanWorldError.ServerOutOfMemory
+  case JBW_CLIENT_OUT_OF_MEMORY: throw JellyBeanWorldError.ClientOutOfMemory
+  case JBW_IO_ERROR: throw JellyBeanWorldError.IOError
+  case JBW_LOST_CONNECTION: throw JellyBeanWorldError.LostConnection
+  case JBW_INVALID_SIMULATOR_CONFIGURATION: throw JellyBeanWorldError.InvalidSimulatorConfiguration
+  case JBW_MPI_ERROR: throw JellyBeanWorldError.MPIError
+  case _: throw JellyBeanWorldError.UnknownNativeError
   }
 }
 
@@ -137,7 +160,17 @@ public final class Simulator {
         handle,
         config.port,
         config.connectionQueueCapacity,
-        config.workerCount, status)
+        config.workerCount,
+        // TODO [PERMISSIONS].
+        Permissions(
+          addAgent: true,
+          removeAgent: true,
+          removeClient: true,
+          setActive: true,
+          getMap: true,
+          getAgentIds: true,
+          getAgentStates: true),
+        status)
       try checkStatus(status)
     }
   }
@@ -185,6 +218,15 @@ public final class Simulator {
         config.port,
         config.connectionQueueCapacity,
         config.workerCount,
+        // TODO [PERMISSIONS].
+        Permissions(
+          addAgent: true,
+          removeAgent: true,
+          removeClient: true,
+          setActive: true,
+          getMap: true,
+          getAgentIds: true,
+          getAgentStates: true),
         status)
       try checkStatus(status)
     }
@@ -224,6 +266,7 @@ public final class Simulator {
   /// - Parameter agent: The agent to be added to this simulator.
   /// - Returns: ID of the new agent.
   @inlinable
+  @discardableResult
   public func add(agent: Agent) throws -> UInt64 {
     var status = JBW_NewStatus()
     defer { JBW_DeleteStatus(status) }
