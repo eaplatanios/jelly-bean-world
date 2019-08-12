@@ -31,6 +31,7 @@ typedef int socklen_t;
 #elif __APPLE__ /* on Mac */
 #include <sys/event.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <netdb.h>
 #include <unistd.h>
 #include <netinet/tcp.h>
