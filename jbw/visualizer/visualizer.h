@@ -3,6 +3,9 @@
 #include "vulkan_renderer.h"
 #include "../simulator.h"
 
+#include <thread>
+#include <condition_variable>
+
 namespace jbw {
 
 using namespace core;
@@ -10,12 +13,6 @@ using namespace mirage;
 
 /* forward declaration */
 template<typename SimulatorData> class visualizer;
-
-template<typename SimulatorData>
-inline void on_framebuffer_resize(GLFWwindow* window, int width, int height) {
-	visualizer<SimulatorData>* v = (visualizer<SimulatorData>*) glfwGetWindowUserPointer(window);
-	v->resized = true;
-}
 
 template<typename SimulatorData>
 inline void cursor_position_callback(GLFWwindow* window, double x, double y)
@@ -29,8 +26,11 @@ inline void cursor_position_callback(GLFWwindow* window, double x, double y)
 	if (!v->left_mouse_button_pressed) {
 		v->left_mouse_button_pressed = true;
 	} else {
+		v->track_agent_id = 0;
 		v->camera_position[0] += (v->last_cursor_x - x) / v->pixel_density;
 		v->camera_position[1] -= (v->last_cursor_y - y) / v->pixel_density;
+		v->translate_start_position[0] = v->camera_position[0];
+		v->translate_start_position[1] = v->camera_position[1];
 	}
 
 	v->last_cursor_x = x;
@@ -56,6 +56,38 @@ inline void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 			v->zoom_animation_start_time = milliseconds();
 			v->zoom_start_pixel_density = v->pixel_density;
 			v->target_pixel_density *= 1.3;
+		} else if (key == GLFW_KEY_0) {
+			v->tracking_animating = false;
+			v->track_agent_id = 0;
+		} else if (key == GLFW_KEY_1) {
+			v->tracking_animating = false;
+			v->track_agent_id = 1;
+		} else if (key == GLFW_KEY_2) {
+			v->tracking_animating = false;
+			v->track_agent_id = 2;
+		} else if (key == GLFW_KEY_3) {
+			v->tracking_animating = false;
+			v->track_agent_id = 3;
+		} else if (key == GLFW_KEY_4) {
+			v->tracking_animating = false;
+			v->track_agent_id = 4;
+		} else if (key == GLFW_KEY_5) {
+			v->tracking_animating = false;
+			v->track_agent_id = 5;
+		} else if (key == GLFW_KEY_6) {
+			v->tracking_animating = false;
+			v->track_agent_id = 6;
+		} else if (key == GLFW_KEY_7) {
+			v->tracking_animating = false;
+			v->track_agent_id = 7;
+		} else if (key == GLFW_KEY_8) {
+			v->tracking_animating = false;
+			v->track_agent_id = 8;
+		} else if (key == GLFW_KEY_9) {
+			v->tracking_animating = false;
+			v->track_agent_id = 9;
+		} else if (key == GLFW_KEY_B) {
+			v->render_background = !v->render_background;
 		}
 	}
 }
@@ -94,7 +126,6 @@ class visualizer
 	};
 
 	GLFWwindow* window;
-	bool resized;
 	uint32_t width;
 	uint32_t height;
 	uint32_t texture_width;
@@ -119,6 +150,7 @@ class visualizer
 	sampler tex_sampler;
 	vertex_buffer scent_quad_buffer;
 	dynamic_vertex_buffer item_quad_buffer;
+	size_t item_vertex_count;
 	size_t item_quad_buffer_capacity;
 	uniform_buffer_data uniform_data;
 	binding_description background_binding;
@@ -133,13 +165,33 @@ class visualizer
 	float target_pixel_density;
 	unsigned long long zoom_animation_start_time;
 
+	/* this is zero if we don't want to track anyone */
+	float translate_start_position[2];
+	float translate_end_position[2];
+	unsigned long long translate_animation_start_time;
+	uint64_t track_agent_id;
+	bool tracking_animating;
+
+	/* the thread that calls `get_map` so we don't need to
+	   do so in `draw_frame`, which keeps everything smooth */
+	std::thread map_retriever;
+	std::mutex scene_lock;
+	std::condition_variable scene_ready_cv;
+	std::atomic_bool running, scene_ready;
+	float left_bound, right_bound, bottom_bound, top_bound;
+	bool render_background;
+
 public:
 	visualizer(simulator<SimulatorData>& sim, uint32_t window_width, uint32_t window_height) :
-			resized(false), width(window_width), height(window_height), sim(sim),
-			background_binding(0, sizeof(vertex)), item_binding(0, sizeof(item_vertex))
+			width(window_width), height(window_height), sim(sim),
+			background_binding(0, sizeof(vertex)), item_binding(0, sizeof(item_vertex)),
+			track_agent_id(0), tracking_animating(false), running(true), scene_ready(false),
+			render_background(true)
 	{
-		camera_position[0] = 0.0f;
-		camera_position[1] = 0.0f;
+		camera_position[0] = 0.5f;
+		camera_position[1] = 0.5f;
+		translate_end_position[0] = camera_position[0];
+		translate_end_position[1] = camera_position[1];
 		pixel_density = 6.0f;
 		target_pixel_density = pixel_density;
 		zoom_start_pixel_density = pixel_density;
@@ -163,7 +215,6 @@ public:
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 		window = glfwCreateWindow(window_width, window_height, "Renderer Test", nullptr, nullptr);
 		glfwSetWindowUserPointer(window, this);
-		glfwSetFramebufferSizeCallback(window, on_framebuffer_resize<SimulatorData>);
 		glfwSetCursorPosCallback(window, cursor_position_callback<SimulatorData>);
 		glfwSetKeyCallback(window, key_callback<SimulatorData>);
 
@@ -307,9 +358,27 @@ public:
 			glfwDestroyWindow(window); glfwTerminate();
 			throw new std::runtime_error("visualizer ERROR: Failed to initialize rendering pipeline.");
 		}
+
+		array<array<patch_state>> patches(64);
+		prepare_scene<true>(patches);
+		for (array<patch_state>& row : patches) {
+			for (patch_state& patch : row) free(patch);
+			free(row);
+		}
+
+		map_retriever = std::thread([this]() {
+			run_map_retriever();
+		});
 	}
 
 	~visualizer() {
+		running = false;
+		scene_ready_cv.notify_one();
+		if (map_retriever.joinable()) {
+			try {
+				map_retriever.join();
+			} catch (...) { }
+		}
 		renderer.wait_until_idle();
 		renderer.delete_sampler(tex_sampler);
 		renderer.delete_dynamic_texture_image(scent_map_texture);
@@ -325,6 +394,11 @@ public:
 		glfwTerminate();
 	}
 
+	inline void track_agent(uint64_t agent_id) {
+		tracking_animating = false;
+		track_agent_id = agent_id;
+	}
+
 	inline bool is_window_closed() {
 		return (bool) glfwWindowShouldClose(window);
 	}
@@ -338,18 +412,116 @@ public:
 		float easing = animation_t * (2 - animation_t);
 		pixel_density = easing * target_pixel_density + (1.0f - easing) * zoom_start_pixel_density;
 
+		if (tracking_animating) {
+			float animation_t = max(0.0f, min(1.0f, (milliseconds() - translate_animation_start_time) / 300.0f));
+			float easing = (animation_t - 1) * (animation_t - 1) * (animation_t - 1) + 1;
+			camera_position[0] = easing * translate_end_position[0] + (1.0f - easing) * translate_start_position[0];
+			camera_position[1] = easing * translate_end_position[1] + (1.0f - easing) * translate_start_position[1];
+		}
+
 		float left = camera_position[0] - 0.5f * (width / pixel_density);
 		float right = camera_position[0] + 0.5f * (width / pixel_density);
 		float bottom = camera_position[1] - 0.5f * (height / pixel_density);
 		float top = camera_position[1] + 0.5f * (height / pixel_density);
-
-		array<array<patch_state>> patches(64);
-		if (sim.get_map({(int64_t) left, (int64_t) bottom}, {(int64_t) ceil(right), (int64_t) ceil(top)}, patches) != status::OK) {
-			fprintf(stderr, "visualizer.draw_frame ERROR: Unable to get map from simulator.\n");
-			return false;
+		{
+			while (running && (left < left_bound || right > right_bound || bottom < bottom_bound || top > top_bound))
+				scene_ready = false;
+			if (!running) return true;
 		}
 
-		unsigned int item_vertex_count = 0;
+		/* construct the model view matrix */
+		float up[] = { 0.0f, 1.0f, 0.0f };
+		float forward[] = { 0.0f, 0.0f, -1.0f };
+		float camera_pos[] = { camera_position[0], camera_position[1], 2.0f };
+		make_identity(uniform_data.mvp.model);
+		make_view_matrix(uniform_data.mvp.view, forward, up, camera_pos);
+		make_orthographic_projection(uniform_data.mvp.projection,
+				-0.5f * (width / pixel_density), 0.5f * (width / pixel_density),
+				-0.5f * (height / pixel_density), 0.5f * (height / pixel_density), -100.0f, 100.0f);
+		uniform_data.pixel_density = pixel_density;
+		uniform_data.patch_size = sim.get_config().patch_size;
+
+		auto reset_command_buffers = [&]() {
+			cleanup_renderer();
+			renderer.delete_dynamic_texture_image(scent_map_texture);
+
+			texture_width = width + 2 * sim.get_config().patch_size;
+			texture_height = height + 2 * sim.get_config().patch_size;
+			size_t image_size = sizeof(pixel) * texture_width * texture_height;
+			if (!renderer.create_dynamic_texture_image(scent_map_texture, image_size, texture_width, texture_height, image_format::R8G8B8A8_UNORM))
+				return false;
+
+			if (!setup_renderer()) return false;
+
+			array<array<patch_state>> patches(64);
+			prepare_scene<true>(patches);
+			for (array<patch_state>& row : patches) {
+				for (patch_state& patch : row) free(patch);
+				free(row);
+			}
+			return true;
+		};
+
+		auto get_window_dimensions = [&](uint32_t& out_width, uint32_t& out_height) {
+			int new_width, new_height;
+			glfwGetFramebufferSize(window, &new_width, &new_height);
+			out_width = (uint32_t) new_width;
+			out_height = (uint32_t) new_height;
+			width = out_width;
+			height = out_height;
+		};
+
+		std::unique_lock<std::mutex> lck(scene_lock);
+		void* pv_uniform_data = (void*) &uniform_data;
+		bool result = renderer.draw_frame(cb, reset_command_buffers, get_window_dimensions, &ub, &pv_uniform_data, 1);
+		scene_ready = false;
+		scene_ready_cv.notify_one();
+		return result;
+	}
+
+private:
+	template<bool HasLock>
+	bool prepare_scene(array<array<patch_state>>& patches)
+	{
+		float left = camera_position[0] - 0.5f * (width / pixel_density) - 0.01f;
+		float right = camera_position[0] + 0.5f * (width / pixel_density) + 0.01f;
+		float bottom = camera_position[1] - 0.5f * (height / pixel_density) - 0.01f;
+		float top = camera_position[1] + 0.5f * (height / pixel_density) + 0.01f;
+
+		bool render_background_map = render_background;
+		if (render_background_map) {
+			if (sim.template get_map<true>({(int64_t) left, (int64_t) bottom}, {(int64_t) ceil(right), (int64_t) ceil(top)}, patches) != status::OK) {
+				fprintf(stderr, "visualizer.draw_frame ERROR: Unable to get map from simulator.\n");
+				return false;
+			}
+		} else {
+			if (sim.template get_map<false>({(int64_t) left, (int64_t) bottom}, {(int64_t) ceil(right), (int64_t) ceil(top)}, patches) != status::OK) {
+				fprintf(stderr, "visualizer.draw_frame ERROR: Unable to get map from simulator.\n");
+				return false;
+			}
+		}
+
+		if (track_agent_id != 0) {
+			agent_state* agent;
+			sim.get_agent_states(&agent, &track_agent_id, 1);
+			if (agent != nullptr) {
+				float new_target_position[] = {agent->current_position.x + 0.5f, agent->current_position.y + 0.5f};
+				agent->lock.unlock();
+
+				if (new_target_position[0] != translate_end_position[0] || new_target_position[1] != translate_end_position[1]) {
+					translate_start_position[0] = camera_position[0];
+					translate_start_position[1] = camera_position[1];
+					translate_end_position[0] = new_target_position[0];
+					translate_end_position[1] = new_target_position[1];
+					translate_animation_start_time = milliseconds();
+					tracking_animating = true;
+				}
+			}
+		} else {
+			tracking_animating = false;
+		}
+
+		size_t new_item_vertex_count = 0;
 		pixel* scent_map_texture_data = (pixel*) scent_map_texture.mapped_memory;
 		const unsigned int patch_size = sim.get_config().patch_size;
 		const unsigned int scent_dimension = sim.get_config().scent_dimension;
@@ -372,15 +544,14 @@ public:
 				size_t new_capacity = 2 * item_quad_buffer_capacity;
 				while (required_item_vertices > new_capacity)
 					new_capacity *= 2;
+				if (!HasLock) scene_lock.lock();
 				renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
 				if (!renderer.create_dynamic_vertex_buffer(item_quad_buffer, new_capacity * sizeof(item_vertex))) {
 					fprintf(stderr, "visualizer.draw_frame ERROR: Unable to expand `item_quad_buffer`.\n");
-					for (array<patch_state>& row : patches) {
-						for (patch_state& patch : row) free(patch);
-						free(row);
-					}
+					if (!HasLock) scene_lock.unlock();
 					return false;
 				}
+				if (!HasLock) scene_lock.unlock();
 			}
 
 			unsigned int texture_width_cells = (unsigned int) (top_right_corner.x - bottom_left_corner.x + 1) * patch_size;
@@ -391,18 +562,20 @@ public:
 			for (int64_t y = bottom_left_corner.y; y <= top_right_corner.y; y++) {
 				if (y_index == patches.length || y != patches[y_index][0].patch_position.y) {
 					/* fill the patches in this row with empty pixels */
-					const int64_t patch_offset_y = y - bottom_left_corner.y;
-					for (unsigned int a = 0; a <= top_right_corner.x - bottom_left_corner.x; a++) {
-						pixel& p = scent_map_texture_data[patch_offset_y * texture_width + a];
-						p.a = 255;
-					}
+					if (render_background_map) {
+						const int64_t patch_offset_y = y - bottom_left_corner.y;
+						for (unsigned int a = 0; a <= top_right_corner.x - bottom_left_corner.x; a++) {
+							pixel& p = scent_map_texture_data[patch_offset_y * texture_width + a];
+							p.a = 255;
+						}
 
-					const int64_t offset_y = patch_offset_y * patch_size;
-					for (unsigned int b = 0; b < patch_size; b++) {
-						for (unsigned int a = 0; a < texture_width_cells; a++) {
-							position texture_position = position(a, b + offset_y);
-							pixel& p = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
-							p.r = 255; p.g = 255; p.b = 255;
+						const int64_t offset_y = patch_offset_y * patch_size;
+						for (unsigned int b = 0; b < patch_size; b++) {
+							for (unsigned int a = 0; a < texture_width_cells; a++) {
+								position texture_position = position(a, b + offset_y);
+								pixel& p = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
+								p.r = 255; p.g = 255; p.b = 255;
+							}
 						}
 					}
 					continue;
@@ -415,101 +588,105 @@ public:
 					const position offset = patch_offset * patch_size;
 					if (x_index == row.length || x != row[x_index].patch_position.x) {
 						/* fill this patch with empty pixels */
-						pixel& p = scent_map_texture_data[patch_offset.y * texture_width + patch_offset.x];
-						p.a = 255;
+						if (render_background_map) {
+							pixel& p = scent_map_texture_data[patch_offset.y * texture_width + patch_offset.x];
+							p.a = 255;
 
-						for (unsigned int b = 0; b < patch_size; b++) {
-							for (unsigned int a = 0; a < patch_size; a++) {
-								position texture_position = position(a, b) + offset;
-								pixel& p = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
-								p.r = 255; p.g = 255; p.b = 255;
+							for (unsigned int b = 0; b < patch_size; b++) {
+								for (unsigned int a = 0; a < patch_size; a++) {
+									position texture_position = position(a, b) + offset;
+									pixel& p = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
+									p.r = 255; p.g = 255; p.b = 255;
+								}
 							}
 						}
 						continue;
 					}
 					const patch_state& patch = row[x_index++];
 
-					pixel& p = scent_map_texture_data[patch_offset.y * texture_width + patch_offset.x];
-					if (patch.fixed) {
-						p.a = 178;
-					} else {
-						p.a = 229;
-					}
+					if (render_background_map) {
+						pixel& p = scent_map_texture_data[patch_offset.y * texture_width + patch_offset.x];
+						if (patch.fixed) {
+							p.a = 178;
+						} else {
+							p.a = 229;
+						}
 
-					for (unsigned int b = 0; b < patch_size; b++) {
-						for (unsigned int a = 0; a < patch_size; a++) {
-							position texture_position = position(a, b) + offset;
-							pixel& current_pixel = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
+						for (unsigned int b = 0; b < patch_size; b++) {
+							for (unsigned int a = 0; a < patch_size; a++) {
+								position texture_position = position(a, b) + offset;
+								pixel& current_pixel = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
 
-							float* cell_scent = patch.scent + ((a*patch_size + b)*scent_dimension);
-							scent_to_color(cell_scent, current_pixel);
+								float* cell_scent = patch.scent + ((a*patch_size + b)*scent_dimension);
+								scent_to_color(cell_scent, current_pixel);
+							}
 						}
 					}
 
 					/* iterate over all items in this patch, creating a quad
-					   for each (we use a triangle list so we need two triangles) */
+					for each (we use a triangle list so we need two triangles) */
 					for (unsigned int i = 0; i < patch.item_count; i++) {
 						const item& it = patch.items[i];
 						const item_properties& item_props = item_types[it.item_type];
-						item_vertices[item_vertex_count].position[0] = it.location.x + 0.5f - 0.4f;
-						item_vertices[item_vertex_count].position[1] = it.location.y + 0.5f - 0.4f;
+						item_vertices[new_item_vertex_count].position[0] = it.location.x + 0.5f - 0.4f;
+						item_vertices[new_item_vertex_count].position[1] = it.location.y + 0.5f - 0.4f;
 						if (item_props.blocks_movement) {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j] + 2.0f;
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j] + 2.0f;
 						} else {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j];
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j];
 						}
-						item_vertices[item_vertex_count].tex_coord[0] = 0.0f;
-						item_vertices[item_vertex_count++].tex_coord[1] = 0.0f;
+						item_vertices[new_item_vertex_count].tex_coord[0] = 0.0f;
+						item_vertices[new_item_vertex_count++].tex_coord[1] = 0.0f;
 
-						item_vertices[item_vertex_count].position[0] = it.location.x + 0.5f - 0.4f;
-						item_vertices[item_vertex_count].position[1] = it.location.y + 0.5f + 0.4f;
+						item_vertices[new_item_vertex_count].position[0] = it.location.x + 0.5f - 0.4f;
+						item_vertices[new_item_vertex_count].position[1] = it.location.y + 0.5f + 0.4f;
 						if (item_props.blocks_movement) {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j] + 2.0f;
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j] + 2.0f;
 						} else {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j];
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j];
 						}
-						item_vertices[item_vertex_count].tex_coord[0] = 0.0f;
-						item_vertices[item_vertex_count++].tex_coord[1] = 1.0f;
+						item_vertices[new_item_vertex_count].tex_coord[0] = 0.0f;
+						item_vertices[new_item_vertex_count++].tex_coord[1] = 1.0f;
 
-						item_vertices[item_vertex_count].position[0] = it.location.x + 0.5f + 0.4f;
-						item_vertices[item_vertex_count].position[1] = it.location.y + 0.5f - 0.4f;
+						item_vertices[new_item_vertex_count].position[0] = it.location.x + 0.5f + 0.4f;
+						item_vertices[new_item_vertex_count].position[1] = it.location.y + 0.5f - 0.4f;
 						if (item_props.blocks_movement) {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j] + 2.0f;
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j] + 2.0f;
 						} else {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j];
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j];
 						}
-						item_vertices[item_vertex_count].tex_coord[0] = 1.0f;
-						item_vertices[item_vertex_count++].tex_coord[1] = 0.0f;
+						item_vertices[new_item_vertex_count].tex_coord[0] = 1.0f;
+						item_vertices[new_item_vertex_count++].tex_coord[1] = 0.0f;
 
-						item_vertices[item_vertex_count].position[0] = it.location.x + 0.5f + 0.4f;
-						item_vertices[item_vertex_count].position[1] = it.location.y + 0.5f + 0.4f;
+						item_vertices[new_item_vertex_count].position[0] = it.location.x + 0.5f + 0.4f;
+						item_vertices[new_item_vertex_count].position[1] = it.location.y + 0.5f + 0.4f;
 						if (item_props.blocks_movement) {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j] + 2.0f;
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j] + 2.0f;
 						} else {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j];
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j];
 						}
-						item_vertices[item_vertex_count].tex_coord[0] = 1.0f;
-						item_vertices[item_vertex_count++].tex_coord[1] = 1.0f;
+						item_vertices[new_item_vertex_count].tex_coord[0] = 1.0f;
+						item_vertices[new_item_vertex_count++].tex_coord[1] = 1.0f;
 
-						item_vertices[item_vertex_count].position[0] = it.location.x + 0.5f + 0.4f;
-						item_vertices[item_vertex_count].position[1] = it.location.y + 0.5f - 0.4f;
+						item_vertices[new_item_vertex_count].position[0] = it.location.x + 0.5f + 0.4f;
+						item_vertices[new_item_vertex_count].position[1] = it.location.y + 0.5f - 0.4f;
 						if (item_props.blocks_movement) {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j] + 2.0f;
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j] + 2.0f;
 						} else {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j];
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j];
 						}
-						item_vertices[item_vertex_count].tex_coord[0] = 1.0f;
-						item_vertices[item_vertex_count++].tex_coord[1] = 0.0f;
+						item_vertices[new_item_vertex_count].tex_coord[0] = 1.0f;
+						item_vertices[new_item_vertex_count++].tex_coord[1] = 0.0f;
 
-						item_vertices[item_vertex_count].position[0] = it.location.x + 0.5f - 0.4f;
-						item_vertices[item_vertex_count].position[1] = it.location.y + 0.5f + 0.4f;
+						item_vertices[new_item_vertex_count].position[0] = it.location.x + 0.5f - 0.4f;
+						item_vertices[new_item_vertex_count].position[1] = it.location.y + 0.5f + 0.4f;
 						if (item_props.blocks_movement) {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j] + 2.0f;
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j] + 2.0f;
 						} else {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = item_props.color[j];
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j];
 						}
-						item_vertices[item_vertex_count].tex_coord[0] = 0.0f;
-						item_vertices[item_vertex_count++].tex_coord[1] = 1.0f;
+						item_vertices[new_item_vertex_count].tex_coord[0] = 0.0f;
+						item_vertices[new_item_vertex_count++].tex_coord[1] = 1.0f;
 					}
 
 					/* iterate over all agents in this patch, creating an oriented triangle for each */
@@ -519,27 +696,26 @@ public:
 						float third[2] = {0};
 						get_triangle_coords(patch.agent_directions[i], first, second, third);
 
-						item_vertices[item_vertex_count].position[0] = patch.agent_positions[i].x + 0.5f + first[0];
-						item_vertices[item_vertex_count].position[1] = patch.agent_positions[i].y + 0.5f + first[1];
-						for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = agent_color[j] + 4.0f;
-						item_vertices[item_vertex_count].tex_coord[0] = 0.0f;
-						item_vertices[item_vertex_count++].tex_coord[1] = 0.0f;
+						item_vertices[new_item_vertex_count].position[0] = patch.agent_positions[i].x + 0.5f + first[0];
+						item_vertices[new_item_vertex_count].position[1] = patch.agent_positions[i].y + 0.5f + first[1];
+						for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = agent_color[j] + 4.0f;
+						item_vertices[new_item_vertex_count].tex_coord[0] = 0.0f;
+						item_vertices[new_item_vertex_count++].tex_coord[1] = 0.0f;
 
-						item_vertices[item_vertex_count].position[0] = patch.agent_positions[i].x + 0.5f + second[0];
-						item_vertices[item_vertex_count].position[1] = patch.agent_positions[i].y + 0.5f + second[1];
-						for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = agent_color[j] + 4.0f;
-						item_vertices[item_vertex_count].tex_coord[0] = 1.0f;
-						item_vertices[item_vertex_count++].tex_coord[1] = 0.0f;
+						item_vertices[new_item_vertex_count].position[0] = patch.agent_positions[i].x + 0.5f + second[0];
+						item_vertices[new_item_vertex_count].position[1] = patch.agent_positions[i].y + 0.5f + second[1];
+						for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = agent_color[j] + 4.0f;
+						item_vertices[new_item_vertex_count].tex_coord[0] = 1.0f;
+						item_vertices[new_item_vertex_count++].tex_coord[1] = 0.0f;
 
-						item_vertices[item_vertex_count].position[0] = patch.agent_positions[i].x + 0.5f + third[0];
-						item_vertices[item_vertex_count].position[1] = patch.agent_positions[i].y + 0.5f + third[1];
-						for (unsigned int j = 0; j < 3; j++) item_vertices[item_vertex_count].color[j] = agent_color[j] + 4.0f;
-						item_vertices[item_vertex_count].tex_coord[0] = 0.0f;
-						item_vertices[item_vertex_count++].tex_coord[1] = 1.0f;
+						item_vertices[new_item_vertex_count].position[0] = patch.agent_positions[i].x + 0.5f + third[0];
+						item_vertices[new_item_vertex_count].position[1] = patch.agent_positions[i].y + 0.5f + third[1];
+						for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = agent_color[j] + 4.0f;
+						item_vertices[new_item_vertex_count].tex_coord[0] = 0.0f;
+						item_vertices[new_item_vertex_count++].tex_coord[1] = 1.0f;
 					}
 				}
 			}
-			renderer.transfer_dynamic_texture_image(scent_map_texture, image_format::R8G8B8A8_UNORM);
 
 			/* position the background quad */
 			vertex vertices[] = {
@@ -550,8 +726,13 @@ public:
 			};
 
 			/* transfer all data to GPU */
-			renderer.fill_vertex_buffer(scent_quad_buffer, vertices, sizeof(vertex) * 4);
+			if (!HasLock) scene_lock.lock();
+			item_vertex_count = new_item_vertex_count;
 			renderer.transfer_dynamic_vertex_buffer(item_quad_buffer, sizeof(item_vertex) * item_vertex_count);
+			if (render_background_map) {
+				renderer.transfer_dynamic_texture_image(scent_map_texture, image_format::R8G8B8A8_UNORM);
+				renderer.fill_vertex_buffer(scent_quad_buffer, vertices, sizeof(vertex) * 4);
+			}
 
 		} else {
 			/* no patches are visible, so move the quad outside the view */
@@ -561,47 +742,17 @@ public:
 				{{top + 10.0f, top + 10.0f}, {0.0f, 1.0f}},
 				{{top + 10.0f, top + 10.0f}, {0.0f, 0.0f}}
 			};
-			renderer.fill_vertex_buffer(scent_quad_buffer, vertices, sizeof(vertex) * 4);
+
+			if (!HasLock) scene_lock.lock();
+			item_vertex_count = new_item_vertex_count;
+			if (render_background_map)
+				renderer.fill_vertex_buffer(scent_quad_buffer, vertices, sizeof(vertex) * 4);
 		}
 
-		for (array<patch_state>& row : patches) {
-			for (patch_state& patch : row) free(patch);
-			free(row);
-		}
-
-		/* construct the model view matrix */
-		float up[] = { 0.0f, 1.0f, 0.0f };
-		float forward[] = { 0.0f, 0.0f, -1.0f };
-		float camera_pos[] = { camera_position[0], camera_position[1], 2.0f };
-		make_identity(uniform_data.mvp.model);
-		make_view_matrix(uniform_data.mvp.view, forward, up, camera_pos);
-		make_orthographic_projection(uniform_data.mvp.projection,
-				-0.5f * (width / pixel_density), 0.5f * (width / pixel_density),
-				-0.5f * (height / pixel_density), 0.5f * (height / pixel_density), -100.0f, 100.0f);
-		uniform_data.pixel_density = pixel_density;
-		uniform_data.patch_size = patch_size;
-
-		auto reset_command_buffers = [&]() {
-			cleanup_renderer();
-			renderer.delete_dynamic_texture_image(scent_map_texture);
-
-			texture_width = width + 2 * sim.get_config().patch_size;
-			texture_height = height + 2 * sim.get_config().patch_size;
-			size_t image_size = sizeof(pixel) * texture_width * texture_height;
-			if (!renderer.create_dynamic_texture_image(scent_map_texture, image_size, texture_width, texture_height, image_format::R8G8B8A8_UNORM))
-				return false;
-
-			return setup_renderer();
-		};
-
-		auto get_window_dimensions = [&](uint32_t& out_width, uint32_t& out_height) {
-			int new_width, new_height;
-			glfwGetFramebufferSize(window, &new_width, &new_height);
-			out_width = (uint32_t) new_width;
-			out_height = (uint32_t) new_height;
-			width = out_width;
-			height = out_height;
-		};
+		left_bound = floor(left / patch_size) * patch_size;
+		right_bound = ceil(right / patch_size) * patch_size;
+		bottom_bound = floor(bottom / patch_size) * patch_size;
+		top_bound = ceil(top / patch_size) * patch_size;
 
 		draw_call<1, 0, 1> draw_scent_map;
 		draw_scent_map.pipeline = scent_map_pipeline;
@@ -619,16 +770,43 @@ public:
 		draw_items.dynamic_vertex_buffer_offsets[0] = 0;
 
 		float clear_color[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-		if (!renderer.record_command_buffer(cb, fb, clear_color, pass, draw_scent_map, draw_items)) {
-			cleanup_renderer();
-			return false;
+		if (render_background_map) {
+			if (!renderer.record_command_buffer(cb, fb, clear_color, pass, draw_scent_map, draw_items)) {
+				cleanup_renderer();
+				if (!HasLock) scene_lock.unlock();
+				return false;
+			}
+		} else {
+			if (!renderer.record_command_buffer(cb, fb, clear_color, pass, draw_items)) {
+				cleanup_renderer();
+				if (!HasLock) scene_lock.unlock();
+				return false;
+			}
 		}
-
-		void* pv_uniform_data = (void*) &uniform_data;
-		return renderer.draw_frame(cb, resized, reset_command_buffers, get_window_dimensions, &ub, &pv_uniform_data, 1);
+		if (!HasLock) {
+			scene_ready_cv.notify_one();
+			scene_ready = true;
+			scene_lock.unlock();
+		}
+		return true;
 	}
 
-private:
+	inline void run_map_retriever()
+	{
+		array<array<patch_state>> patches(64);
+		while (running) {
+			while (running && scene_ready) { }
+			if (!running) break;
+
+			prepare_scene<false>(patches);
+			for (array<patch_state>& row : patches) {
+				for (patch_state& patch : row) free(patch);
+				free(row);
+			}
+			patches.clear();
+		}
+	}
+
 	bool setup_renderer() {
 		dynamic_texture_image dynamic_textures[] = { scent_map_texture };
 		uint32_t texture_bindings[] = { 1 };
@@ -770,7 +948,6 @@ private:
 		}
 	}
 
-	template<typename A> friend void on_framebuffer_resize(GLFWwindow*, int, int);
 	template<typename A> friend void cursor_position_callback(GLFWwindow*, double, double);
 	template<typename A> friend void key_callback(GLFWwindow*, int, int, int, int);
 };

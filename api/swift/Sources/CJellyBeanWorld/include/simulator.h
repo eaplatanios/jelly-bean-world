@@ -267,6 +267,7 @@ const SimulationMap simulatorMap(
   void* clientHandle,
   Position bottomLeftCorner,
   Position topRightCorner,
+  bool getScentMap,
   JBW_Status* status);
 
 const AgentIDList simulatorAgentIds(

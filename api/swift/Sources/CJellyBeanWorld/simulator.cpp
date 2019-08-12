@@ -593,19 +593,21 @@ inline void init(
     status->message = "Insufficient memory while initializing a map patch.";
     return;
   }
-  patch.scent = (float*) malloc(sizeof(float) * n * n * config.scent_dimension);
-  if (patch.scent == nullptr) {
-    free(patch.items);
-    free(patch.agents);
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while initializing a map patch.";
-    return;
+  if (src.scent != nullptr) {
+    patch.scent = (float*) malloc(sizeof(float) * n * n * config.scent_dimension);
+    if (patch.scent == nullptr) {
+      free(patch.items);
+      free(patch.agents);
+      status->code = JBW_OUT_OF_MEMORY_ERROR;
+      status->message = "Insufficient memory while initializing a map patch.";
+      return;
+    }
   }
   patch.vision = (float*) malloc(sizeof(float) * n * n * config.color_dimension);
   if (patch.vision == nullptr) {
     free(patch.items);
     free(patch.agents);
-    free(patch.scent);
+    if (src.scent != nullptr) free(patch.scent);
     status->code = JBW_OUT_OF_MEMORY_ERROR;
     status->message = "Insufficient memory while initializing a map patch.";
     return;
@@ -625,7 +627,7 @@ inline void init(
   patch.numItems = src.item_count;
   patch.numAgents = src.agent_count;
   patch.fixed = src.fixed;
-  memcpy(patch.scent, src.scent, sizeof(float) * n * n * config.scent_dimension);
+  if (src.scent != nullptr) memcpy(patch.scent, src.scent, sizeof(float) * n * n * config.scent_dimension);
   memcpy(patch.vision, src.vision, sizeof(float) * n * n * config.color_dimension);
 }
 
@@ -633,7 +635,8 @@ inline void init(
 inline void free(SimulationMapPatch& patch) {
   free(patch.items);
   free(patch.agents);
-  free(patch.scent);
+  if (patch.scent != nullptr)
+    free(patch.scent);
   free(patch.vision);
 }
 
@@ -1655,6 +1658,7 @@ const SimulationMap simulatorMap(
   void* clientHandle,
   Position bottomLeftCorner,
   Position topRightCorner,
+  bool getScentMap,
   JBW_Status* jbwStatus
 ) {
   position bottom_left = position(bottomLeftCorner.x, bottomLeftCorner.y);
@@ -1663,7 +1667,12 @@ const SimulationMap simulatorMap(
     /* the simulation is local, so call get_map directly */
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
     array<array<patch_state>> patches(16);
-    status result = sim_handle->get_map(bottom_left, top_right, patches);
+    status result;
+    if (getScentMap) {
+      result = sim_handle->get_map<true>(bottom_left, top_right, patches);
+    } else {
+      result = sim_handle->get_map<false>(bottom_left, top_right, patches);
+    }
     if (result != status::OK) {
       /* TODO: translate status enum */
       jbwStatus->code = JBW_UNKNOWN_ERROR;
@@ -1691,7 +1700,7 @@ const SimulationMap simulatorMap(
     }
 
     client_ptr->data.waiting_for_server = true;
-    if (!send_get_map(*client_ptr, bottom_left, top_right)) {
+    if (!send_get_map(*client_ptr, bottom_left, top_right, getScentMap)) {
       jbwStatus->code = JBW_COMMUNICATION_ERROR;
       jbwStatus->message = "Failed to send a \"get map\" request.";
       return EMPTY_SIM_MAP;

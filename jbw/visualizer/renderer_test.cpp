@@ -27,12 +27,6 @@ struct model_view_matrix {
 	float projection[16];
 };
 
-bool resized = false;
-
-inline void on_framebuffer_resize(GLFWwindow* window, int width, int height) {
-	resized = true;
-}
-
 inline void cleanup(GLFWwindow* window) {
 	glfwDestroyWindow(window);
 	glfwTerminate();
@@ -51,6 +45,7 @@ inline void cleanup(GLFWwindow* window,
 inline void cleanup_renderer(
 		vulkan_renderer& renderer,
 		graphics_pipeline& pipeline,
+		render_pass& pass,
 		frame_buffer& fb,
 		command_buffer& cb,
 		uniform_buffer& ub,
@@ -63,6 +58,7 @@ inline void cleanup_renderer(
 	renderer.delete_descriptor_pool(pool);
 	renderer.delete_frame_buffer(fb);
 	renderer.delete_graphics_pipeline(pipeline);
+	renderer.delete_render_pass(pass);
 }
 
 inline void cross(float (&out)[3],
@@ -119,7 +115,7 @@ inline void make_perspective_projection(float (&proj)[16],
 template<size_t N>
 bool setup_renderer(vulkan_renderer& renderer,
 		shader& vertex_shader, shader& fragment_shader,
-		graphics_pipeline& pipeline,
+		graphics_pipeline& pipeline, render_pass& pass,
 		frame_buffer& fb, command_buffer& cb,
 		uniform_buffer& ub, const vertex_buffer& vb,
 		descriptor_pool& pool,
@@ -130,31 +126,35 @@ bool setup_renderer(vulkan_renderer& renderer,
 		const dynamic_texture_image& texture,
 		const sampler& sampler)
 {
-	float clear_color[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-	vertex_buffer vertex_buffers[] = { vb };
-	uint64_t offsets[] = { 0 };
 	uint32_t ub_binding = 0;
 	uint32_t texture_binding = 1;
 	descriptor_type pool_types[] = { descriptor_type::UNIFORM_BUFFER, descriptor_type::COMBINED_IMAGE_SAMPLER };
-	if (!renderer.create_graphics_pipeline(pipeline, vertex_shader, "main", fragment_shader, "main", primitive_topology::TRIANGLE_STRIP, binding, attributes, &layout, 1)) {
+	if (!renderer.create_render_pass(pass)) {
+		renderer.delete_render_pass(pass);
+	} else if (!renderer.create_graphics_pipeline(pipeline, pass, vertex_shader, "main", fragment_shader, "main", primitive_topology::TRIANGLE_STRIP, false, 0.0f, binding, attributes, &layout, 1)) {
+		renderer.delete_render_pass(pass);
 		return false;
-	} else if (!renderer.create_frame_buffer(fb, pipeline)) {
+	} else if (!renderer.create_frame_buffer(fb, pass)) {
 		renderer.delete_graphics_pipeline(pipeline);
+		renderer.delete_render_pass(pass);
 		return false;
 	} else if (!renderer.create_uniform_buffer(ub, sizeof(model_view_matrix))) {
 		renderer.delete_frame_buffer(fb);
 		renderer.delete_graphics_pipeline(pipeline);
+		renderer.delete_render_pass(pass);
 		return false;
 	} else if (!renderer.create_descriptor_pool(pool, pool_types, 2)) {
 		renderer.delete_uniform_buffer(ub);
 		renderer.delete_frame_buffer(fb);
 		renderer.delete_graphics_pipeline(pipeline);
+		renderer.delete_render_pass(pass);
 		return false;
 	} else if (!renderer.create_descriptor_set(ub_set, &ub, &ub_binding, 1, nullptr, nullptr, 0, &texture, &texture_binding, 1, &sampler, layout, pool)) {
 		renderer.delete_uniform_buffer(ub);
 		renderer.delete_descriptor_pool(pool);
 		renderer.delete_frame_buffer(fb);
 		renderer.delete_graphics_pipeline(pipeline);
+		renderer.delete_render_pass(pass);
 		return false;
 	} else if (!renderer.create_command_buffer(cb)) {
 		renderer.delete_uniform_buffer(ub);
@@ -162,9 +162,21 @@ bool setup_renderer(vulkan_renderer& renderer,
 		renderer.delete_descriptor_pool(pool);
 		renderer.delete_frame_buffer(fb);
 		renderer.delete_graphics_pipeline(pipeline);
+		renderer.delete_render_pass(pass);
 		return false;
-	} else if (!renderer.record_command_buffer(cb, fb, pipeline, clear_color, 4, 0, vertex_buffers, offsets, &ub_set, 1)) {
-		cleanup_renderer(renderer, pipeline, fb, cb, ub, ub_set, pool);
+	}
+
+	draw_call<1, 0, 1> draw;
+	draw.pipeline = pipeline;
+	draw.descriptor_sets[0] = ub_set;
+	draw.first_vertex = 0;
+	draw.vertex_count = 4;
+	draw.vertex_buffers[0] = vb;
+	draw.vertex_buffer_offsets[0] = 0;
+
+	float clear_color[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+	if (!renderer.record_command_buffer(cb, fb, clear_color, pass, draw)) {
+		cleanup_renderer(renderer, pipeline, pass, fb, cb, ub, ub_set, pool);
 		return false;
 	}
 	return true;
@@ -173,16 +185,16 @@ bool setup_renderer(vulkan_renderer& renderer,
 int main(int argc, const char** argv)
 {
 	size_t vertex_shader_size;
-	char* vertex_shader_src = read_file<true>("vert.spv", vertex_shader_size);
+	char* vertex_shader_src = read_file<true>("renderer_test_vertex_shader.spv", vertex_shader_size);
 	if (vertex_shader_src == nullptr) {
-		fprintf(stderr, "ERROR: Unable to read 'vert.spv'.\n");
+		fprintf(stderr, "ERROR: Unable to read 'renderer_test_vertex_shader.spv'.\n");
 		return EXIT_FAILURE;
 	}
 
 	size_t fragment_shader_size;
-	char* fragment_shader_src = read_file<true>("frag.spv", fragment_shader_size);
+	char* fragment_shader_src = read_file<true>("renderer_test_fragment_shader.spv", fragment_shader_size);
 	if (fragment_shader_src == nullptr) {
-		fprintf(stderr, "ERROR: Unable to read 'frag.spv'.\n");
+		fprintf(stderr, "ERROR: Unable to read 'renderer_test_fragment_shader.spv'.\n");
 		free(vertex_shader_src);
 		return EXIT_FAILURE;
 	}
@@ -191,13 +203,12 @@ int main(int argc, const char** argv)
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 	uint32_t window_width = 800, window_height = 800;
 	GLFWwindow* window = glfwCreateWindow(window_width, window_height, "Renderer Test", nullptr, nullptr);
-	glfwSetFramebufferSizeCallback(window, on_framebuffer_resize);
 
 	uint32_t extension_count = 0;
 	const char** required_extensions = glfwGetRequiredInstanceExtensions(&extension_count);
 	vulkan_renderer renderer("Renderer Test", 0, "no engine", 0,
 			required_extensions, extension_count, device_selector::FIRST_ANY,
-			glfw_surface(window), window_width, window_height, 2, false);
+			glfw_surface(window), window_width, window_height, 2, false, false, false);
 
 	shader vertex_shader, fragment_shader;
 	if (!renderer.create_shader(vertex_shader, vertex_shader_src, vertex_shader_size)) {
@@ -230,6 +241,7 @@ int main(int argc, const char** argv)
 	renderer.fill_vertex_buffer(vb, (void*) vertices, sizeof(vertex) * 4);
 
 	graphics_pipeline pipeline;
+	render_pass pass;
 	frame_buffer fb;
 	command_buffer cb;
 	descriptor_set_layout layout;
@@ -250,7 +262,7 @@ int main(int argc, const char** argv)
 	}
 
 	size_t image_size = sizeof(pixel) * 32 * 32;
-	if (!renderer.create_dynamic_texture_image(texture, image_size, 32, 32)) {
+	if (!renderer.create_dynamic_texture_image(texture, image_size, 32, 32, image_format::R8G8B8A8_UNORM)) {
 		renderer.delete_descriptor_set_layout(layout);
 		renderer.delete_vertex_buffer(vb);
 		cleanup(window, renderer, vertex_shader, fragment_shader);
@@ -268,8 +280,8 @@ int main(int argc, const char** argv)
 	}
 
 	auto reset_command_buffers = [&]() {
-		cleanup_renderer(renderer, pipeline, fb, cb, ub, ub_set, pool);
-		return setup_renderer(renderer, vertex_shader, fragment_shader, pipeline, fb, cb, ub, vb, pool, ub_set, binding, attributes, layout, texture, sampler);
+		cleanup_renderer(renderer, pipeline, pass, fb, cb, ub, ub_set, pool);
+		return setup_renderer(renderer, vertex_shader, fragment_shader, pipeline, pass, fb, cb, ub, vb, pool, ub_set, binding, attributes, layout, texture, sampler);
 	};
 
 	auto get_window_dimensions = [&](uint32_t& width, uint32_t& height) {
@@ -281,10 +293,10 @@ int main(int argc, const char** argv)
 		window_height = height;
 	};
 
-	if (!setup_renderer(renderer, vertex_shader, fragment_shader, pipeline, fb, cb, ub, vb, pool, ub_set, binding, attributes, layout, texture, sampler)) {
+	if (!setup_renderer(renderer, vertex_shader, fragment_shader, pipeline, pass, fb, cb, ub, vb, pool, ub_set, binding, attributes, layout, texture, sampler)) {
 		renderer.delete_descriptor_set_layout(layout);
 		renderer.delete_vertex_buffer(vb);
-		cleanup_renderer(renderer, pipeline, fb, cb, ub, ub_set, pool);
+		cleanup_renderer(renderer, pipeline, pass, fb, cb, ub, ub_set, pool);
 		return EXIT_FAILURE;
 	}
 
@@ -296,7 +308,6 @@ int main(int argc, const char** argv)
 	timer stopwatch;
 	uint64_t elapsed = 0;
 	uint64_t frame_count = 0;
-	bool resized = false;
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
 
@@ -311,7 +322,7 @@ int main(int argc, const char** argv)
 				texture_data[i * 32 + j].a = 255;
 			}
 		}
-		renderer.transfer_dynamic_texture_image(texture);
+		renderer.transfer_dynamic_texture_image(texture, image_format::R8G8B8A8_UNORM);
 
 		/* construct the view matrix */
 		float up[] = { 0.0f, 1.0f, 0.0f };
@@ -325,7 +336,7 @@ int main(int argc, const char** argv)
 				-100.0f, 100.0f);
 
 		void* transform_data = (void*) &transform;
-		renderer.draw_frame(cb, resized, reset_command_buffers, get_window_dimensions, &ub, &transform_data, 1);
+		renderer.draw_frame(cb, reset_command_buffers, get_window_dimensions, &ub, &transform_data, 1);
 		frame_count++;
 
 		if (stopwatch.milliseconds() >= 1000) {
@@ -340,7 +351,7 @@ int main(int argc, const char** argv)
 	renderer.delete_dynamic_texture_image(texture);
 	renderer.delete_descriptor_set_layout(layout);
 	renderer.delete_vertex_buffer(vb);
-	cleanup_renderer(renderer, pipeline, fb, cb, ub, ub_set, pool);
+	cleanup_renderer(renderer, pipeline, pass, fb, cb, ub, ub_set, pool);
 	cleanup(window, renderer, vertex_shader, fragment_shader);
 	return EXIT_SUCCESS;
 }

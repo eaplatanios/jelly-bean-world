@@ -148,6 +148,7 @@ void* alloc_position_keys(size_t n, size_t element_size) {
 template<typename PerPatchData, typename ItemType>
 struct map {
 	hash_map<position, patch<PerPatchData>> patches;
+	array<position> patch_positions;
 
 	unsigned int n;
 	unsigned int mcmc_iterations;
@@ -161,7 +162,7 @@ struct map {
 
 public:
 	map(unsigned int n, unsigned int mcmc_iterations, const ItemType* item_types, unsigned int item_type_count, uint_fast32_t seed) :
-		patches(1024, alloc_position_keys), n(n), mcmc_iterations(mcmc_iterations), initial_seed(seed), cache(item_types, item_type_count, n)
+		patches(1024, alloc_position_keys), patch_positions(512), n(n), mcmc_iterations(mcmc_iterations), initial_seed(seed), cache(item_types, item_type_count, n)
 	{
 		rng.seed(seed);
 #if !defined(NDEBUG)
@@ -204,32 +205,17 @@ public:
 	inline patch_type& get_or_make_patch(const position& patch_position)
 	{
 		bool contains; unsigned int bucket;
-		if (ResizeMap) patches.check_size(alloc_position_keys);
+		if (ResizeMap) {
+			patches.check_size(alloc_position_keys);
+			patch_positions.ensure_capacity(patch_positions.length + 1);
+		}
 		patch_type& p = patches.get(patch_position, contains, bucket);
 		if (!contains) {
 			/* uniformly sample an existing patch to initialize the new patch */
 			if (patches.table.size > 0) {
-				position patch_positions[8];
-				patch_positions[0] = patch_position.up();
-				patch_positions[1] = patch_position.down();
-				patch_positions[2] = patch_position.left();
-				patch_positions[3] = patch_position.right();
-				patch_positions[4] = patch_position.up().left();
-				patch_positions[5] = patch_position.up().right();
-				patch_positions[6] = patch_position.down().left();
-				patch_positions[7] = patch_position.down().right();
-
-				patch_type* neighbors[8]; unsigned int neighbor_count = 0;
-				for (unsigned int i = 0; i < 8; i++) {
-					neighbors[neighbor_count] = get_patch_if_exists(patch_positions[i]);
-					if (neighbors[neighbor_count] != nullptr)
-						patch_positions[neighbor_count++] = patch_positions[i];
-				}
-
-				unsigned int sampled_index = rng() % neighbor_count;
-
 				/* copy the items from the existing patch into the new patch */
-				init(p, neighbors[sampled_index]->items, (patch_position - patch_positions[sampled_index]) * n);
+				position sampled_patch_position = patch_positions[rng() % patch_positions.length];
+				init(p, patches.get(sampled_patch_position).items, (patch_position - sampled_patch_position) * n);
 			} else {
 				/* there are no patches so initialize an empty patch */
 				init(p);
@@ -238,6 +224,7 @@ public:
 			/* add a new patch */
 			patches.table.keys[bucket] = patch_position;
 			patches.table.size++;
+			patch_positions[patch_positions.length++] = patch_position;
 		}
 		return p;
 	}
@@ -253,15 +240,16 @@ public:
 	unsigned int get_fixed_neighborhood(
 			position world_position,
 			patch_type* neighborhood[4],
-			position patch_positions[4])
+			position out_patch_positions[4])
 	{
-		unsigned int index = get_neighborhood_positions(world_position, patch_positions);
+		unsigned int index = get_neighborhood_positions(world_position, out_patch_positions);
 
 		patches.check_size(patches.table.size + 16, alloc_position_keys);
+		patch_positions.ensure_capacity(patch_positions.length + 16);
 		for (unsigned int i = 0; i < 4; i++)
-			neighborhood[i] = &get_or_make_patch<false>(patch_positions[i]);
+			neighborhood[i] = &get_or_make_patch<false>(out_patch_positions[i]);
 
-		fix_patches(neighborhood, patch_positions, 4);
+		fix_patches(neighborhood, out_patch_positions, 4);
 		return index;
 	}
 
@@ -477,13 +465,18 @@ inline bool init(map<PerPatchData, ItemType>& world, unsigned int n,
 		unsigned int mcmc_iterations, const ItemType* item_types,
 		unsigned int item_type_count, uint_fast32_t seed)
 {
-	if (!hash_map_init(world.patches, 1024, alloc_position_keys))
+	if (!hash_map_init(world.patches, 1024, alloc_position_keys)) {
 		return false;
+	} else if (!array_init(world.patch_positions, 512)) {
+		free(world.patches);
+		return false;
+	}
 	world.n = n;
 	world.mcmc_iterations = mcmc_iterations;
 	world.initial_seed = seed;
 	if (!init(world.cache, item_types, item_type_count, n)) {
 		free(world.patches);
+		free(world.patch_positions);
 		return false;
 	}
 
@@ -523,6 +516,7 @@ bool read(map<PerPatchData, ItemType>& world, Stream& in,
 	if (!read(world.n, in)
 	 || !read(world.mcmc_iterations, in)
 	 || !read(world.initial_seed, in)
+	 || !read(world.patch_positions, in)
 	 || !read(world.patches, in, alloc_position_keys, scribe, patch_reader))
 		return false;
 	if (!init(world.cache, item_types, item_type_count, world.n)) {
@@ -549,6 +543,7 @@ bool write(const map<PerPatchData, ItemType>& world, Stream& out,
 	return write(world.n, out)
 		&& write(world.mcmc_iterations, out)
 		&& write(world.initial_seed, out)
+		&& write(world.patch_positions, out)
 		&& write(world.patches, out, scribe, patch_writer);
 }
 

@@ -1046,43 +1046,54 @@ struct patch_state {
     }
 
     static inline void free(patch_state& patch) {
-        core::free(patch.scent);
+        if (patch.scent != nullptr)
+            core::free(patch.scent);
         core::free(patch.vision);
         core::free(patch.items);
         core::free(patch.agent_positions);
         core::free(patch.agent_directions);
     }
 
+    template<bool InitializeScent>
     inline bool init_helper(unsigned int n,
             unsigned int scent_dimension, unsigned int color_dimension,
             unsigned int item_count, unsigned int agent_count)
     {
-        scent = (float*) calloc(n * n * scent_dimension, sizeof(float));
-        if (scent == NULL) {
-            fprintf(stderr, "patch_state.init_helper ERROR: Insufficient memory for scent.\n");
-            return false;
+        if (InitializeScent) {
+            scent = (float*) calloc(n * n * scent_dimension, sizeof(float));
+            if (scent == NULL) {
+                fprintf(stderr, "patch_state.init_helper ERROR: Insufficient memory for scent.\n");
+                return false;
+            }
+        } else {
+            scent = nullptr;
         }
         vision = (float*) calloc(n * n * color_dimension, sizeof(float));
         if (vision == NULL) {
             fprintf(stderr, "patch_state.init_helper ERROR: Insufficient memory for vision.\n");
-            core::free(scent); return false;
+            if (InitializeScent) core::free(scent);
+            return false;
         }
         items = (item*) malloc(sizeof(item) * item_count);
         if (items == NULL) {
             fprintf(stderr, "patch_state.init_helper ERROR: Insufficient memory for items.\n");
-            core::free(scent); core::free(vision); return false;
+            if (InitializeScent) core::free(scent);
+            core::free(vision); return false;
         }
         agent_positions = (position*) malloc(sizeof(position) * agent_count);
         if (agent_positions == NULL) {
             fprintf(stderr, "patch_state.init_helper ERROR: Insufficient memory for agent_positions.\n");
-            core::free(scent); core::free(vision);
-            core::free(items); return false;
+            if (InitializeScent) core::free(scent);
+            core::free(vision); core::free(items);
+            return false;
         }
         agent_directions = (direction*) malloc(sizeof(direction) * agent_count);
         if (agent_directions == NULL) {
             fprintf(stderr, "patch_state.init_helper ERROR: Insufficient memory for agent_directions.\n");
-            core::free(scent); core::free(vision);
-            core::free(items); return false;
+            if (InitializeScent) core::free(scent);
+            core::free(vision); core::free(items);
+            core::free(agent_positions);
+            return false;
         }
         return true;
     }
@@ -1093,13 +1104,14 @@ struct patch_state {
  * not initialize the contents of any of the fields, except for `scent` and
  * `vision`, which are initialized to zeros.
  */
+template<bool InitializeScent>
 inline bool init(patch_state& patch, unsigned int n,
         unsigned int scent_dimension, unsigned int color_dimension,
         unsigned int item_count, unsigned int agent_count)
 {
     patch.item_count = item_count;
     patch.agent_count = agent_count;
-    return patch.init_helper(n, scent_dimension, color_dimension, item_count, agent_count);
+    return patch.init_helper<InitializeScent>(n, scent_dimension, color_dimension, item_count, agent_count);
 }
 
 /**
@@ -1107,11 +1119,14 @@ inline bool init(patch_state& patch, unsigned int n,
  */
 template<typename Stream>
 bool read(patch_state& patch, Stream& in, const simulator_config& config) {
+    bool has_scent;
     unsigned int n = config.patch_size;
     return read(patch.patch_position, in) && read(patch.fixed, in)
         && read(patch.item_count, in) && read(patch.agent_count, in)
-        && patch.init_helper(n, config.scent_dimension, config.color_dimension, patch.item_count, patch.agent_count)
-        && read(patch.scent, in, n * n * config.scent_dimension)
+        && read(has_scent, in)
+        && (!has_scent || patch.init_helper<true>(n, config.scent_dimension, config.color_dimension, patch.item_count, patch.agent_count))
+        && (has_scent || patch.init_helper<false>(n, config.scent_dimension, config.color_dimension, patch.item_count, patch.agent_count))
+        && (!has_scent || read(patch.scent, in, n * n * config.scent_dimension))
         && read(patch.vision, in, n * n * config.color_dimension)
         && read(patch.items, in, patch.item_count)
         && read(patch.agent_positions, in, patch.agent_count)
@@ -1126,6 +1141,7 @@ bool write(const patch_state& patch, Stream& out, const simulator_config& config
     unsigned int n = config.patch_size;
     return write(patch.patch_position, out) && write(patch.fixed, out)
         && write(patch.item_count, out) && write(patch.agent_count, out)
+        && write(patch.scent != nullptr, out)
         && write(patch.scent, out, n * n * config.scent_dimension)
         && write(patch.vision, out, n * n * config.color_dimension)
         && write(patch.items, out, patch.item_count)
@@ -1590,6 +1606,7 @@ public:
      *      represents a row of patches that all share the same `y` value in
      *      their patch positions;
      */
+    template<bool GetScentMap>
     status get_map(
             position bottom_left_corner,
             position top_right_corner,
@@ -1617,7 +1634,7 @@ public:
                 if (!current_row.ensure_capacity(current_row.length + 1))
                     return status::OUT_OF_MEMORY;
                 patch_state& state = current_row[current_row.length];
-                if (!init(state, config.patch_size,
+                if (!init<GetScentMap>(state, config.patch_size,
                     config.scent_dimension, config.color_dimension,
                     (unsigned int) patch->items.length,
                     (unsigned int) patch->data.agents.length)) return status::OUT_OF_MEMORY;
@@ -1640,22 +1657,24 @@ public:
 
                 /* consider all patches in the neighborhood of 'patch' */
                 position patch_world_position = position(x, y) * config.patch_size;
-                for (unsigned int a = 0; a < config.patch_size; a++) {
-                    for (unsigned int b = 0; b < config.patch_size; b++) {
-                        position current_position = patch_world_position + position(a, b);
-                        patch_type* neighborhood[4]; position patch_positions[4];
-                        unsigned int patch_count = world.get_neighborhood(current_position, neighborhood, patch_positions);
-                        for (unsigned int i = 0; i < patch_count; i++) {
-                            /* iterate over neighboring items, and add their contributions to scent and vision */
-                            for (unsigned int j = 0; j < neighborhood[i]->items.length; j++) {
-                                const item& item = neighborhood[i]->items[j];
+                if (GetScentMap) {
+                    for (unsigned int a = 0; a < config.patch_size; a++) {
+                        for (unsigned int b = 0; b < config.patch_size; b++) {
+                            position current_position = patch_world_position + position(a, b);
+                            patch_type* neighborhood[4]; position patch_positions[4];
+                            unsigned int patch_count = world.get_neighborhood(current_position, neighborhood, patch_positions);
+                            for (unsigned int i = 0; i < patch_count; i++) {
+                                /* iterate over neighboring items, and add their contributions to scent and vision */
+                                for (unsigned int j = 0; j < neighborhood[i]->items.length; j++) {
+                                    const item& item = neighborhood[i]->items[j];
 
-                                /* check if the item is too old; if so, ignore it */
-                                if (item.deletion_time > 0 && time >= item.deletion_time + config.deleted_item_lifetime)
-                                    continue;
+                                    /* check if the item is too old; if so, ignore it */
+                                    if (item.deletion_time > 0 && time >= item.deletion_time + config.deleted_item_lifetime)
+                                        continue;
 
-                                compute_scent_contribution(scent_model, item, current_position, time,
-                                        config, state.scent + ((a*config.patch_size + b)*config.scent_dimension));
+                                    compute_scent_contribution(scent_model, item, current_position, time,
+                                            config, state.scent + ((a*config.patch_size + b)*config.scent_dimension));
+                                }
                             }
                         }
                     }

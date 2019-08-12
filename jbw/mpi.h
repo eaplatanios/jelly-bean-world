@@ -707,10 +707,11 @@ inline bool receive_get_map(
 	state.client_states_lock.unlock();
 
 	position bottom_left, top_right;
+	bool get_scent_map;
 	status response;
 	array<array<patch_state>> patches(32);
 	bool success = true;
-	if (!read(bottom_left, in) || !read(top_right, in)) {
+	if (!read(bottom_left, in) || !read(top_right, in) || !read(get_scent_map, in)) {
 		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
@@ -720,7 +721,11 @@ inline bool receive_get_map(
 		response = status::PERMISSION_ERROR;
 	} else {
 		cstate.lock.unlock();
-		response = sim.get_map(bottom_left, top_right, patches);
+		if (get_scent_map) {
+			response = sim.template get_map<true>(bottom_left, top_right, patches);
+		} else {
+			response = sim.template get_map<false>(bottom_left, top_right, patches);
+		}
 		if (response != status::OK) {
 			for (array<patch_state>& row : patches) {
 				for (patch_state& patch : row) free(patch);
@@ -1443,14 +1448,17 @@ bool send_do_nothing(ClientType& c, uint64_t agent_id) {
  * 		patches we wish to retrieve.
  * \param top_right The top-right corner of the bounding box containing the
  * 		patches we wish to retrieve.
+ * \param get_scent_map Whether we want to also retrieve the array of scent
+ * 		values at every cell in each patch. If `false`, the `scent` field will
+ * 		be set to `nullptr`.
  * \returns `true` if the sending is successful; `false` otherwise.
  */
 template<typename ClientType>
-bool send_get_map(ClientType& c, position bottom_left, position top_right) {
-	memory_stream mem_stream = memory_stream(sizeof(message_type) + 2 * sizeof(position));
+bool send_get_map(ClientType& c, position bottom_left, position top_right, bool get_scent_map) {
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + 2 * sizeof(position) + sizeof(get_scent_map));
 	fixed_width_stream<memory_stream> out(mem_stream);
 	return write(message_type::GET_MAP, out)
-		&& write(bottom_left, out) && write(top_right, out)
+		&& write(bottom_left, out) && write(top_right, out) && write(get_scent_map, out)
 		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
 }
 

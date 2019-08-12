@@ -1061,7 +1061,7 @@ public:
 	}
 
 	template<typename ResetCommandBuffersFunction, typename GetWindowDimensionsFunction>
-	inline bool draw_frame(command_buffer& cb, bool& resized,
+	inline bool draw_frame(command_buffer& cb,
 			ResetCommandBuffersFunction reset_command_buffers,
 			GetWindowDimensionsFunction get_window_dimensions)
 	{
@@ -1070,20 +1070,19 @@ public:
 		uint32_t image_index;
 		VkResult result = vkAcquireNextImageKHR(logical_device, swap_chain, UINT64_MAX, image_available_semaphores[current_frame], VK_NULL_HANDLE, &image_index);
 
-		if (result == VK_ERROR_OUT_OF_DATE_KHR || resized) {
+		if (result == VK_ERROR_OUT_OF_DATE_KHR) {
 			/* free and reinitialize the swap chain */
-			resized = false;
 			return reset_swap_chain(reset_command_buffers, get_window_dimensions);
 		} else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
 			fprintf(stderr, "vulkan_renderer.draw_frame ERROR: Failed to acquire next frame.\n");
 			return false;
 		}
 
-		return present_frame(cb, image_index, resized, reset_command_buffers, get_window_dimensions);
+		return present_frame(cb, image_index, reset_command_buffers, get_window_dimensions);
 	}
 
 	template<typename ResetCommandBuffersFunction, typename GetWindowDimensionsFunction>
-	inline bool draw_frame(command_buffer& cb, bool& resized,
+	inline bool draw_frame(command_buffer& cb,
 			ResetCommandBuffersFunction reset_command_buffers,
 			GetWindowDimensionsFunction get_window_dimensions,
 			uniform_buffer* uniform_buffers,
@@ -1095,9 +1094,8 @@ public:
 		uint32_t image_index;
 		VkResult result = vkAcquireNextImageKHR(logical_device, swap_chain, UINT64_MAX, image_available_semaphores[current_frame], VK_NULL_HANDLE, &image_index);
 
-		if (result == VK_ERROR_OUT_OF_DATE_KHR || resized) {
+		if (result == VK_ERROR_OUT_OF_DATE_KHR) {
 			/* free and reinitialize the swap chain */
-			resized = false;
 			return reset_swap_chain(reset_command_buffers, get_window_dimensions);
 		} else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
 			fprintf(stderr, "vulkan_renderer.draw_frame ERROR: Failed to acquire next frame.\n");
@@ -1111,7 +1109,7 @@ public:
 			vkUnmapMemory(logical_device, uniform_buffers[i].memories[image_index]);
 		}
 
-		return present_frame(cb, image_index, resized, reset_command_buffers, get_window_dimensions);
+		return present_frame(cb, image_index, reset_command_buffers, get_window_dimensions);
 	}
 
 private:
@@ -1359,7 +1357,7 @@ private:
 
 	template<typename ResetCommandBuffersFunction, typename GetWindowDimensionsFunction>
 	inline bool present_frame(
-			command_buffer& cb, uint32_t image_index, bool& resized,
+			command_buffer& cb, uint32_t image_index,
 			ResetCommandBuffersFunction reset_command_buffers,
 			GetWindowDimensionsFunction get_window_dimensions)
 	{
@@ -1395,10 +1393,8 @@ private:
 		presentInfo.pResults = nullptr;
 		VkResult result = vkQueuePresentKHR(queue, &presentInfo);
 
-		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || resized) {
-			resized = false;
+		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
 			return reset_swap_chain(reset_command_buffers, get_window_dimensions);
-		}
 
 		current_frame = (current_frame + 1) % max_frames_in_flight;
 		return true;

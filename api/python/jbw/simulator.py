@@ -407,7 +407,7 @@ class Simulator(object):
     Returns:
       A list of tuples, where each tuple contains the state of a patch.
     """
-    return simulator_c.map(self._handle, self._client_handle, bottom_left, top_right)
+    return simulator_c.map(self._handle, self._client_handle, bottom_left, top_right, True)
 
   def set_active(self, agent, active):
     """Sets whether the given agent is active or inactive.

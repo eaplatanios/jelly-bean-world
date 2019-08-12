@@ -40,7 +40,7 @@ int main(int argc, const char** argv)
 		config.allowed_movement_directions[i] = action_policy::ALLOWED;
 	for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
 		config.allowed_rotations[i] = action_policy::ALLOWED;
-	config.no_op_allowed = true;
+	config.no_op_allowed = false;
 	config.patch_size = 32;
 	config.mcmc_iterations = 4000;
 	config.agent_color = (float*) calloc(config.color_dimension, sizeof(float));
@@ -88,7 +88,7 @@ int main(int argc, const char** argv)
 	config.item_types[3].color[1] = 0.5f;
 	config.item_types[3].color[2] = 0.5f;
 	config.item_types[3].required_item_counts[3] = 1;
-	config.item_types[3].blocks_movement = true;
+	config.item_types[3].blocks_movement = false;
 	config.item_types.length = item_type_count;
 
 	config.item_types[0].intensity_fn.fn = constant_intensity_fn;
@@ -133,11 +133,7 @@ int main(int argc, const char** argv)
 	set_interaction_args(config.item_types.data, 3, 2, zero_interaction_fn, {});
 	set_interaction_args(config.item_types.data, 3, 3, cross_interaction_fn, {10.0f, 15.0f, 20.0f, -200.0f, -20.0f, 1.0f});
 
-	simulator<empty_data>& sim = *((simulator<empty_data>*) alloca(sizeof(simulator<empty_data>)));
-	if (init(sim, config, empty_data()) != status::OK) {
-		fprintf(stderr, "ERROR: Unable to initialize simulator.\n");
-		return EXIT_FAILURE;
-	}
+	simulator<empty_data> sim(config, empty_data());
 
 	uint64_t agent_id; agent_state* agent;
 	if (sim.add_agent(agent_id, agent) != status::OK) {
@@ -170,6 +166,7 @@ int main(int argc, const char** argv)
 	unsigned long long elapsed = 0;
 	unsigned int frame_count = 0;
 	visualizer<empty_data> visualizer(sim, 800, 800);
+	visualizer.track_agent(agent_id);
 	while (simulation_running) {
 		if (visualizer.is_window_closed())
 			break;
@@ -197,7 +194,6 @@ int main(int argc, const char** argv)
 			simulation_worker.join();
 		} catch (...) { }
 	}
-	free(sim);
 
 	return EXIT_SUCCESS;
 }
