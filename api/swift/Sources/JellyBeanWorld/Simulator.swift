@@ -150,10 +150,9 @@ public final class Simulator {
     self.clientConfiguration = nil
     var cConfig = configuration.toC()
     defer { cConfig.deallocate() }
-    var status = JBW_NewStatus()
-    defer { JBW_DeleteStatus(status) }
-    self.handle = simulatorCreate(&cConfig.configuration, nativeOnStepCallback, status)
-    try checkStatus(status)
+    var status = JBW_Status()
+    self.handle = simulatorCreate(&cConfig.configuration, nativeOnStepCallback, &status)
+    try checkStatus(&status)
     simulatorSetStepCallbackData(handle, Unmanaged.passUnretained(self).toOpaque())
     if let config = serverConfiguration {
       self.serverHandle = simulationServerStart(
@@ -170,8 +169,8 @@ public final class Simulator {
           getMap: true,
           getAgentIds: true,
           getAgentStates: true),
-        status)
-      try checkStatus(status)
+        &status)
+      try checkStatus(&status)
     }
   }
 
@@ -189,10 +188,9 @@ public final class Simulator {
     agents: [Agent],
     serverConfiguration: ServerConfiguration? = nil
   ) throws {
-    var status = JBW_NewStatus()
-    defer { JBW_DeleteStatus(status) }
-    let cSimulatorInfo = simulatorLoad(file.absoluteString, nativeOnStepCallback, status)
-    try checkStatus(status)
+    var status = JBW_Status()
+    let cSimulatorInfo = simulatorLoad(file.absoluteString, nativeOnStepCallback, &status)
+    try checkStatus(&status)
     defer { simulatorDeleteSimulatorInfo(cSimulatorInfo) }
     self.handle = cSimulatorInfo.handle
     self.configuration = Configuration(fromC: cSimulatorInfo.config)
@@ -227,8 +225,8 @@ public final class Simulator {
           getMap: true,
           getAgentIds: true,
           getAgentStates: true),
-        status)
-      try checkStatus(status)
+        &status)
+      try checkStatus(&status)
     }
   }
 
@@ -268,10 +266,9 @@ public final class Simulator {
   @inlinable
   @discardableResult
   public func add(agent: Agent) throws -> UInt64 {
-    var status = JBW_NewStatus()
-    defer { JBW_DeleteStatus(status) }
-    let state = simulatorAddAgent(handle, clientHandle, status)
-    try checkStatus(status)
+    var status = JBW_Status()
+    let state = simulatorAddAgent(handle, clientHandle, &status)
+    try checkStatus(&status)
     defer { simulatorDeleteAgentSimulationState(state) }
     let id = state.id
     agents[id] = agent
@@ -284,10 +281,9 @@ public final class Simulator {
   /// - Parameter id: ID of the agent to remove.
   @inlinable
   public func remove(agentWithID id: UInt64) throws {
-    var status = JBW_NewStatus()
-    defer { JBW_DeleteStatus(status) }
-    simulatorRemoveAgent(handle, clientHandle, id, status)
-    try checkStatus(status)
+    var status = JBW_Status()
+    simulatorRemoveAgent(handle, clientHandle, id, &status)
+    try checkStatus(&status)
   }
 
   /// Activates the agent with ID `agentID` managed by this simulator.
@@ -295,10 +291,9 @@ public final class Simulator {
   /// - Parameter id: ID of the agent to activate.
   @inlinable
   public func activate(agentWithID id: UInt64) throws {
-    var status = JBW_NewStatus()
-    defer { JBW_DeleteStatus(status) }
-    simulatorSetActive(handle, clientHandle, id, true, status)
-    try checkStatus(status)
+    var status = JBW_Status()
+    simulatorSetActive(handle, clientHandle, id, true, &status)
+    try checkStatus(&status)
   }
 
   /// Deactivates the agent with ID `agentID` managed by this simulator.
@@ -306,10 +301,9 @@ public final class Simulator {
   /// - Parameter id: ID of the agent to deactivate.
   @inlinable
   public func deactivate(agentWithID id: UInt64) throws {
-    var status = JBW_NewStatus()
-    defer { JBW_DeleteStatus(status) }
-    simulatorSetActive(handle, clientHandle, id, false, status)
-    try checkStatus(status)
+    var status = JBW_Status()
+    simulatorSetActive(handle, clientHandle, id, false, &status)
+    try checkStatus(&status)
   }
 
   /// Performs a simulation step.
@@ -350,10 +344,9 @@ public final class Simulator {
   /// - Parameter file: File in which to save the state of this simulator.
   @inlinable
   public func save(to file: URL) throws {
-    var status = JBW_NewStatus()
-    defer { JBW_DeleteStatus(status) }
-    simulatorSave(handle, file.absoluteString, status)
-    try checkStatus(status)
+    var status = JBW_Status()
+    simulatorSave(handle, file.absoluteString, &status)
+    try checkStatus(&status)
   }
 
   /// Returns the portion of the simulator map that lies within the rectangle formed by the
@@ -367,11 +360,10 @@ public final class Simulator {
     bottomLeft: Position = Position(x: Int64.min, y: Int64.min),
     topRight: Position = Position(x: Int64.max, y: Int64.max)
    ) throws -> SimulationMap {
-    var status = JBW_NewStatus()
-    defer { JBW_DeleteStatus(status) }
+    var status = JBW_Status()
     let cSimulationMap = simulatorMap(
-      handle, clientHandle, bottomLeft.toC(), topRight.toC(), status)
-    try checkStatus(status)
+      handle, clientHandle, bottomLeft.toC(), topRight.toC(), &status)
+    try checkStatus(&status)
     defer { simulatorDeleteSimulationMap(cSimulationMap) }
     return SimulationMap(fromC: cSimulationMap, using: configuration)
   }
@@ -614,11 +606,10 @@ public enum Action {
     clientHandle: UnsafeMutableRawPointer?,
     agentID: UInt64
   ) throws {
-    var status = JBW_NewStatus()
-    defer { JBW_DeleteStatus(status) }
+    var status = JBW_Status()
     switch self {
     case .none:
-      simulatorNoOpAgent(simulatorHandle, clientHandle, agentID, status)
+      simulatorNoOpAgent(simulatorHandle, clientHandle, agentID, &status)
     case let .move(direction, stepCount):
       simulatorMoveAgent(
         simulatorHandle,
@@ -626,11 +617,11 @@ public enum Action {
         agentID,
         direction.toC(),
         UInt32(stepCount),
-        status)
+        &status)
     case let .turn(direction):
-      simulatorTurnAgent(simulatorHandle, clientHandle, agentID, direction.toC(), status)
+      simulatorTurnAgent(simulatorHandle, clientHandle, agentID, direction.toC(), &status)
     }
-    try checkStatus(status)
+    try checkStatus(&status)
   }
 }
 

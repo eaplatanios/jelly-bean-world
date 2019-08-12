@@ -21,8 +21,7 @@ let package = Package(
       path: ".", 
       sources: [
         "api/swift/Sources/CJellyBeanWorld",
-        "jbw/simulator.cpp",
-        "jbw/status.cpp"],
+        "jbw/simulator.cpp"],
       publicHeadersPath: "api/swift/Sources/CJellyBeanWorld",
       cxxSettings: [
         .headerSearchPath("jbw"),

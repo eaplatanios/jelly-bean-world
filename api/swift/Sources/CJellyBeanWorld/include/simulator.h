@@ -21,11 +21,32 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "status.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+typedef enum JBW_StatusCode {
+  JBW_OK = 0,
+  JBW_OUT_OF_MEMORY,
+  JBW_INVALID_AGENT_ID,
+  JBW_VIOLATED_PERMISSIONS,
+  JBW_AGENT_ALREADY_ACTED,
+  JBW_AGENT_ALREADY_EXISTS,
+  JBW_SERVER_PARSE_MESSAGE_ERROR,
+  JBW_CLIENT_PARSE_MESSAGE_ERROR,
+  JBW_SERVER_OUT_OF_MEMORY,
+  JBW_CLIENT_OUT_OF_MEMORY,
+  JBW_IO_ERROR,
+  JBW_LOST_CONNECTION,
+  JBW_INVALID_SIMULATOR_CONFIGURATION,
+  JBW_MPI_ERROR
+} JBW_StatusCode;
+
+// Represents a Jelly Bean World (JBW) API call status.
+// This is a struct to allow providing more information (e.g., error messages) in the future.
+typedef struct JBW_Status {
+  JBW_StatusCode code;
+} JBW_Status;
 
 /** Represents all possible directions of motion
  *  in the environment. */

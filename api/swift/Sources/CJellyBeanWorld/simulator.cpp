@@ -21,7 +21,6 @@
 #include <thread>
 
 #include "include/simulator.h"
-#include "include/status.h"
 
 #include "gibbs_field.h"
 #include "mpi.h"
@@ -775,7 +774,7 @@ void on_step(
   uint64_t time
 ) {
   // TODO [STATUS]: Find a way to propagate this status code to Swift.
-  auto* status = JBW_NewStatus();
+  auto status = JBW_Status { JBW_OK };
   simulator_data& data = sim->get_data();
   if (data.server.status != server_status::STOPPING) {
     /* this simulator is a server, so send a step response to every client */
@@ -793,8 +792,8 @@ void on_step(
   }
   const simulator_config& config = sim->get_config();
   for (size_t i = 0; i < data.agent_ids.length; i++) {
-    init(agent_states[i], *agents.get(data.agent_ids[i]), config, data.agent_ids[i], status);
-    if (status->code != JBW_OK) {
+    init(agent_states[i], *agents.get(data.agent_ids[i]), config, data.agent_ids[i], &status);
+    if (status.code != JBW_OK) {
       for (size_t j = 0; j < i; j++)
         free(agent_states[j]);
       free(agent_states);
@@ -852,10 +851,10 @@ void on_add_agent(
   const agent_state& new_agent
 ) {
   // TODO [STATUS]: Find a way to propagate this status code to Swift.
-  auto* status = JBW_NewStatus();
+  auto status = JBW_Status { JBW_OK };
   AgentSimulationState new_agent_state;
-  init(new_agent_state, new_agent, c.config, agent_id, status);
-  if (response != status::OK || status->code != JBW_OK)
+  init(new_agent_state, new_agent, c.config, agent_id, &status);
+  if (response != status::OK || status.code != JBW_OK)
     new_agent_state = EMPTY_AGENT_SIM_STATE;
   std::unique_lock<std::mutex> lck(c.data.lock);
   c.data.waiting_for_server = false;
@@ -1073,17 +1072,17 @@ void on_step(
   const agent_state* agent_states
 ) {
   // TODO [STATUS]: Find a way to propagate this status code to Swift.
-  auto* status = JBW_NewStatus();
-  JBW_SetJBWStatusFromStatus(status, response);
+  auto status = JBW_Status { JBW_OK };
+  JBW_SetJBWStatusFromStatus(&status, response);
   AgentSimulationState* agents = (AgentSimulationState*) malloc(
     sizeof(AgentSimulationState) * agent_ids.length);
   if (agents == nullptr) {
-    status->code = JBW_OUT_OF_MEMORY;
+    status.code = JBW_OUT_OF_MEMORY;
     return;
   }
   for (size_t i = 0; i < agent_ids.length; i++) {
-    init(agents[i], agent_states[i], c.config, agent_ids[i], status);
-    if (status->code != JBW_OK) {
+    init(agents[i], agent_states[i], c.config, agent_ids[i], &status);
+    if (status.code != JBW_OK) {
       for (size_t j = 0; j < i; j++)
         free(agents[j]);
       free(agents);
