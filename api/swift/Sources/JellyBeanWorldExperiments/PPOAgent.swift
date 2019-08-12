@@ -15,10 +15,9 @@
 import JellyBeanWorld
 import Logging
 import ReinforcementLearning
+import TensorFlow
 
-fileprivate struct JellyBeanWorldActorCritic: Network {
-  @noDerivative public var state: None = None()
-
+fileprivate struct JellyBeanWorldActorCritic: Module {
   public var conv1: Conv2D<Float> = Conv2D<Float>(filterShape: (3, 3, 3, 16), strides: (2, 2))
   public var conv2: Conv2D<Float> = Conv2D<Float>(filterShape: (2, 2, 16, 16), strides: (1, 1))
   public var denseHidden: Dense<Float> = Dense<Float>(inputSize: 256, outputSize: 64)
@@ -61,7 +60,7 @@ fileprivate struct JellyBeanWorldActorCritic: Network {
   }
 }
 
-public func runPPO(batchSize: Int = 32) {
+public func runPPO(batchSize: Int = 32) throws {
   let logger = Logger(label: "Jelly Bean World - PPO Agent")
 
   let banana = Item(
@@ -145,17 +144,17 @@ public func runPPO(batchSize: Int = 32) {
       simulatorConfiguration: simulatorConfiguration,
       reward: reward)
   }
-  let environment = JellyBeanWorld.Environment(configurations: configurations)
+  let environment = try JellyBeanWorld.Environment(configurations: configurations)
   let totalCumulativeReward = TotalCumulativeReward(for: environment)
 
   let network = JellyBeanWorldActorCritic()
   var agent = PPOAgent(
     for: environment,
     network: network,
-    optimizer: AMSGrad(for: network),
-    learningRateSchedule: LinearLearningRateSchedule(initialValue: 1e-3, slope: 1e-3 / 100000.0),
+    optimizer: AMSGrad(for: network, learningRate: 1e-3),
+    learningRateSchedule: LinearLearningRateDecay(slope: 1e-3 / 100000.0, lowerBound: 1e-6),
     advantageFunction: GeneralizedAdvantageEstimation(discountFactor: 0.99, discountWeight: 0.95),
-    normalizeAdvantages: true,
+    advantagesNormalizer: TensorNormalizer<Float>(streaming: false, alongAxes: 0, 1),
     useTDLambdaReturn: true,
     clip: PPOClip(epsilon: 0.1),
     penalty: PPOPenalty(klCutoffFactor: 0.5),
@@ -164,7 +163,7 @@ public func runPPO(batchSize: Int = 32) {
     iterationCountPerUpdate: 1)
 
   for step in 0..<1000000 {
-    let loss = agent.update(
+    let loss = try agent.update(
       using: environment,
       maxSteps: 128 * batchSize,
       stepCallbacks: [{ (environment, trajectory) in

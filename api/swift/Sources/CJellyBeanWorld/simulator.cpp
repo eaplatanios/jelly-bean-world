@@ -21,14 +21,29 @@
 #include <thread>
 
 #include "include/simulator.h"
-#include "include/status.h"
 
 #include "gibbs_field.h"
 #include "mpi.h"
 #include "simulator.h"
+#include "status.h"
 
 using namespace core;
 using namespace jbw;
+
+void JBW_SetJBWStatusFromStatus(JBW_Status* jbw_s, status s) {
+  switch (s) {
+    case status::OK: jbw_s->code = JBW_OK;
+    case status::OUT_OF_MEMORY: jbw_s->code = JBW_OUT_OF_MEMORY;
+    case status::INVALID_AGENT_ID: jbw_s->code = JBW_INVALID_AGENT_ID;
+    case status::PERMISSION_ERROR: jbw_s->code = JBW_VIOLATED_PERMISSIONS;
+    case status::AGENT_ALREADY_ACTED: jbw_s->code = JBW_AGENT_ALREADY_ACTED;
+    case status::AGENT_ALREADY_EXISTS: jbw_s->code = JBW_AGENT_ALREADY_EXISTS;
+    case status::SERVER_PARSE_MESSAGE_ERROR: jbw_s->code = JBW_SERVER_PARSE_MESSAGE_ERROR;
+    case status::CLIENT_PARSE_MESSAGE_ERROR: jbw_s->code = JBW_CLIENT_PARSE_MESSAGE_ERROR;
+    case status::SERVER_OUT_OF_MEMORY: jbw_s->code = JBW_SERVER_OUT_OF_MEMORY;
+    case status::CLIENT_OUT_OF_MEMORY: jbw_s->code = JBW_CLIENT_OUT_OF_MEMORY;
+  }
+}
 
 constexpr AgentSimulationState EMPTY_AGENT_SIM_STATE = { 0 };
 constexpr SimulatorInfo EMPTY_SIM_INFO = { 0 };
@@ -36,7 +51,6 @@ constexpr SimulationNewClientInfo EMPTY_NEW_CLIENT_INFO = { 0 };
 constexpr SimulationClientInfo EMPTY_CLIENT_INFO = { 0 };
 constexpr SimulationMap EMPTY_SIM_MAP = { 0 };
 constexpr AgentIDList EMPTY_AGENT_ID_LIST = { 0 };
-
 
 inline Direction to_Direction(direction dir) {
   switch (dir) {
@@ -166,8 +180,7 @@ inline void init(
   function.fn = get_intensity_fn((intensity_fns) src.id, src.args, src.numArgs);
   function.args = (float*) malloc(sizeof(float) * src.numArgs);
   if (function.args == nullptr) {
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while intializing an energy function instance.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
   memcpy(function.args, src.args, sizeof(float) * src.numArgs);
@@ -183,8 +196,7 @@ inline void init(
   function.id = (unsigned int) get_intensity_fn(src.fn);
   function.args = (float*) malloc(sizeof(float) * src.arg_count);
   if (function.args == nullptr) {
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while intializing an intensity function instance.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
   memcpy(function.args, src.args, sizeof(float) * src.arg_count);
@@ -204,8 +216,7 @@ inline void init(
   function.fn = get_interaction_fn((interaction_fns) src.id, src.args, src.numArgs);
   function.args = (float*) malloc(sizeof(float) * src.numArgs);
   if (function.args == nullptr) {
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while intializing an energy function instance.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
   memcpy(function.args, src.args, sizeof(float) * src.numArgs);
@@ -222,8 +233,7 @@ inline void init(
   function.id = (unsigned int) get_interaction_fn(src.fn);
   function.args = (float*) malloc(sizeof(float) * src.arg_count);
   if (function.args == nullptr) {
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while intializing an interaction function instance.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
   memcpy(function.args, src.args, sizeof(float) * src.arg_count);
@@ -254,7 +264,6 @@ inline void init(
     unique(item_ids);
     if (item_ids.length != src.energyFunctions.numInteractionFns) {
       status->code = JBW_INVALID_SIMULATOR_CONFIGURATION;
-      status->message = "The item type IDs are not unique.";
       return;
     }
   }
@@ -282,8 +291,7 @@ inline void init(
     src.requiredItemCosts, src.blocksMovement, intensity_fn, interaction_fns, scent_dimension,
     color_dimension, item_type_count);
   if (!success) {
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while initializing an item properties instance.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
 
@@ -303,8 +311,7 @@ inline void init(
 ) {
   properties.name = (char*) malloc(sizeof(char) * (src.name.length + 1));
   if (properties.name == nullptr) {
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while intializing an item properties instance.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
   for (unsigned int i = 0; i < src.name.length; i++)
@@ -314,8 +321,7 @@ inline void init(
   properties.scent = (float*) malloc(sizeof(float) * scent_dimension);
   if (properties.scent == nullptr) {
     free(properties.name);
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while intializing an item properties instance.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
   for (unsigned int i = 0; i < scent_dimension; i++)
@@ -325,8 +331,7 @@ inline void init(
   if (properties.color == nullptr) {
     free(properties.name);
     free(properties.scent);
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while intializing an item properties instance.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
   for (unsigned int i = 0; i < color_dimension; i++)
@@ -337,8 +342,7 @@ inline void init(
     free(properties.name);
     free(properties.scent);
     free(properties.color);
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while intializing an item properties instance.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
   for (unsigned int i = 0; i < item_type_count; i++)
@@ -350,8 +354,7 @@ inline void init(
     free(properties.scent);
     free(properties.color);
     free(properties.requiredItemCosts);
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while intializing an item properties instance.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
   for (unsigned int i = 0; i < item_type_count; i++)
@@ -384,8 +387,7 @@ inline void init(
     free(properties.requiredItemCosts);
     free(properties.requiredItemCounts);
     free(properties.energyFunctions.intensityFn);
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while intializing an item properties instance.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
   unsigned int index = 0;
@@ -434,8 +436,7 @@ inline void init(
 
   state.scent = (float*) malloc(sizeof(float) * config.scent_dimension);
   if (state.scent == nullptr) {
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while initializing an agent's state.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
 
@@ -446,8 +447,7 @@ inline void init(
   state.vision = (float*) malloc(sizeof(float) * vision_size);
   if (state.vision == nullptr) {
     free(state.scent);
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while initializing an agent's state.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
 
@@ -455,8 +455,7 @@ inline void init(
   if (state.collectedItems == nullptr) {
     free(state.scent);
     free(state.vision);
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while initializing an agent's state.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
 
@@ -478,8 +477,7 @@ inline void free(AgentSimulationState& state) {
 inline void init(simulator_config& config, const SimulatorConfig& src, JBW_Status* status) {
   config.agent_color = (float*) malloc(sizeof(float) * src.colorDimSize);
   if (config.agent_color == nullptr) {
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while initializing a simulator.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
 
@@ -492,8 +490,7 @@ inline void init(simulator_config& config, const SimulatorConfig& src, JBW_Statu
   config.no_op_allowed = src.noOpAllowed;
 
   if (!config.item_types.ensure_capacity(max(1u, src.numItemTypes))) {
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while initializing a simulator.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
 
@@ -530,8 +527,7 @@ inline void init(
   config.randomSeed = initial_seed;
   config.agentColor = (float*) malloc(sizeof(float) * src.color_dimension);
   if (config.agentColor == nullptr) {
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while initializing a simulator.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
 
@@ -545,8 +541,7 @@ inline void init(
 
   config.itemTypes = (ItemProperties*) malloc(sizeof(ItemProperties) * src.item_types.length);
   if (config.itemTypes == nullptr) {
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while initializing a simulator.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
   for (unsigned int i = 0; i < src.item_types.length; i++) {
@@ -582,15 +577,13 @@ inline void init(
   unsigned int n = config.patch_size;
   patch.items = (ItemInfo*) malloc(sizeof(ItemInfo) * src.item_count);
   if (patch.items == nullptr) {
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while initializing a map patch.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
   patch.agents = (AgentInfo*) malloc(sizeof(AgentInfo) * src.agent_count);
   if (patch.agents == nullptr) {
     free(patch.items);
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while initializing a map patch.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
   if (src.scent != nullptr) {
@@ -598,8 +591,7 @@ inline void init(
     if (patch.scent == nullptr) {
       free(patch.items);
       free(patch.agents);
-      status->code = JBW_OUT_OF_MEMORY_ERROR;
-      status->message = "Insufficient memory while initializing a map patch.";
+      status->code = JBW_OUT_OF_MEMORY;
       return;
     }
   }
@@ -608,8 +600,7 @@ inline void init(
     free(patch.items);
     free(patch.agents);
     if (src.scent != nullptr) free(patch.scent);
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while initializing a map patch.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
   for (unsigned int i = 0; i < src.item_count; i++) {
@@ -654,8 +645,7 @@ inline void init(
   map.patches = (SimulationMapPatch*) malloc(
     max((size_t) 1, sizeof(SimulationMapPatch) * patch_count));
   if (map.patches == nullptr) {
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while initializing a simulation map.";
+    status->code = JBW_OUT_OF_MEMORY;
     return;
   }
   for (const array<patch_state>& row : patches) {
@@ -786,7 +776,8 @@ void on_step(
   const hash_map<uint64_t, agent_state*>& agents,
   uint64_t time
 ) {
-  auto* status = JBW_NewStatus();
+  // TODO [STATUS]: Find a way to propagate this status code to Swift.
+  auto status = JBW_Status { JBW_OK };
   simulator_data& data = sim->get_data();
   if (data.server.status != server_status::STOPPING) {
     /* this simulator is a server, so send a step response to every client */
@@ -804,10 +795,8 @@ void on_step(
   }
   const simulator_config& config = sim->get_config();
   for (size_t i = 0; i < data.agent_ids.length; i++) {
-    init(agent_states[i], *agents.get(data.agent_ids[i]), config, data.agent_ids[i], status);
-    // TODO: Propagate this to Swift.
-    if (status->code != JBW_OK) {
-      fprintf(stderr, "on_step ERROR: Insufficient memory for agent state.\n");
+    init(agent_states[i], *agents.get(data.agent_ids[i]), config, data.agent_ids[i], &status);
+    if (status.code != JBW_OK) {
       for (size_t j = 0; j < i; j++)
         free(agent_states[j]);
       free(agent_states);
@@ -844,31 +833,6 @@ inline char* concat(const char* first, const char* second) {
   return buf;
 }
 
-inline void check_response(status response, const char* prefix) {
-  char* message;
-  switch (response) {
-  case status::OK:
-    break;
-  case status::INVALID_AGENT_ID:
-    message = concat(prefix, "Invalid agent ID.");
-    if (message != nullptr) { /* TODO: communicate error `message` to swift */ free(message); } break;
-  case status::SERVER_PARSE_MESSAGE_ERROR:
-    message = concat(prefix, "Server was unable to parse MPI message from client.");
-    if (message != nullptr) { /* TODO: communicate error `message` to swift */ free(message); } break;
-  case status::CLIENT_PARSE_MESSAGE_ERROR:
-    message = concat(prefix, "Client was unable to parse MPI message from server.");
-    if (message != nullptr) { /* TODO: communicate error `message` to swift */ free(message); } break;
-  case status::SERVER_OUT_OF_MEMORY:
-    message = concat(prefix, "Server had insufficient memory.");
-    if (message != nullptr) { /* TODO: communicate error `message` to swift */ free(message); } break;
-  case status::CLIENT_OUT_OF_MEMORY:
-    message = concat(prefix, "Client had insufficient memory.");
-    if (message != nullptr) { /* TODO: communicate error `message` to swift */ free(message); } break;
-  default:
-    break;
-  }
-}
-
 /**
  * The callback invoked when the client receives an add_agent response from the
  * server. This function copies the agent state into an AgentSimulationState
@@ -889,10 +853,11 @@ void on_add_agent(
   status response,
   const agent_state& new_agent
 ) {
-  auto* status = JBW_NewStatus();
+  // TODO [STATUS]: Find a way to propagate this status code to Swift.
+  auto status = JBW_Status { JBW_OK };
   AgentSimulationState new_agent_state;
-  init(new_agent_state, new_agent, c.config, agent_id, status);
-  if (response != status::OK || status->code != JBW_OK)
+  init(new_agent_state, new_agent, c.config, agent_id, &status);
+  if (response != status::OK || status.code != JBW_OK)
     new_agent_state = EMPTY_AGENT_SIM_STATE;
   std::unique_lock<std::mutex> lck(c.data.lock);
   c.data.waiting_for_server = false;
@@ -1109,18 +1074,18 @@ void on_step(
   const array<uint64_t>& agent_ids,
   const agent_state* agent_states
 ) {
-  check_response(response, "on_step: ");
-  auto* status = JBW_NewStatus();
+  // TODO [STATUS]: Find a way to propagate this status code to Swift.
+  auto status = JBW_Status { JBW_OK };
+  JBW_SetJBWStatusFromStatus(&status, response);
   AgentSimulationState* agents = (AgentSimulationState*) malloc(
     sizeof(AgentSimulationState) * agent_ids.length);
   if (agents == nullptr) {
-    fprintf(stderr, "on_step ERROR: Insufficient memory for agents.\n");
+    status.code = JBW_OUT_OF_MEMORY;
     return;
   }
   for (size_t i = 0; i < agent_ids.length; i++) {
-    init(agents[i], agent_states[i], c.config, agent_ids[i], status);
-    if (status->code != JBW_OK) {
-      fprintf(stderr, "on_step ERROR: Insufficient memory for agent.\n");
+    init(agents[i], agent_states[i], c.config, agent_ids[i], &status);
+    if (status.code != JBW_OK) {
       for (size_t j = 0; j < i; j++)
         free(agents[j]);
       free(agents);
@@ -1160,36 +1125,24 @@ inline void wait_for_server(client<client_data>& c) {
 void* simulatorCreate(
   const SimulatorConfig* config,
   OnStepCallback onStepCallback,
-  JBW_Status* jbwStatus
+  JBW_Status* status
 ) {
   simulator_config sim_config;
-  init(sim_config, *config, jbwStatus);
-  if (jbwStatus->code != JBW_OK) return nullptr;
+  init(sim_config, *config, status);
+  if (status->code != JBW_OK) return nullptr;
   simulator_data data(onStepCallback, nullptr);
   simulator<simulator_data>* sim = (simulator<simulator_data>*) malloc(
     sizeof(simulator<simulator_data>));
   if (sim == nullptr) {
-    jbwStatus->code = JBW_OUT_OF_MEMORY_ERROR;
-    jbwStatus->message = "Insufficient memory while creating a new simulator.";
+    status->code = JBW_OUT_OF_MEMORY;
     return nullptr;
   }
-  status result = init(*sim, sim_config, data, config->randomSeed);
-  /* TODO: translate status enum */
+  auto result = init(*sim, sim_config, data, config->randomSeed);
   if (result != status::OK) {
-    jbwStatus->code = JBW_OUT_OF_MEMORY_ERROR;
-    jbwStatus->message = "Insufficient memory while initializing a new simulator.";
+    JBW_SetJBWStatusFromStatus(status, result);
     return nullptr;
   }
   return (void*) sim;
-}
-
-
-template<typename ... Args>
-std::string string_format(const std::string& format, Args... args) {
-  size_t size = snprintf(nullptr, 0, format.c_str(), args...) + 1;
-  std::unique_ptr<char[]> buffer(new char[size]); 
-  snprintf(buffer.get(), size, format.c_str(), args...);
-  return std::string(buffer.get(), buffer.get() + size - 1);
 }
 
 
@@ -1197,7 +1150,6 @@ void simulatorSave(void* simulatorHandle, const char* filePath, JBW_Status* stat
   FILE* file = open_file(filePath, "wb");
   if (file == nullptr) {
     status->code = JBW_IO_ERROR;
-    status->message = string_format("Unable to open '%s' for writing.", filePath).c_str();
     return;
   }
   simulator<simulator_data>* sim = (simulator<simulator_data>*) simulatorHandle;
@@ -1210,7 +1162,6 @@ void simulatorSave(void* simulatorHandle, const char* filePath, JBW_Status* stat
   fclose(file);
   if (!result) {
     status->code = JBW_IO_ERROR;
-    status->message = string_format("Error while writing to '%s'", filePath).c_str();
   }
 }
 
@@ -1223,8 +1174,7 @@ SimulatorInfo simulatorLoad(
   simulator<simulator_data>* sim = (simulator<simulator_data>*) malloc(
     sizeof(simulator<simulator_data>));
   if (sim == nullptr) {
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while loading a simulator.";
+    status->code = JBW_OUT_OF_MEMORY;
     return EMPTY_SIM_INFO;
   }
 
@@ -1234,7 +1184,6 @@ SimulatorInfo simulatorLoad(
   if (file == nullptr) {
     free(sim);
     status->code = JBW_IO_ERROR;
-    status->message = "Failed to open file from which to load the simulator.";
     return EMPTY_SIM_INFO;
   }
 
@@ -1244,7 +1193,6 @@ SimulatorInfo simulatorLoad(
     free(sim);
     fclose(file);
     status->code = JBW_IO_ERROR;
-    status->message = "Failed to load the simulator data.";
     return EMPTY_SIM_INFO;
   }
   simulator_data& sim_data = sim->get_data();
@@ -1257,7 +1205,6 @@ SimulatorInfo simulatorLoad(
     free(sim);
     fclose(file);
     status->code = JBW_IO_ERROR;
-    status->message = "Failed to load the agent IDs.";
     return EMPTY_SIM_INFO;
   }
   sim_data.agent_ids.length = agent_id_count;
@@ -1267,8 +1214,7 @@ SimulatorInfo simulatorLoad(
   if (agent_states == nullptr) {
     free(*sim);
     free(sim);
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while loading a simulator.";
+    status->code = JBW_OUT_OF_MEMORY;
     return EMPTY_SIM_INFO;
   }
 
@@ -1280,8 +1226,7 @@ SimulatorInfo simulatorLoad(
     free(*sim);
     free(sim);
     free(agent_states);
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while loading a simulator.";
+    status->code = JBW_OUT_OF_MEMORY;
     return EMPTY_SIM_INFO;
   }
   for (size_t i = 0; i < agent_id_count; i++) {
@@ -1331,17 +1276,15 @@ void simulatorSetStepCallbackData(void* simulatorHandle, const void* callbackDat
 AgentSimulationState simulatorAddAgent(
   void* simulatorHandle,
   void* clientHandle,
-  JBW_Status* jbwStatus
+  JBW_Status* status
 ) {
   if (clientHandle == nullptr) {
     /* the simulation is local, so call add_agent directly */
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
     uint64_t new_agent_id; agent_state* new_agent;
-    status result = sim_handle->add_agent(new_agent_id, new_agent);
-    /* TODO: translate status enum */
+    auto result = sim_handle->add_agent(new_agent_id, new_agent);
     if (result != status::OK) {
-      jbwStatus->code = JBW_EXCEEDED_AGENT_LIMIT;
-      jbwStatus->message = "Failed to add new agent.";
+      JBW_SetJBWStatusFromStatus(status, result);
       return EMPTY_AGENT_SIM_STATE;
     }
 
@@ -1349,30 +1292,32 @@ AgentSimulationState simulatorAddAgent(
 
     AgentSimulationState new_agent_state;
     std::unique_lock<std::mutex> lock(new_agent->lock);
-    init(new_agent_state, *new_agent, sim_handle->get_config(), new_agent_id, jbwStatus);
-    if (jbwStatus->code != JBW_OK) return EMPTY_AGENT_SIM_STATE;
+    init(new_agent_state, *new_agent, sim_handle->get_config(), new_agent_id, status);
+    if (status->code != JBW_OK) return EMPTY_AGENT_SIM_STATE;
     return new_agent_state;
   } else {
     /* this is a client, so send an add_agent message to the server */
-    client<client_data>* client_ptr = (client<client_data>*) clientHandle;
-    if (!client_ptr->client_running) {
-      jbwStatus->code = JBW_LOST_CONNECTION;
-      jbwStatus->message = "Connection to the simulation server was lost.";
+    client<client_data>* client_handle = (client<client_data>*) clientHandle;
+    if (!client_handle->client_running) {
+      status->code = JBW_LOST_CONNECTION;
       return EMPTY_AGENT_SIM_STATE;
     }
 
-    client_ptr->data.waiting_for_server = true;
-    if (!send_add_agent(*client_ptr)) {
-      jbwStatus->code = JBW_COMMUNICATION_ERROR;
-      jbwStatus->message = "Failed to send an \"add agent\" request.";
+    client_handle->data.waiting_for_server = true;
+    if (!send_add_agent(*client_handle)) {
+      status->code = JBW_MPI_ERROR;
       return EMPTY_AGENT_SIM_STATE;
     }
 
     /* wait for response from server */
-    wait_for_server(*client_ptr);
+    wait_for_server(*client_handle);
 
-    /* TODO: translate status enum from `client_ptr->data.server_response` (`client_ptr->data.response_data.agent_state` here could be EMPTY_AGENT_SIM_STATE) */
-    return client_ptr->data.response_data.agent_state;
+    if (client_handle->data.server_response != status::OK) {
+      JBW_SetJBWStatusFromStatus(status, client_handle->data.server_response);
+      return EMPTY_AGENT_SIM_STATE;
+    }
+
+    return client_handle->data.response_data.agent_state;
   }
 }
 
@@ -1381,17 +1326,15 @@ void simulatorRemoveAgent(
   void* simulatorHandle,
   void* clientHandle,
   uint64_t agentId,
-  JBW_Status* jbwStatus
+  JBW_Status* status
 ) {
   if (clientHandle == nullptr) {
     /* the simulation is local, so call add_agent directly */
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
 
-    status result = sim_handle->remove_agent(agentId);
+    auto result = sim_handle->remove_agent(agentId);
     if (result != status::OK) {
-      /* TODO: translate status enum */
-      jbwStatus->code = JBW_UNKNOWN_ERROR;
-      jbwStatus->message = "Failed to remove an agent.";
+      JBW_SetJBWStatusFromStatus(status, result);
       return;
     }
 
@@ -1401,27 +1344,23 @@ void simulatorRemoveAgent(
       agent_ids.remove(index);
   } else {
     /* this is a client, so send an add_agent message to the server */
-    client<client_data>* client_ptr = (client<client_data>*) clientHandle;
-    if (!client_ptr->client_running) {
-      jbwStatus->code = JBW_LOST_CONNECTION;
-      jbwStatus->message = "Connection to the simulation server was lost.";
+    client<client_data>* client_handle = (client<client_data>*) clientHandle;
+    if (!client_handle->client_running) {
+      status->code = JBW_LOST_CONNECTION;
       return;
     }
 
-    client_ptr->data.waiting_for_server = true;
-    if (!send_remove_agent(*client_ptr, agentId)) {
-      jbwStatus->code = JBW_COMMUNICATION_ERROR;
-      jbwStatus->message = "Failed to send an \"add agent\" request.";
+    client_handle->data.waiting_for_server = true;
+    if (!send_remove_agent(*client_handle, agentId)) {
+      status->code = JBW_MPI_ERROR;
       return;
     }
 
     /* wait for response from server */
-    wait_for_server(*client_ptr);
+    wait_for_server(*client_handle);
 
-    if (client_ptr->data.server_response != status::OK) {
-      /* TODO: translate status enum */
-      jbwStatus->code = JBW_UNKNOWN_ERROR;
-      jbwStatus->message = "Failed to remove an agent.";
+    if (client_handle->data.server_response != status::OK) {
+      JBW_SetJBWStatusFromStatus(status, client_handle->data.server_response);
       return;
     }
   }
@@ -1434,41 +1373,35 @@ void simulatorMoveAgent(
   uint64_t agentId,
   Direction direction,
   unsigned int numSteps,
-  JBW_Status* jbwStatus
+  JBW_Status* status
 ) {
   if (clientHandle == nullptr) {
     /* the simulation is local, so call move directly */
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
-    status result = sim_handle->move(agentId, to_direction(direction), numSteps);
+    auto result = sim_handle->move(agentId, to_direction(direction), numSteps);
     if (result != status::OK) {
-      /* TODO: translate status enum */
-      jbwStatus->code = JBW_UNKNOWN_ERROR;
-      jbwStatus->message = "Failed to move an agent.";
+      JBW_SetJBWStatusFromStatus(status, result);
       return;
     }
   } else {
     /* this is a client, so send a move message to the server */
-    client<client_data>* client_ptr = (client<client_data>*) clientHandle;
-    if (!client_ptr->client_running) {
-      jbwStatus->code = JBW_LOST_CONNECTION;
-      jbwStatus->message = "Connection to the simulation server was lost.";
+    client<client_data>* client_handle = (client<client_data>*) clientHandle;
+    if (!client_handle->client_running) {
+      status->code = JBW_LOST_CONNECTION;
       return;
     }
 
-    client_ptr->data.waiting_for_server = true;
-    if (!send_move(*client_ptr, agentId, to_direction(direction), numSteps)) {
-      jbwStatus->code = JBW_COMMUNICATION_ERROR;
-      jbwStatus->message = "Failed to send a \"move agent\" request.";
+    client_handle->data.waiting_for_server = true;
+    if (!send_move(*client_handle, agentId, to_direction(direction), numSteps)) {
+      status->code = JBW_MPI_ERROR;
       return;
     }
 
     /* wait for response from server */
-    wait_for_server(*client_ptr);
+    wait_for_server(*client_handle);
 
-    if (client_ptr->data.server_response != status::OK) {
-      /* TODO: translate status enum */
-      jbwStatus->code = JBW_UNKNOWN_ERROR;
-      jbwStatus->message = "Failed to move an agent.";
+    if (client_handle->data.server_response != status::OK) {
+      JBW_SetJBWStatusFromStatus(status, client_handle->data.server_response);
       return;
     }
   }
@@ -1480,41 +1413,35 @@ void simulatorTurnAgent(
   void* clientHandle,
   uint64_t agentId,
   TurnDirection direction,
-  JBW_Status* jbwStatus
+  JBW_Status* status
 ) {
   if (clientHandle == nullptr) {
     /* the simulation is local, so call turn directly */
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
-    status result = sim_handle->turn(agentId, to_direction(direction));
+    auto result = sim_handle->turn(agentId, to_direction(direction));
     if (result != status::OK) {
-      /* TODO: translate status enum */
-      jbwStatus->code = JBW_UNKNOWN_ERROR;
-      jbwStatus->message = "Failed to turn an agent.";
+      JBW_SetJBWStatusFromStatus(status, result);
       return;
     }
   } else {
     /* this is a client, so send a turn message to the server */
-    client<client_data>* client_ptr = (client<client_data>*) clientHandle;
-    if (!client_ptr->client_running) {
-      jbwStatus->code = JBW_LOST_CONNECTION;
-      jbwStatus->message = "Connection to the simulation server was lost.";
+    client<client_data>* client_handle = (client<client_data>*) clientHandle;
+    if (!client_handle->client_running) {
+      status->code = JBW_LOST_CONNECTION;
       return;
     }
 
-    client_ptr->data.waiting_for_server = true;
-    if (!send_turn(*client_ptr, agentId, to_direction(direction))) {
-      jbwStatus->code = JBW_COMMUNICATION_ERROR;
-      jbwStatus->message = "Failed to send a \"turn agent\" request.";
+    client_handle->data.waiting_for_server = true;
+    if (!send_turn(*client_handle, agentId, to_direction(direction))) {
+      status->code = JBW_MPI_ERROR;
       return;
     }
 
     /* wait for response from server */
-    wait_for_server(*client_ptr);
+    wait_for_server(*client_handle);
 
-    if (client_ptr->data.server_response != status::OK) {
-      /* TODO: translate status enum */
-      jbwStatus->code = JBW_UNKNOWN_ERROR;
-      jbwStatus->message = "Failed to turn an agent.";
+    if (client_handle->data.server_response != status::OK) {
+      JBW_SetJBWStatusFromStatus(status, client_handle->data.server_response);
       return;
     }
   }
@@ -1525,41 +1452,35 @@ void simulatorNoOpAgent(
   void* simulatorHandle,
   void* clientHandle,
   uint64_t agentId,
-  JBW_Status* jbwStatus
+  JBW_Status* status
 ) {
   if (clientHandle == nullptr) {
     /* the simulation is local, so call do_nothing directly */
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
-    status result = sim_handle->do_nothing(agentId);
+    auto result = sim_handle->do_nothing(agentId);
     if (result != status::OK) {
-      /* TODO: translate status enum */
-      jbwStatus->code = JBW_UNKNOWN_ERROR;
-      jbwStatus->message = "Failed to perform a \"no-op\" agent action.";
+      JBW_SetJBWStatusFromStatus(status, result);
       return;
     }
   } else {
     /* this is a client, so send a do_nothing message to the server */
-    client<client_data>* client_ptr = (client<client_data>*) clientHandle;
-    if (!client_ptr->client_running) {
-      jbwStatus->code = JBW_LOST_CONNECTION;
-      jbwStatus->message = "Connection to the simulation server was lost.";
+    client<client_data>* client_handle = (client<client_data>*) clientHandle;
+    if (!client_handle->client_running) {
+      status->code = JBW_LOST_CONNECTION;
       return;
     }
 
-    client_ptr->data.waiting_for_server = true;
-    if (!send_do_nothing(*client_ptr, agentId)) {
-      jbwStatus->code = JBW_COMMUNICATION_ERROR;
-      jbwStatus->message = "Failed to send a \"no-op\" request.";
+    client_handle->data.waiting_for_server = true;
+    if (!send_do_nothing(*client_handle, agentId)) {
+      status->code = JBW_MPI_ERROR;
       return;
     }
 
     /* wait for response from server */
-    wait_for_server(*client_ptr);
+    wait_for_server(*client_handle);
 
-    if (client_ptr->data.server_response != status::OK) {
-      /* TODO: translate status enum */
-      jbwStatus->code = JBW_UNKNOWN_ERROR;
-      jbwStatus->message = "Failed to perform a \"no-op\" agent action.";
+    if (client_handle->data.server_response != status::OK) {
+      JBW_SetJBWStatusFromStatus(status, client_handle->data.server_response);
       return;
     }
   }
@@ -1576,11 +1497,9 @@ void simulatorSetActive(
   if (clientHandle == nullptr) {
     /* the simulation is local, so call set_active directly */
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
-    status result = sim_handle->set_agent_active(agentId, active);
+    auto result = sim_handle->set_agent_active(agentId, active);
     if (result != status::OK) {
-      /* TODO: translate status enum */
-      jbwStatus->code = JBW_UNKNOWN_ERROR;
-      jbwStatus->message = "Failed to perform a \"set active\" agent action.";
+      JBW_SetJBWStatusFromStatus(status, result);
       return;
     }
   } else {
@@ -1588,19 +1507,22 @@ void simulatorSetActive(
     client<client_data>* client_handle = (client<client_data>*) clientHandle;
     if (!client_handle->client_running) {
       status->code = JBW_LOST_CONNECTION;
-      status->message = "Connection to the simulation server was lost.";
       return;
     }
 
     client_handle->data.waiting_for_server = true;
     if (!send_set_active(*client_handle, agentId, active)) {
-      status->code = JBW_COMMUNICATION_ERROR;
-      status->message = "Failed to send a \"set active\" request.";
+      status->code = JBW_MPI_ERROR;
       return;
     }
 
     /* wait for response from server */
     wait_for_server(*client_handle);
+
+    if (client_handle->data.server_response != status::OK) {
+      JBW_SetJBWStatusFromStatus(status, client_handle->data.server_response);
+      return;
+    }
   }
 }
 
@@ -1615,11 +1537,9 @@ bool simulatorIsActive(
     /* the simulation is local, so call is_active directly */
     bool active;
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
-    status result = sim_handle->is_agent_active(agentId, active);
+    auto result = sim_handle->is_agent_active(agentId, active);
     if (result != status::OK) {
-      /* TODO: translate status enum */
-      jbwStatus->code = JBW_UNKNOWN_ERROR;
-      jbwStatus->message = "Failed to perform a \"set active\" agent action.";
+      JBW_SetJBWStatusFromStatus(status, result);
       return false;
     }
     return active;
@@ -1628,23 +1548,20 @@ bool simulatorIsActive(
     client<client_data>* client_handle = (client<client_data>*) clientHandle;
     if (!client_handle->client_running) {
       status->code = JBW_LOST_CONNECTION;
-      status->message = "Connection to the simulation server was lost.";
       return false;
     }
 
     client_handle->data.waiting_for_server = true;
     if (!send_is_active(*client_handle, agentId)) {
-      status->code = JBW_COMMUNICATION_ERROR;
-      status->message = "Failed to send an \"is active\" request.";
+      status->code = JBW_MPI_ERROR;
       return false;
     }
 
     /* wait for response from server */
     wait_for_server(*client_handle);
-    if (client_handle->data.server_response == status::OK) {
-      /* TODO: translate status enum */
-      status->code = JBW_COMMUNICATION_ERROR;
-      status->message = "Invalid response received for an \"is active\" request.";
+
+    if (client_handle->data.server_response != status::OK) {
+      JBW_SetJBWStatusFromStatus(status, client_handle->data.server_response);
       return false;
     }
 
@@ -1659,7 +1576,7 @@ const SimulationMap simulatorMap(
   Position bottomLeftCorner,
   Position topRightCorner,
   bool getScentMap,
-  JBW_Status* jbwStatus
+  JBW_Status* status
 ) {
   position bottom_left = position(bottomLeftCorner.x, bottomLeftCorner.y);
   position top_right = position(topRightCorner.x, topRightCorner.y);
@@ -1667,22 +1584,17 @@ const SimulationMap simulatorMap(
     /* the simulation is local, so call get_map directly */
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
     array<array<patch_state>> patches(16);
-    status result;
-    if (getScentMap) {
-      result = sim_handle->get_map<true>(bottom_left, top_right, patches);
-    } else {
-      result = sim_handle->get_map<false>(bottom_left, top_right, patches);
-    }
+    auto result = (getScentMap ?
+      sim_handle->get_map<true>(bottom_left, top_right, patches) :
+      sim_handle->get_map<false>(bottom_left, top_right, patches));
     if (result != status::OK) {
-      /* TODO: translate status enum */
-      jbwStatus->code = JBW_UNKNOWN_ERROR;
-      jbwStatus->message = "Failed to obtain the simulation map.";
+      JBW_SetJBWStatusFromStatus(status, result);
       return EMPTY_SIM_MAP;
     }
 
     SimulationMap map;
-    init(map, patches, sim_handle->get_config(), jbwStatus);
-    if (jbwStatus->code != JBW_OK)
+    init(map, patches, sim_handle->get_config(), status);
+    if (status->code != JBW_OK)
       map = EMPTY_SIM_MAP;
     for (array<patch_state>& row : patches) {
       for (auto& entry : row)
@@ -1692,39 +1604,35 @@ const SimulationMap simulatorMap(
     return map;
   } else {
     /* this is a client, so send a get_map message to the server */
-    client<client_data>* client_ptr = (client<client_data>*) clientHandle;
-    if (!client_ptr->client_running) {
-      jbwStatus->code = JBW_LOST_CONNECTION;
-      jbwStatus->message = "Connection to the simulation server was lost.";
+    client<client_data>* client_handle = (client<client_data>*) clientHandle;
+    if (!client_handle->client_running) {
+      status->code = JBW_LOST_CONNECTION;
       return EMPTY_SIM_MAP;
     }
 
-    client_ptr->data.waiting_for_server = true;
-    if (!send_get_map(*client_ptr, bottom_left, top_right, getScentMap)) {
-      jbwStatus->code = JBW_COMMUNICATION_ERROR;
-      jbwStatus->message = "Failed to send a \"get map\" request.";
+    client_handle->data.waiting_for_server = true;
+    if (!send_get_map(*client_handle, bottom_left, top_right, getScentMap)) {
+      status->code = JBW_MPI_ERROR;
       return EMPTY_SIM_MAP;
     }
 
     /* wait for response from server */
-    wait_for_server(*client_ptr);
+    wait_for_server(*client_handle);
     SimulationMap map;
-    if (client_ptr->data.server_response != status::OK) {
-      /* TODO: translate status enum */
-      jbwStatus->code = JBW_UNKNOWN_ERROR;
-      jbwStatus->message = "Failed to obtain the simulation map.";
+    if (client_handle->data.server_response != status::OK) {
+      JBW_SetJBWStatusFromStatus(status, client_handle->data.server_response);
       return EMPTY_SIM_MAP;
     }
-    init(map, *client_ptr->data.response_data.map, client_ptr->config, jbwStatus);
-    if (jbwStatus->code != JBW_OK)
+    init(map, *client_handle->data.response_data.map, client_handle->config, status);
+    if (status->code != JBW_OK)
       map = EMPTY_SIM_MAP;
-    for (array<patch_state>& row : *client_ptr->data.response_data.map) {
+    for (array<patch_state>& row : *client_handle->data.response_data.map) {
       for (patch_state& entry : row)
         free(entry);
       free(row);
     }
-    free(*client_ptr->data.response_data.map);
-    free(client_ptr->data.response_data.map);
+    free(*client_handle->data.response_data.map);
+    free(client_handle->data.response_data.map);
     return map;
   }
 }
@@ -1733,22 +1641,19 @@ const SimulationMap simulatorMap(
 const AgentIDList simulatorAgentIds(
   void* simulatorHandle,
   void* clientHandle,
-  JBW_Status* jbwStatus
+  JBW_Status* status
 ) {
   if (clientHandle == nullptr) {
     /* the simulation is local, so call get_agent_ids directly */
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
     array<uint64_t>& agent_ids = *((array<uint64_t>*) alloca(sizeof(array<uint64_t>)));
     if (!array_init(agent_ids, 16)) {
-      status->code = JBW_OUT_OF_MEMORY_ERROR;
-      status->message = "Insufficient memory while initializing array for agent IDs.";
+      status->code = JBW_OUT_OF_MEMORY;
       return EMPTY_AGENT_ID_LIST;
     }
-    status result = sim_handle->get_agent_ids(agent_ids);
+    auto result = sim_handle->get_agent_ids(agent_ids);
     if (result != status::OK) {
-      /* TODO: translate status enum */
-      jbwStatus->code = JBW_UNKNOWN_ERROR;
-      jbwStatus->message = "Failed to obtain the agent IDs.";
+      JBW_SetJBWStatusFromStatus(status, result);
       return EMPTY_AGENT_ID_LIST;
     }
 
@@ -1758,31 +1663,27 @@ const AgentIDList simulatorAgentIds(
     return list;
   } else {
     /* this is a client, so send a get_agent_ids message to the server */
-    client<client_data>* client_ptr = (client<client_data>*) clientHandle;
-    if (!client_ptr->client_running) {
-      jbwStatus->code = JBW_LOST_CONNECTION;
-      jbwStatus->message = "Connection to the simulation server was lost.";
+    client<client_data>* client_handle = (client<client_data>*) clientHandle;
+    if (!client_handle->client_running) {
+      status->code = JBW_LOST_CONNECTION;
       return EMPTY_AGENT_ID_LIST;
     }
 
-    client_ptr->data.waiting_for_server = true;
-    if (!send_get_agent_ids(*client_ptr)) {
-      jbwStatus->code = JBW_COMMUNICATION_ERROR;
-      jbwStatus->message = "Failed to send a \"get agent ids\" request.";
+    client_handle->data.waiting_for_server = true;
+    if (!send_get_agent_ids(*client_handle)) {
+      status->code = JBW_MPI_ERROR;
       return EMPTY_AGENT_ID_LIST;
     }
 
     /* wait for response from server */
-    wait_for_server(*client_ptr);
+    wait_for_server(*client_handle);
     AgentIDList list;
-    if (client_ptr->data.server_response != status::OK) {
-      /* TODO: translate status enum */
-      jbwStatus->code = JBW_UNKNOWN_ERROR;
-      jbwStatus->message = "Failed to obtain the agent IDs.";
+    if (client_handle->data.server_response != status::OK) {
+      JBW_SetJBWStatusFromStatus(status, client_handle->data.server_response);
       return EMPTY_AGENT_ID_LIST;
     }
-    list.agentIds = client_ptr->data.response_data.agent_ids.key;
-    list.numAgents = (unsigned int) client_ptr->data.response_data.agent_ids.value;
+    list.agentIds = client_handle->data.response_data.agent_ids.key;
+    list.numAgents = (unsigned int) client_handle->data.response_data.agent_ids.value;
     return list;
   }
 }
@@ -1793,15 +1694,15 @@ const AgentSimulationState* simulatorAgentStates(
   void* clientHandle,
   uint64_t* agentIds,
   unsigned int numAgents,
-  JBW_Status* jbwStatus
+  JBW_Status* status
 ) {
   if (clientHandle == nullptr) {
     /* the simulation is local, so call get_agent_ids directly */
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
-    agent_state** agent_states = (agent_state**) malloc(max((size_t) 1, sizeof(agent_state*) * numAgents));
+    agent_state** agent_states = (agent_state**) malloc(
+      max((size_t) 1, sizeof(agent_state*) * numAgents));
     if (agent_states == nullptr) {
-      status->code = JBW_OUT_OF_MEMORY_ERROR;
-      status->message = "Insufficient memory while initializing array for agent state pointers.";
+      status->code = JBW_OUT_OF_MEMORY;
       return nullptr;
     }
     sim_handle->get_agent_states(agent_states, agentIds, numAgents);
@@ -1809,92 +1710,88 @@ const AgentSimulationState* simulatorAgentStates(
     AgentSimulationState* agent_simulation_states = (AgentSimulationState*) malloc(
       max((size_t) 1, sizeof(AgentSimulationState) * numAgents));
     if (agent_simulation_states == nullptr) {
-      fprintf(stderr, "simulatorAgentStates ERROR: Insufficient memory for `agent_simulation_states`.\n");
+      status->code = JBW_OUT_OF_MEMORY;
       for (size_t i = 0; i < numAgents; i++)
-        if (agent_states[i] != nullptr) agent_states[i]->lock.unlock();
-      free(agent_states); return nullptr;
+        if (agent_states[i] != nullptr)
+          agent_states[i]->lock.unlock();
+      free(agent_states);
+      return nullptr;
     }
     const simulator_config& config = sim_handle->get_config();
-    auto* status = JBW_NewStatus(); /* TODO: this will cause a memory leak; i copied this from `on_step` */
     for (size_t i = 0; i < numAgents; i++) {
       if (agent_states[i] == nullptr) {
         agent_simulation_states[i] = EMPTY_AGENT_SIM_STATE;
       } else {
         init(agent_simulation_states[i], *agent_states[i], config, agentIds[i], status);
-        // TODO: Propagate this to Swift.
         if (status->code != JBW_OK) {
-          fprintf(stderr, "simulatorAgentStates ERROR: Insufficient memory for agent state.\n");
-          for (size_t j = 0; j < i; j++) free(agent_simulation_states[j]);
-          for (size_t j = i; j < numAgents; j++) agent_states[j]->lock.unlock();
+          for (size_t j = 0; j < i; j++)
+            free(agent_simulation_states[j]);
+          for (size_t j = i; j < numAgents; j++)
+            agent_states[j]->lock.unlock();
           free(agent_simulation_states);
-          free(agent_states); return nullptr;
+          free(agent_states);
+          return nullptr;
         }
         agent_states[i]->lock.unlock();
       }
     }
     return agent_simulation_states;
-
   } else {
     /* this is a client, so send a get_agent_states message to the server */
-    client<client_data>* client_ptr = (client<client_data>*) clientHandle;
-    if (!client_ptr->client_running) {
-      jbwStatus->code = JBW_LOST_CONNECTION;
-      jbwStatus->message = "Connection to the simulation server was lost.";
+    client<client_data>* client_handle = (client<client_data>*) clientHandle;
+    if (!client_handle->client_running) {
+      status->code = JBW_LOST_CONNECTION;
       return nullptr;
     }
 
-    client_ptr->data.waiting_for_server = true;
-    if (!send_get_agent_states(*client_ptr, agentIds, numAgents)) {
-      jbwStatus->code = JBW_COMMUNICATION_ERROR;
-      jbwStatus->message = "Failed to send a \"get agent states\" request.";
+    client_handle->data.waiting_for_server = true;
+    if (!send_get_agent_states(*client_handle, agentIds, numAgents)) {
+      status->code = JBW_MPI_ERROR;
       return nullptr;
     }
 
     /* wait for response from server */
-    wait_for_server(*client_ptr);
-    if (client_ptr->data.server_response != status::OK) {
-      /* TODO: translate status enum */
-      jbwStatus->code = JBW_UNKNOWN_ERROR;
-      jbwStatus->message = "Failed to obtain the agent states.";
+    wait_for_server(*client_handle);
+    if (client_handle->data.server_response != status::OK) {
+      JBW_SetJBWStatusFromStatus(status, client_handle->data.server_response);
       return nullptr;
     }
 
     AgentSimulationState* agent_simulation_states = (AgentSimulationState*) malloc(
       max((size_t) 1, sizeof(AgentSimulationState) * numAgents));
     if (agent_simulation_states == nullptr) {
-      fprintf(stderr, "simulatorAgentStates ERROR: Insufficient memory for `agent_simulation_states`.\n");
-      for (size_t i = 0; i < client_ptr->data.response_data.agent_states.length; i++)
-        free(client_ptr->data.response_data.agent_states.states[i]);
-      free(client_ptr->data.response_data.agent_states.ids);
-      free(client_ptr->data.response_data.agent_states.states);
+      status->code = JBW_OUT_OF_MEMORY;
+      for (size_t i = 0; i < client_handle->data.response_data.agent_states.length; i++)
+        free(client_handle->data.response_data.agent_states.states[i]);
+      free(client_handle->data.response_data.agent_states.ids);
+      free(client_handle->data.response_data.agent_states.states);
       return nullptr;
     }
-    const simulator_config& config = client_ptr->config;
-    auto* status = JBW_NewStatus(); /* TODO: this will cause a memory leak; i copied this from `on_step` */
+    const simulator_config& config = client_handle->config;
     size_t next_index = 0;
     for (size_t i = 0; i < numAgents; i++) {
-      if (next_index == client_ptr->data.response_data.agent_states.length
-       || client_ptr->data.response_data.agent_states.ids[next_index] != agentIds[i])
+      if (next_index == client_handle->data.response_data.agent_states.length
+       || client_handle->data.response_data.agent_states.ids[next_index] != agentIds[i])
       {
         agent_simulation_states[i] = EMPTY_AGENT_SIM_STATE;
       } else {
-        init(agent_simulation_states[i], client_ptr->data.response_data.agent_states.states[i], config, agentIds[i], status);
-        // TODO: Propagate this to Swift.
+        init(
+          agent_simulation_states[i], client_handle->data.response_data.agent_states.states[i],
+          config, agentIds[i], status);
         if (status->code != JBW_OK) {
-          fprintf(stderr, "simulatorAgentStates ERROR: Insufficient memory for agent state.\n");
           for (size_t j = i; j < numAgents; j++)
-            free(client_ptr->data.response_data.agent_states.states[j]);
-          free(client_ptr->data.response_data.agent_states.ids);
-          free(client_ptr->data.response_data.agent_states.states);
+            free(client_handle->data.response_data.agent_states.states[j]);
+          free(client_handle->data.response_data.agent_states.ids);
+          free(client_handle->data.response_data.agent_states.states);
           free(agent_simulation_states);
           return nullptr;
         }
-        free(client_ptr->data.response_data.agent_states.states[i]);
+        free(client_handle->data.response_data.agent_states.states[i]);
         next_index++;
       }
     }
-    free(client_ptr->data.response_data.agent_states.ids);
-    free(client_ptr->data.response_data.agent_states.states);
+    free(client_handle->data.response_data.agent_states.ids);
+    free(client_handle->data.response_data.agent_states.states);
     return agent_simulation_states;
   }
 }
@@ -1910,9 +1807,11 @@ void* simulationServerStart(
 ) {
   simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
   async_server& server = sim_handle->get_data().server;
-  if (!init_server(server, *sim_handle, (uint16_t) port, connectionQueueCapacity, numWorkers, to_permissions(perms))) {
-    status->code = JBW_COMMUNICATION_ERROR;
-    status->message = "Failed to initialize a simulation server.";
+  if (!init_server(
+    server, *sim_handle, (uint16_t) port, connectionQueueCapacity,
+    numWorkers, to_permissions(perms))
+  ) {
+    status->code = JBW_MPI_ERROR;
     return nullptr;
   }
   return (void*) &server;
@@ -1948,8 +1847,7 @@ SimulationNewClientInfo simulationClientConnect(
   if (new_client == nullptr || !init(*new_client)) {
     if (new_client != nullptr)
       free(new_client);
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while creating a simulation client.";
+    status->code = JBW_OUT_OF_MEMORY;
     return EMPTY_NEW_CLIENT_INFO;
   }
 
@@ -1959,8 +1857,7 @@ SimulationNewClientInfo simulationClientConnect(
   if (simulator_time == UINT64_MAX) {
     free(*new_client);
     free(new_client);
-    status->code = JBW_COMMUNICATION_ERROR;
-    status->message = "Failed to initialize a simulation client.";
+    status->code = JBW_MPI_ERROR;
     return EMPTY_NEW_CLIENT_INFO;
   }
 
@@ -1986,11 +1883,9 @@ SimulationClientInfo simulationClientReconnect(
 ) {
   client<client_data>* new_client = (client<client_data>*) malloc(sizeof(client<client_data>));
   if (new_client == nullptr || !init(*new_client)) {
-    /* TODO: communicate out of memory errors to swift */
+    status->code = JBW_OUT_OF_MEMORY;
     if (new_client != nullptr)
       free(new_client);
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while reconnecting a simulation client.";
     return EMPTY_CLIENT_INFO;
   }
 
@@ -2002,8 +1897,7 @@ SimulationClientInfo simulationClientReconnect(
   if (simulator_time == UINT64_MAX) {
     free(*new_client);
     free(new_client);
-    status->code = JBW_COMMUNICATION_ERROR;
-    status->message = "Failed to initialize a simulation client.";
+    status->code = JBW_MPI_ERROR;
     return EMPTY_CLIENT_INFO;
   }
 
@@ -2016,8 +1910,7 @@ SimulationClientInfo simulationClientReconnect(
     stop_client(*new_client);
     free(*new_client);
     free(new_client);
-    status->code = JBW_OUT_OF_MEMORY_ERROR;
-    status->message = "Insufficient memory while reconnecting a simulation client.";
+    status->code = JBW_OUT_OF_MEMORY;
     return EMPTY_CLIENT_INFO;
   }
   for (size_t i = 0; i < agent_count; i++) {
@@ -2054,21 +1947,20 @@ SimulationClientInfo simulationClientReconnect(
 
 
 void simulationClientStop(void* clientHandle) {
-  client<client_data>* client_ptr = (client<client_data>*) clientHandle;
-  stop_client(*client_ptr);
-  free(*client_ptr);
-  free(client_ptr);
+  client<client_data>* client_handle = (client<client_data>*) clientHandle;
+  stop_client(*client_handle);
+  free(*client_handle);
+  free(client_handle);
 }
 
 
 void simulationClientRemove(void* clientHandle, JBW_Status* status) {
-  client<client_data>* client_ptr = (client<client_data>*) clientHandle;
-  if (!remove_client(*client_ptr)) {
-    status->code = JBW_UNKNOWN_ERROR;
-    status->message = "Failed to remove a simulation client.";
+  client<client_data>* client_handle = (client<client_data>*) clientHandle;
+  if (!remove_client(*client_handle)) {
+    status->code = JBW_MPI_ERROR;
   }
-  free(*client_ptr);
-  free(client_ptr);
+  free(*client_handle);
+  free(client_handle);
 }
 
 

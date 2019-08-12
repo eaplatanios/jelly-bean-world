@@ -12,5 +12,5 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
-// runDummy()
-runPPO(batchSize: 32)
+try! runDummy()
+// try! runPPO(batchSize: 32)
