@@ -355,14 +355,16 @@ public final class Simulator {
   /// - Parameters:
   ///   - bottomLeft: Bottom left corner of the requested map portion.
   ///   - topRight: Top right corner of the requested map portion.
+  ///   - includingScent: Indicates whether to include scent in the obtained map representation.
   @inlinable
   internal func map(
     bottomLeft: Position = Position(x: Int64.min, y: Int64.min),
-    topRight: Position = Position(x: Int64.max, y: Int64.max)
+    topRight: Position = Position(x: Int64.max, y: Int64.max),
+    includingScent: Bool = true
    ) throws -> SimulationMap {
     var status = JBW_Status()
     let cSimulationMap = simulatorMap(
-      handle, clientHandle, bottomLeft.toC(), topRight.toC(), &status)
+      handle, clientHandle, bottomLeft.toC(), topRight.toC(), includingScent, &status)
     try checkStatus(&status)
     defer { simulatorDeleteSimulationMap(cSimulationMap) }
     return SimulationMap(fromC: cSimulationMap, using: configuration)

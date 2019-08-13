@@ -2,6 +2,15 @@
   "object": {
     "pins": [
       {
+        "package": "llbuild",
+        "repositoryURL": "https://github.com/apple/swift-llbuild.git",
+        "state": {
+          "branch": null,
+          "revision": "f1c9ad9a253cdf1aa89a7f5c99c30b4513b06ddb",
+          "version": "0.1.1"
+        }
+      },
+      {
         "package": "swift-log",
         "repositoryURL": "https://github.com/apple/swift-log.git",
         "state": {
@@ -11,11 +20,20 @@
         }
       },
       {
+        "package": "SwiftPM",
+        "repositoryURL": "https://github.com/apple/swift-package-manager.git",
+        "state": {
+          "branch": null,
+          "revision": "8656a25cb906c1896339f950ac960ee1b4fe8034",
+          "version": "0.4.0"
+        }
+      },
+      {
         "package": "ReinforcementLearning",
         "repositoryURL": "https://github.com/eaplatanios/swift-rl.git",
         "state": {
           "branch": "master",
-          "revision": "8ea3c847783f024e3286931ac1d73dbccc2f7447",
+          "revision": "94fe8826cbe077ee8451dec7f54f86ffdc475943",
           "version": null
         }
       }

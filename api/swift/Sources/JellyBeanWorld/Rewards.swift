@@ -27,13 +27,16 @@ public struct AgentTransition {
   }
 }
 
-/// Reward function that scores agent transitions.
-public struct Reward {
-  public let scoringFunction: (AgentTransition) -> Float
+///  Reward function that scores agent transitions.
+public enum Reward {
+  case collect(item: Item, value: Float)
+  indirect case combined(Reward, Reward)
 
+  /// Adds two reward functions. The resulting reward will be equal to the sum of the rewards
+  /// computed by the two functions.
   @inlinable
-  public init(using scoringFunction: @escaping (AgentTransition) -> Float) {
-    self.scoringFunction = scoringFunction
+  public static func +(lhs: Reward, rhs: Reward) -> Reward {
+    .combined(lhs, rhs)
   }
 
   /// Returns a reward value for the provided transition.
@@ -42,41 +45,33 @@ public struct Reward {
   /// - Returns: Reward value for the provided transition.
   @inlinable
   public func callAsFunction(for transition: AgentTransition) -> Float {
-    scoringFunction(transition)
+    switch self {
+      case let .collect(item, value):
+        let currentItemCount = transition.currentState.items[item] ?? 0
+        let previousItemCount = transition.previousState.items[item] ?? 0
+        return Float(currentItemCount - previousItemCount) * value
+      case let .combined(reward1, reward2):
+        return reward1(for: transition) + reward2(for: transition)
+    }
   }
 }
 
-extension Reward {
-  public init(summing rewards: [Reward]) {
-    self.init(using: { transition in rewards.map {
-      $0(for: transition)
-    }.reduce(0, +) })
-  }
-
-  public init(summing rewards: Reward...) {
-    self.init(summing: rewards)
-  }
+/// Reward function schedule which specifies which reward function is used at each time step.
+/// This is useful for representing never-ending learning settings that require adaptation.
+public protocol RewardSchedule {
+  /// Returns the reward function to use for the specified time step.
+  func reward(forStep step: UInt64) -> Reward
 }
 
-extension Reward {
-  public init(@RewardBuilder rewardBuilder: () -> Reward) {
-    self = rewardBuilder()
-  }
-}
+/// Fixed reward function schedule that uses the same reward function for all time steps.
+public struct FixedReward: RewardSchedule {
+  public let reward: Reward
 
-@_functionBuilder
-public struct RewardBuilder {
-  public static func buildBlock(_ rewards: Reward...) -> Reward {
-    Reward(summing: rewards)
+  public init(_ reward: Reward) {
+    self.reward = reward
   }
-}
 
-extension Reward {
-  public init(forCollecting item: Item, withValue value: Float) {
-    self.init(using: { transition in
-      let currentItemCount = transition.currentState.items[item] ?? 0
-      let previousItemCount = transition.previousState.items[item] ?? 0
-      return Float(currentItemCount - previousItemCount) * value
-    })
+  public func reward(forStep step: UInt64) -> Reward {
+    reward
   }
 }
