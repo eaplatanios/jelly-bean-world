@@ -40,12 +40,14 @@ public final class Environment: ReinforcementLearning.Environment {
       try simulator.add(agent: agent)
       return State(simulator: simulator, agent: agent)
     }
-    let observation = Observation.stack(states.map { state in
+    let observation = Observation.stack(zip(configurations, states).map { (configuration, state) in
       let agentState = state.simulator.agentStates.values.first!
+      let rewardFunction = configuration.rewardSchedule.reward(forStep: state.simulator.time)
       return Observation(
         vision: Tensor<Float>(agentState.vision),
         scent: Tensor<Float>(agentState.scent),
-        moved: Tensor<Bool>(repeating: false, shape: [batchSize]))
+        moved: Tensor<Bool>(repeating: false, shape: [batchSize]),
+        rewardFunction: rewardFunction)
     })
     self.step =  Step(
       kind: StepKind.first(batchSize: batchSize),
@@ -63,12 +65,13 @@ public final class Environment: ReinforcementLearning.Environment {
       states[i].agent.nextAction = Int(actions[i].scalarized())
       try states[i].simulator.step()
       let agentState = states[i].simulator.agentStates.values.first!
+      let rewardFunction = configurations[i].rewardSchedule.reward(
+        forStep: states[i].simulator.time)
       let observation = Observation(
         vision: Tensor<Float>(agentState.vision),
         scent: Tensor<Float>(agentState.scent),
-        moved: Tensor<Bool>(agentState.position != previousAgentState.position))
-      let rewardFunction = configurations[i].rewardSchedule.reward(
-        forStep: states[i].simulator.time)
+        moved: Tensor<Bool>(agentState.position != previousAgentState.position),
+        rewardFunction: rewardFunction)
       let reward = Tensor<Float>(rewardFunction(for: AgentTransition(
         previousState: previousAgentState,
         currentState: agentState)))
@@ -87,12 +90,14 @@ public final class Environment: ReinforcementLearning.Environment {
       try simulator.add(agent: agent)
       return State(simulator: simulator, agent: agent)
     }
-    let observation = Observation.stack(states.map { state in
+    let observation = Observation.stack(zip(configurations, states).map { (configuration, state) in
       let agentState = state.simulator.agentStates.values.first!
+      let rewardFunction = configuration.rewardSchedule.reward(forStep: state.simulator.time)
       return Observation(
         vision: Tensor<Float>(agentState.vision),
         scent: Tensor<Float>(agentState.scent),
-        moved: Tensor<Bool>(repeating: false, shape: [batchSize]))
+        moved: Tensor<Bool>(repeating: false, shape: [batchSize]),
+        rewardFunction: rewardFunction)
     })
     step =  Step(
       kind: StepKind.first(batchSize: batchSize),
@@ -126,12 +131,19 @@ extension Environment {
     public var vision: Tensor<Float>
     public var scent: Tensor<Float>
     @noDerivative public var moved: Tensor<Bool>
+    @noDerivative public var rewardFunction: Reward?
 
     @inlinable
-    public init(vision: Tensor<Float>, scent: Tensor<Float>, moved: Tensor<Bool>) {
+    public init(
+      vision: Tensor<Float>,
+      scent: Tensor<Float>,
+      moved: Tensor<Bool>,
+      rewardFunction: Reward?
+    ) {
       self.vision = vision
       self.scent = scent
       self.moved = moved
+      self.rewardFunction = rewardFunction
     }
   }
 }
@@ -187,6 +199,7 @@ extension Environment {
       true // TODO: Check for the range of values.
     }
 
+    // TODO: How do we sample a reward function?
     public struct ValueDistribution: DifferentiableDistribution, KeyPathIterable {
       @usableFromInline internal var visionDistribution: Uniform<Float> = Uniform<Float>(
         lowerBound: Tensor<Float>(0),
@@ -220,7 +233,8 @@ extension Environment {
         Observation(
           vision: visionDistribution.mode(),
           scent: scentDistribution.mode(),
-          moved: movedDistribution.mode() .> 0)
+          moved: movedDistribution.mode() .> 0,
+          rewardFunction: nil)
       }
 
       @inlinable
@@ -228,7 +242,8 @@ extension Environment {
         Observation(
           vision: visionDistribution.sample(),
           scent: scentDistribution.sample(),
-          moved: movedDistribution.sample() .> 0)
+          moved: movedDistribution.sample() .> 0,
+          rewardFunction: nil)
       }
     }
   }
