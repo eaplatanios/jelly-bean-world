@@ -115,7 +115,7 @@ void print_controls(Stream& out) {
 		"  6 key:   Track agent with ID 6.\n"
 		"  7 key:   Track agent with ID 7.\n"
 		"  8 key:   Track agent with ID 8.\n"
-		"  9 key:   Track agent with ID 9.\n");
+		"  9 key:   Track agent with ID 9.\n\n");
 }
 
 inline void set_interaction_args(
@@ -269,11 +269,12 @@ bool run_locally(uint64_t track_agent_id)
 		}
 	});
 
+	print_controls(stdout); fflush(stdout);
+
 	timer stopwatch;
 	unsigned long long elapsed = 0;
 	unsigned int frame_count = 0;
 	visualizer<simulator<empty_data>> visualizer(sim, 800, 800, track_agent_id);
-	print_controls(stdout); fflush(stdout);
 	while (simulation_running) {
 		if (visualizer.is_window_closed())
 			break;
@@ -317,8 +318,9 @@ bool run(
 	}
 	connected_to_server = true;
 
-	visualizer<client<visualizer_client_data>> visualizer(sim, 800, 800, track_agent_id);
 	print_controls(stdout); fflush(stdout);
+
+	visualizer<client<visualizer_client_data>> visualizer(sim, 800, 800, track_agent_id);
 	while (sim.client_running) {
 		if (visualizer.is_window_closed())
 			break;

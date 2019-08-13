@@ -95,22 +95,22 @@ inline void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 struct visualizer_client_data {
 	visualizer<client<visualizer_client_data>>* painter = nullptr;
 
-	bool waiting_for_get_map;
+	bool waiting_for_get_map = false;
 	float get_map_left;
 	float get_map_right;
 	float get_map_bottom;
 	float get_map_top;
-	bool get_map_render_background;
+	bool get_map_render_background = true;
 
-	status get_map_response;
-	array<array<patch_state>>* map;
+	status get_map_response = status::OK;
+	array<array<patch_state>>* map = nullptr;
 
-	bool waiting_for_get_agent_states;
-	uint64_t track_agent_id;
+	bool waiting_for_get_agent_states = false;
+	uint64_t track_agent_id = 0;
 
-	status get_agent_states_response;
-	const agent_state* agent_states;
-	size_t agent_state_count;
+	status get_agent_states_response = status::OK;
+	const agent_state* agent_states = nullptr;
+	size_t agent_state_count = 0;
 };
 
 template <typename SimulatorData>
@@ -944,6 +944,32 @@ private:
 		}
 	}
 
+	inline bool process_mpi_status(client<visualizer_client_data>& sim)
+	{
+		if (sim.data.get_map_response == status::PERMISSION_ERROR) {
+			fprintf(stderr, "ERROR: We don't have permission to call `get_map` on the server.\n");
+			running = false;
+			remove_client(sim);
+			return false;
+		} else if (sim.data.get_map_response != status::OK) {
+			fprintf(stderr, "visualizer.run_map_retriever ERROR: `get_map` failed.\n");
+			running = false;
+			remove_client(sim);
+			return false;
+		}
+
+		if (sim.data.get_agent_states_response == status::PERMISSION_ERROR) {
+			fprintf(stderr, "ERROR: We don't have permission to call `get_agent_states` on the server. We cannot track agents.\n");
+			track_agent_id = 0;
+			sim.data.track_agent_id = 0;
+		} else if (sim.data.get_agent_states_response != status::INVALID_AGENT_ID
+				&& sim.data.get_agent_states_response != status::OK)
+		{
+			fprintf(stderr, "visualizer.run_map_retriever ERROR: `get_agent_states` failed.\n");
+		}
+		return true;
+	}
+
 	inline void run_map_retriever(client<visualizer_client_data>& sim)
 	{
 		while (running) {
@@ -951,11 +977,8 @@ private:
 			while (running && sim.client_running && (scene_ready || sim.data.waiting_for_get_map || sim.data.waiting_for_get_agent_states)) { }
 			if (!running || !sim.client_running) break;
 
-			if (sim.data.get_map_response != status::OK)
-				fprintf(stderr, "visualizer.run_map_retriever ERROR: `get_map` failed.\n");
-			if (sim.data.get_agent_states_response != status::INVALID_AGENT_ID
-			 && sim.data.get_agent_states_response != status::OK)
-				fprintf(stderr, "visualizer.run_map_retriever ERROR: `get_agent_states` failed.\n");
+			if (!process_mpi_status(sim))
+				return;
 
 			/* copy the response so we can send the next MPI requests */
 			visualizer_client_data response = sim.data;
@@ -969,19 +992,20 @@ private:
 
 	bool prepare_scene(client<visualizer_client_data>& sim)
 	{
+		/* wait for any existing MPI requests to finish */
+		while (sim.client_running && (sim.data.waiting_for_get_map || sim.data.waiting_for_get_agent_states)) { }
+		if (!sim.client_running) return false;
+
 		sim.data.painter = this;
 		if (!send_mpi_requests(sim))
 			return false;
 
 		/* wait until we get responses from the server and the renderer thread has finished drawing the previous scene */
-		while (sim.client_running && (scene_ready || sim.data.waiting_for_get_map || sim.data.waiting_for_get_agent_states)) { }
+		while (sim.client_running && (sim.data.waiting_for_get_map || sim.data.waiting_for_get_agent_states)) { }
 		if (!sim.client_running) return false;
 
-		if (sim.data.get_map_response != status::OK)
-			fprintf(stderr, "visualizer.prepare_scene ERROR: `get_map` failed.\n");
-		if (sim.data.get_agent_states_response != status::INVALID_AGENT_ID
-		 && sim.data.get_agent_states_response != status::OK)
-			fprintf(stderr, "visualizer.prepare_scene ERROR: `get_agent_states` failed.\n");
+		if (!process_mpi_status(sim))
+			return false;
 
 		process_mpi_response<true>(sim.data);
 
