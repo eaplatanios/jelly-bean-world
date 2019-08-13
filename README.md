@@ -402,16 +402,16 @@ to generate a new one.
 <!--
 TODOs:
 - [x] 1. Error handling Swift.
-- [ ] 1. Flag in get_map for visualizing scent.
+- [x] 1. Flag in get_map for visualizing scent.
 - [x] 2. Add support for destroying clients.
-- [ ] 2.5. Add support for obtaining list of agents from simulator and specific agent positions/states.
-- [ ] 3. Visualizer should connect to a simulation server (add CLI support for starting the visualizer).
-- [ ] 4. White boundary?
+- [x] 2.5. Add support for obtaining list of agents from simulator and specific agent positions/states.
+- [x] 3. Visualizer should connect to a simulation server (add CLI support for starting the visualizer).
+- [x] 4. White boundary?
 - [ ] 4.5. Black background outside the map (option or default or whatever).
 - [x] 5. Resize window.
 - [x] 6. Zoom/movement.
-- [ ] 7. Default to tracking agent 0 (agent always in the center of the window).
-- [ ] 8. Track agent at current zoom level (maybe using keyboard numbers).
+- [x] 7. Default to tracking agent 0 (agent always in the center of the window).
+- [x] 8. Track agent at current zoom level (maybe using keyboard numbers).
 
 - [ ] Per-client permissions.
 -->
