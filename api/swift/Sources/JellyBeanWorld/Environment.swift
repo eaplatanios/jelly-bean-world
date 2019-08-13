@@ -67,7 +67,9 @@ public final class Environment: ReinforcementLearning.Environment {
         vision: Tensor<Float>(agentState.vision),
         scent: Tensor<Float>(agentState.scent),
         moved: Tensor<Bool>(agentState.position != previousAgentState.position))
-      let reward = Tensor<Float>(configurations[i].reward(for: AgentTransition(
+      let rewardFunction = configurations[i].rewardSchedule.reward(
+        forStep: states[i].simulator.time)
+      let reward = Tensor<Float>(rewardFunction(for: AgentTransition(
         previousState: previousAgentState,
         currentState: agentState)))
       return Step(kind: StepKind.transition(), observation: observation, reward: reward)
@@ -109,12 +111,12 @@ public final class Environment: ReinforcementLearning.Environment {
 extension Environment {
   public struct Configuration {
     public let simulatorConfiguration: Simulator.Configuration
-    public let reward: Reward
+    public let rewardSchedule: RewardSchedule
 
     @inlinable
-    public init(simulatorConfiguration: Simulator.Configuration, reward: Reward) {
+    public init(simulatorConfiguration: Simulator.Configuration, rewardSchedule: RewardSchedule) {
       self.simulatorConfiguration = simulatorConfiguration
-      self.reward = reward
+      self.rewardSchedule = rewardSchedule
     }
   }
 }

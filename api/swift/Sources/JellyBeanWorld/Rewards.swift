@@ -55,3 +55,23 @@ public enum Reward {
     }
   }
 }
+
+/// Reward function schedule which specifies which reward function is used at each time step.
+/// This is useful for representing never-ending learning settings that require adaptation.
+public protocol RewardSchedule {
+  /// Returns the reward function to use for the specified time step.
+  func reward(forStep step: UInt64) -> Reward
+}
+
+/// Fixed reward function schedule that uses the same reward function for all time steps.
+public struct FixedReward: RewardSchedule {
+  public let reward: Reward
+
+  public init(_ reward: Reward) {
+    self.reward = reward
+  }
+
+  public func reward(forStep step: UInt64) -> Reward {
+    reward
+  }
+}
