@@ -367,7 +367,7 @@ public:
 			throw new std::runtime_error("visualizer ERROR: Failed to create `scent_map_texture`.");
 		}
 
-		if (!renderer.create_sampler(tex_sampler, filter::NEAREST, filter::NEAREST,
+		if (!renderer.create_sampler(tex_sampler, filter::LINEAR, filter::LINEAR,
 				sampler_address_mode::CLAMP_TO_EDGE, sampler_address_mode::CLAMP_TO_EDGE,
 				sampler_address_mode::CLAMP_TO_EDGE, false, 1.0f))
 		{
@@ -574,7 +574,7 @@ private:
 							for (unsigned int a = 0; a < texture_width_cells; a++) {
 								position texture_position = position(a, b + offset_y);
 								pixel& p = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
-								p.r = 255; p.g = 255; p.b = 255;
+								p.r = 0; p.g = 0; p.b = 0;
 							}
 						}
 					}
@@ -596,7 +596,7 @@ private:
 								for (unsigned int a = 0; a < patch_size; a++) {
 									position texture_position = position(a, b) + offset;
 									pixel& p = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
-									p.r = 255; p.g = 255; p.b = 255;
+									p.r = 0; p.g = 0; p.b = 0;
 								}
 							}
 						}
@@ -606,11 +606,7 @@ private:
 
 					if (render_background_map) {
 						pixel& p = scent_map_texture_data[patch_offset.y * texture_width + patch_offset.x];
-						if (patch.fixed) {
-							p.a = 178;
-						} else {
-							p.a = 229;
-						}
+						p.a = 229;
 
 						for (unsigned int b = 0; b < patch_size; b++) {
 							for (unsigned int a = 0; a < patch_size; a++) {
@@ -770,7 +766,7 @@ private:
 		draw_items.dynamic_vertex_buffer_offsets[0] = 0;
 		draw_items.descriptor_sets[0] = set;
 
-		float clear_color[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+		float clear_color[] = { 0.0f, 0.0f, 0.0f, 1.0f };
 		if (render_background_map) {
 			if (!renderer.record_command_buffer(cb, fb, clear_color, pass, draw_scent_map, draw_items)) {
 				cleanup_renderer();
