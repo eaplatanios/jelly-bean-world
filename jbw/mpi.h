@@ -436,35 +436,33 @@ inline bool receive_add_agent(
 				sim.remove_agent(new_agent_id);
 			return true;
 		}
+		cstate_ptr->lock.lock();
+		state.client_states_lock.unlock();
 		if (response == status::OK) {
-			cstate_ptr->lock.lock();
-			state.client_states_lock.unlock();
 			if (!cstate_ptr->agent_ids.add(new_agent_id)) {
 				sim.remove_agent(new_agent_id);
-				cstate_ptr->lock.unlock();
 				response = status::SERVER_OUT_OF_MEMORY;
 			}
 		} else if (response == status::OUT_OF_MEMORY) {
-			state.client_states_lock.unlock();
 			response = status::SERVER_OUT_OF_MEMORY;
-		} else {
-			state.client_states_lock.unlock();
 		}
 	}
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(response) + sizeof(new_agent_id) + sizeof(*new_agent));
 	fixed_width_stream<memory_stream> out(mem_stream);
 	if (response == status::OK) {
-		std::unique_lock<std::mutex> lock(new_agent->lock);
+		bool result = write(message_type::ADD_AGENT_RESPONSE, out)
+				   && write(response, out)
+				   && write(new_agent_id, out)
+				   && write(*new_agent, out, sim.get_config())
+				   && send_message(connection, mem_stream.buffer, mem_stream.position);
 		cstate_ptr->lock.unlock();
-		return write(message_type::ADD_AGENT_RESPONSE, out)
-			&& write(response, out)
-			&& write(new_agent_id, out)
-			&& write(*new_agent, out, sim.get_config())
-			&& send_message(connection, mem_stream.buffer, mem_stream.position);
+		return result;
 	} else {
-		return write(message_type::ADD_AGENT_RESPONSE, out)
-			&& write(response, out)
-			&& send_message(connection, mem_stream.buffer, mem_stream.position);
+		bool result = write(message_type::ADD_AGENT_RESPONSE, out)
+				   && write(response, out)
+				   && send_message(connection, mem_stream.buffer, mem_stream.position);
+		cstate_ptr->lock.unlock();
+		return result;
 	}
 }
 
@@ -513,16 +511,12 @@ inline bool receive_remove_agent(
 				state.client_states_lock.unlock();
 				return true;
 			}
+			cstate_ptr->lock.lock();
+			state.client_states_lock.unlock();
 			if (response == status::OK) {
-				cstate_ptr->lock.lock();
-				state.client_states_lock.unlock();
 				cstate.agent_ids.remove(index);
-				cstate_ptr->lock.unlock();
 			} else if (response == status::OUT_OF_MEMORY) {
-				state.client_states_lock.unlock();
 				response = status::SERVER_OUT_OF_MEMORY;
-			} else {
-				state.client_states_lock.unlock();
 			}
 		}
 	}
@@ -532,6 +526,7 @@ inline bool receive_remove_agent(
 	success &= write(message_type::REMOVE_AGENT_RESPONSE, out)
 			&& write(agent_id, out) && write(response, out)
 			&& send_message(connection, mem_stream.buffer, mem_stream.position);
+	cstate_ptr->lock.unlock();
 	return success;
 }
 
@@ -602,9 +597,20 @@ inline bool receive_move(
 	fixed_width_stream<memory_stream> out(mem_stream);
 
 	success &= write(message_type::MOVE_RESPONSE, out)
-			&& write(agent_id, out) && write(response, out)
-			&& send_message(connection, mem_stream.buffer, mem_stream.position);
-	return success;
+			&& write(agent_id, out) && write(response, out);
+	if (!success) return false;
+
+	bool contains;
+	state.client_states_lock.lock();
+	client_state* cstate_ptr = state.client_states.get(client_id, contains);
+	if (!contains) {
+		/* the client was destroyed while we were moving the agent */
+		state.client_states_lock.unlock();
+		return true;
+	}
+	std::unique_lock<std::mutex> lck(cstate_ptr->lock);
+	state.client_states_lock.unlock();
+	return send_message(connection, mem_stream.buffer, mem_stream.position);
 }
 
 /* Precondition: `state.client_states_lock` must be held by the calling thread. */
@@ -647,9 +653,20 @@ inline bool receive_turn(
 	fixed_width_stream<memory_stream> out(mem_stream);
 
 	success &= write(message_type::TURN_RESPONSE, out)
-			&& write(agent_id, out) && write(response, out)
-			&& send_message(connection, mem_stream.buffer, mem_stream.position);
-	return success;
+			&& write(agent_id, out) && write(response, out);
+	if (!success) return false;
+
+	bool contains;
+	state.client_states_lock.lock();
+	client_state* cstate_ptr = state.client_states.get(client_id, contains);
+	if (!contains) {
+		/* the client was destroyed while we were turning the agent */
+		state.client_states_lock.unlock();
+		return true;
+	}
+	std::unique_lock<std::mutex> lck(cstate_ptr->lock);
+	state.client_states_lock.unlock();
+	return send_message(connection, mem_stream.buffer, mem_stream.position);
 }
 
 /* Precondition: `state.client_states_lock` must be held by the calling thread. */
@@ -690,9 +707,20 @@ inline bool receive_do_nothing(
 	fixed_width_stream<memory_stream> out(mem_stream);
 
 	success &= write(message_type::DO_NOTHING_RESPONSE, out)
-			&& write(agent_id, out) && write(response, out)
-			&& send_message(connection, mem_stream.buffer, mem_stream.position);
-	return success;
+			&& write(agent_id, out) && write(response, out);
+	if (!success) return false;
+
+	bool contains;
+	state.client_states_lock.lock();
+	client_state* cstate_ptr = state.client_states.get(client_id, contains);
+	if (!contains) {
+		/* the client was destroyed while we were issuing a no-op for the agent */
+		state.client_states_lock.unlock();
+		return true;
+	}
+	std::unique_lock<std::mutex> lck(cstate_ptr->lock);
+	state.client_states_lock.unlock();
+	return send_message(connection, mem_stream.buffer, mem_stream.position);
 }
 
 /* Precondition: `state.client_states_lock` must be held by the calling thread. */
@@ -740,8 +768,27 @@ inline bool receive_get_map(
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(response) + sizeof(hash_map<position, patch_state>));
 	fixed_width_stream<memory_stream> out(mem_stream);
 	success &= write(message_type::GET_MAP_RESPONSE, out) && write(response, out)
-			&& (response != status::OK || write(patches, out, sim.get_config()))
-			&& send_message(connection, mem_stream.buffer, mem_stream.position);
+			&& (response != status::OK || write(patches, out, sim.get_config()));
+	if (!success) {
+		for (array<patch_state>& row : patches) {
+			for (patch_state& patch : row) free(patch);
+			free(row);
+		}
+		return false;
+	}
+
+	bool contains;
+	state.client_states_lock.lock();
+	client_state* cstate_ptr = state.client_states.get(client_id, contains);
+	if (!contains) {
+		/* the client was destroyed while we were getting the map */
+		state.client_states_lock.unlock();
+		return true;
+	}
+	cstate_ptr->lock.lock();
+	state.client_states_lock.unlock();
+	success = send_message(connection, mem_stream.buffer, mem_stream.position);
+	cstate_ptr->lock.unlock();
 	for (array<patch_state>& row : patches) {
 		for (patch_state& patch : row) free(patch);
 		free(row);
@@ -780,9 +827,20 @@ inline bool receive_get_agent_ids(
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(response) + sizeof(size_t) + sizeof(uint64_t) * agent_ids.length);
 	fixed_width_stream<memory_stream> out(mem_stream);
 	success &= write(message_type::GET_AGENT_IDS_RESPONSE, out) && write(response, out)
-			&& write(agent_ids.length, out) && write(agent_ids.data, out, agent_ids.length)
-			&& send_message(connection, mem_stream.buffer, mem_stream.position);
-	return success;
+			&& write(agent_ids.length, out) && write(agent_ids.data, out, agent_ids.length);
+	if (!success) return false;
+
+	bool contains;
+	state.client_states_lock.lock();
+	client_state* cstate_ptr = state.client_states.get(client_id, contains);
+	if (!contains) {
+		/* the client was destroyed while we were getting the agent IDs */
+		state.client_states_lock.unlock();
+		return true;
+	}
+	cstate_ptr->lock.lock();
+	state.client_states_lock.unlock();
+	return send_message(connection, mem_stream.buffer, mem_stream.position);
 }
 
 template<typename Stream>
@@ -834,8 +892,8 @@ inline bool receive_get_agent_states(
 	state.client_states_lock.unlock();
 
 	status response;
-	uint64_t* agent_ids;
-	agent_state** agent_states;
+	uint64_t* agent_ids = nullptr;
+	agent_state** agent_states = nullptr;
 	size_t agent_state_count;
 	bool success = true;
 	if (!read(agent_state_count, in)) {
@@ -882,13 +940,24 @@ inline bool receive_get_agent_states(
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(response) + sizeof(size_t) + (sizeof(uint64_t) + sizeof(agent_state)) * agent_state_count);
 	fixed_width_stream<memory_stream> out(mem_stream);
 	success &= write(message_type::GET_AGENT_STATES_RESPONSE, out) && write(response, out)
-			&& (response != status::OK || send_agent_states(out, agent_ids, agent_states, agent_state_count, sim.get_config()))
-			&& send_message(connection, mem_stream.buffer, mem_stream.position);
+			&& (response != status::OK || send_agent_states(out, agent_ids, agent_states, agent_state_count, sim.get_config()));
 	if (response == status::OK) {
 		free(agent_ids);
 		free(agent_states);
 	}
-	return success;
+	if (!success) return false;
+
+	bool contains;
+	state.client_states_lock.lock();
+	client_state* cstate_ptr = state.client_states.get(client_id, contains);
+	if (!contains) {
+		/* the client was destroyed while we were getting the agent states */
+		state.client_states_lock.unlock();
+		return true;
+	}
+	std::unique_lock<std::mutex> lck(cstate_ptr->lock);
+	state.client_states_lock.unlock();
+	return send_message(connection, mem_stream.buffer, mem_stream.position);
 }
 
 /* Precondition: `state.client_states_lock` must be held by the calling thread. */
@@ -931,9 +1000,20 @@ inline bool receive_set_active(
 	fixed_width_stream<memory_stream> out(mem_stream);
 
 	success &= write(message_type::SET_ACTIVE_RESPONSE, out)
-			&& write(agent_id, out) && write(response, out)
-			&& send_message(connection, mem_stream.buffer, mem_stream.position);
-	return success;
+			&& write(agent_id, out) && write(response, out);
+	if (!success) return false;
+
+	bool contains;
+	state.client_states_lock.lock();
+	client_state* cstate_ptr = state.client_states.get(client_id, contains);
+	if (!contains) {
+		/* the client was destroyed while we were setting the active status of the agent */
+		state.client_states_lock.unlock();
+		return true;
+	}
+	std::unique_lock<std::mutex> lck(cstate_ptr->lock);
+	state.client_states_lock.unlock();
+	return send_message(connection, mem_stream.buffer, mem_stream.position);
 }
 
 /* Precondition: `state.client_states_lock` must be held by the calling thread. */
@@ -974,9 +1054,20 @@ inline bool receive_is_active(
 
 	success &= write(message_type::IS_ACTIVE_RESPONSE, out)
 			&& write(agent_id, out) && write(response, out)
-			&& (response != status::OK || write(active, out))
-			&& send_message(connection, mem_stream.buffer, mem_stream.position);
-	return success;
+			&& (response != status::OK || write(active, out));
+	if (!success) return false;
+
+	bool contains;
+	state.client_states_lock.lock();
+	client_state* cstate_ptr = state.client_states.get(client_id, contains);
+	if (!contains) {
+		/* the client was destroyed while we were getting the active status of the agent */
+		state.client_states_lock.unlock();
+		return true;
+	}
+	std::unique_lock<std::mutex> lck(cstate_ptr->lock);
+	state.client_states_lock.unlock();
+	return send_message(connection, mem_stream.buffer, mem_stream.position);
 }
 
 template<typename SimulatorData>
