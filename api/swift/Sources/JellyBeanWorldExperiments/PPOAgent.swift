@@ -17,22 +17,25 @@ import Logging
 import ReinforcementLearning
 import TensorFlow
 
+public enum InputType {
+  case vision
+  case scent
+  case visionAndScent
+}
+
+public enum NetworkType {
+  case plain
+  case contextual
+}
+
 fileprivate struct JellyBeanWorldActorCritic: Module {
   public var conv1: Conv2D<Float> = Conv2D<Float>(filterShape: (3, 3, 3, 16), strides: (2, 2))
   public var conv2: Conv2D<Float> = Conv2D<Float>(filterShape: (2, 2, 16, 16), strides: (1, 1))
   public var denseHidden: Dense<Float> = Dense<Float>(inputSize: 256, outputSize: 64)
   // public var denseScent1: Dense<Float> = Dense<Float>(inputSize: 3, outputSize: 32)
   // public var denseScent2: Dense<Float> = Dense<Float>(inputSize: 32, outputSize: 4)
-  public var denseAction: Dense<Float> = Dense<Float>(inputSize: 64, outputSize: 3) // TODO: Easy way to get the number of actions.
+  public var denseAction: Dense<Float> = Dense<Float>(inputSize: 64, outputSize: 3)
   public var denseValue: Dense<Float> = Dense<Float>(inputSize: 64, outputSize: 1)
-
-  @inlinable
-  public init() {}
-
-  @inlinable
-  public init(copying other: JellyBeanWorldActorCritic) {
-    self = other
-  }
 
   @inlinable
   @differentiable
@@ -62,77 +65,6 @@ fileprivate struct JellyBeanWorldActorCritic: Module {
 
 public func runPPO(batchSize: Int = 32) throws {
   let logger = Logger(label: "Jelly Bean World - PPO Agent")
-
-  let banana = Item(
-    name: "banana",
-    scent: ShapedArray([0.0, 1.0, 0.0]),
-    color: ShapedArray([0.0, 1.0, 0.0]),
-    requiredItemCounts: [:],
-    requiredItemCosts: [:],
-    blocksMovement: false,
-    energyFunctions: EnergyFunctions(
-      intensityFn: .constant(-5.3),
-      interactionFns: [
-        .piecewiseBox(itemId: 0,  10.0, 200.0,  0.0,  -6.0),
-        .piecewiseBox(itemId: 1, 200.0,   0.0, -6.0,  -6.0),
-        .piecewiseBox(itemId: 2,  10.0, 200.0, 2.0, -100.0)]))
-
-  let onion = Item(
-    name: "onion",
-    scent: ShapedArray([1.0, 0.0, 0.0]),
-    color: ShapedArray([1.0, 0.0, 0.0]),
-    requiredItemCounts: [:],
-    requiredItemCosts: [:],
-    blocksMovement: false,
-    energyFunctions: EnergyFunctions(
-      intensityFn: .constant(-5.0),
-      interactionFns: [
-        .piecewiseBox(itemId: 0, 200.0, 0.0,   -6.0,   -6.0),
-        .piecewiseBox(itemId: 2, 200.0, 0.0, -100.0, -100.0)]))
-
-  let jellyBean = Item(
-    name: "jellyBean",
-    scent: ShapedArray([0.0, 0.0, 1.0]),
-    color: ShapedArray([0.0, 0.0, 1.0]),
-    requiredItemCounts: [:],
-    requiredItemCosts: [:],
-    blocksMovement: false,
-    energyFunctions: EnergyFunctions(
-      intensityFn: .constant(-5.3),
-      interactionFns: [
-        .piecewiseBox(itemId: 0,  10.0, 200.0,    2.0, -100.0),
-        .piecewiseBox(itemId: 1, 200.0,   0.0, -100.0, -100.0),
-        .piecewiseBox(itemId: 2,  10.0, 200.0,  0.0,   -6.0)]))
-
-  // let wall = Item(
-  //   name: "wall",
-  //   scent: ShapedArray([0.0, 0.0, 0.0]),
-  //   color: ShapedArray([0.5, 0.5, 0.5]),
-  //   requiredItemCounts: [3: 1], // Make walls impossible to collect.
-  //   requiredItemCosts: [:],
-  //   blocksMovement: true,
-  //   energyFunctions: EnergyFunctions(
-  //     intensityFn: .constant(0.0),
-  //     interactionFns: [
-  //       .cross(itemId: 3, 10.0, 15.0, 20.0, -200.0, -20.0, 1.0)]))
-
-  let simulatorConfiguration = Simulator.Configuration(
-    randomSeed: 1234567890,
-    maxStepsPerMove: 1,
-    scentDimensionality: 3,
-    colorDimensionality: 3,
-    visionRange: 5,
-    movePolicies: [.up: .allowed],
-    turnPolicies: [.left: .allowed, .right: .allowed],
-    noOpAllowed: false,
-    patchSize: 32,
-    mcmcIterations: 4000,
-    items: [banana, onion, jellyBean], //, wall],
-    agentColor: [0.0, 0.0, 1.0],
-    moveConflictPolicy: .firstComeFirstServe,
-    scentDecay: 0.4,
-    scentDiffusion: 0.14,
-    removedItemLifetime: 2000)
 
   // let reward = Reward(item: jellyBean, value: 1.0) + Reward(item: onion, value: -1.0)
   let reward = Reward.collect(item: jellyBean, value: 1.0)
