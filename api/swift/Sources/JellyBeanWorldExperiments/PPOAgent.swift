@@ -136,10 +136,11 @@ public func runPPO(batchSize: Int = 32) throws {
 
   // let reward = Reward(item: jellyBean, value: 1.0) + Reward(item: onion, value: -1.0)
   let reward = Reward.collect(item: jellyBean, value: 1.0)
+  let rewardSchedule = FixedReward(reward)
   let configurations = (0..<batchSize).map { _ in
     JellyBeanWorld.Environment.Configuration(
       simulatorConfiguration: simulatorConfiguration,
-      reward: reward)
+      rewardSchedule: rewardSchedule)
   }
   let environment = try JellyBeanWorld.Environment(configurations: configurations)
   let totalCumulativeReward = TotalCumulativeReward(for: environment)
