@@ -16,7 +16,7 @@ import Foundation
 import ReinforcementLearning
 import TensorFlow
 
-public final class Environment: ReinforcementLearning.Environment {
+public struct Environment: ReinforcementLearning.Environment {
   public let batchSize: Int
   public let configurations: [Configuration]
   public let actionSpace: Discrete
@@ -58,7 +58,9 @@ public final class Environment: ReinforcementLearning.Environment {
   /// Updates the environment according to the provided action.
   @inlinable
   @discardableResult
-  public func step(taking action: Tensor<Int32>) throws -> Step<Observation, Tensor<Float>> {
+  public mutating func step(
+    taking action: Tensor<Int32>
+  ) throws -> Step<Observation, Tensor<Float>> {
     let actions = action.unstacked()
     step = Step<Observation, Tensor<Float>>.stack(try states.indices.map { i in
       let previousAgentState = states[i].simulator.agentStates.values.first!
@@ -83,7 +85,7 @@ public final class Environment: ReinforcementLearning.Environment {
   /// Resets the environment.
   @inlinable
   @discardableResult
-  public func reset() throws -> Step<Observation, Tensor<Float>> {
+  public mutating func reset() throws -> Step<Observation, Tensor<Float>> {
     states = try configurations.map { configuration -> State in
       let simulator = try Simulator(using: configuration.simulatorConfiguration)
       let agent = Agent()

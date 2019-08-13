@@ -414,4 +414,9 @@ TODOs:
 - [x] 8. Track agent at current zoom level (maybe using keyboard numbers).
 
 - [ ] Per-client permissions.
+
+Example for running a Swift experiment:
+```bash
+swift run -c release JellyBeanWorldExperiments --reward collectJellyBeans --agent ppo --observation vision --network plain
+```
 -->

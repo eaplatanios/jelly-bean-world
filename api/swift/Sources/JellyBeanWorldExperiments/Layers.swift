@@ -57,7 +57,7 @@ public struct VisionActorCritic: Module {
   public var denseAction: Dense<Float>
   public var denseValue: Dense<Float>
 
-  public init(hiddenSize: Int) {
+  public init(hiddenSize: Int = 64) {
     visionLayer = VisionLayer(outputSize: hiddenSize)
     denseAction = Dense<Float>(inputSize: hiddenSize, outputSize: 3)
     denseValue = Dense<Float>(inputSize: hiddenSize, outputSize: 1)
@@ -86,7 +86,7 @@ public struct ScentActorCritic: Module {
   public var denseAction: Dense<Float>
   public var denseValue: Dense<Float>
 
-  public init(hiddenSize: Int) {
+  public init(hiddenSize: Int = 64) {
     scentLayer = ScentLayer(outputSize: hiddenSize)
     denseAction = Dense<Float>(inputSize: hiddenSize, outputSize: 3)
     denseValue = Dense<Float>(inputSize: hiddenSize, outputSize: 1)
@@ -116,7 +116,7 @@ public struct VisionAndScentActorCritic: Module {
   public var denseAction: Dense<Float>
   public var denseValue: Dense<Float>
 
-  public init(hiddenSize: Int) {
+  public init(hiddenSize: Int = 64) {
     visionLayer = VisionLayer(outputSize: hiddenSize)
     scentLayer = ScentLayer(outputSize: hiddenSize)
     denseAction = Dense<Float>(inputSize: hiddenSize, outputSize: 3)
