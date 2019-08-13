@@ -134,11 +134,8 @@ public func runPPO(batchSize: Int = 32) throws {
     scentDiffusion: 0.14,
     removedItemLifetime: 2000)
 
-  // let reward = Reward {
-  //   Reward(forCollecting: jellyBean, withValue: 1.0)
-  //   Reward(forCollecting: onion, withValue: -1.0)
-  // }
-  let reward = Reward(forCollecting: jellyBean, withValue: 1.0)
+  // let reward = Reward(item: jellyBean, value: 1.0) + Reward(item: onion, value: -1.0)
+  let reward = Reward.collect(item: jellyBean, value: 1.0)
   let configurations = (0..<batchSize).map { _ in
     JellyBeanWorld.Environment.Configuration(
       simulatorConfiguration: simulatorConfiguration,
