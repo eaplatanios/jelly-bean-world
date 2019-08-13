@@ -19,7 +19,7 @@ import Python
 import TensorFlow
 
 // Create a dummy agent delegate.
-struct DummyAgent: Agent {
+fileprivate struct DummyAgent: JellyBeanWorld.Agent {
   @usableFromInline internal var counter: UInt64 = 0
 
   @inlinable
@@ -45,22 +45,20 @@ struct DummyAgent: Agent {
   }
 }
 
-public func runDummy() throws {
-  let logger = Logger(label: "Jelly Bean World - Dummy Agent")
-
+public func runDummyExperiment() {
   PythonLibrary.useVersion(3, 7)
   let mpl = Python.import("matplotlib")
   mpl.use("TkAgg")
 
-  let simulator = try Simulator(using: simulatorConfiguration)
+  let simulator = try! Simulator(using: simulatorConfiguration)
 
   // Create the agents.
-  print("Creating agents.")
+  logger.info("Creating agents.")
   let numAgents = 1
-  var agents = [Agent]()
+  var agents = [JellyBeanWorld.Agent]()
   while agents.count < numAgents {
     let agent = DummyAgent()
-    try simulator.add(agent: agent)
+    try! simulator.add(agent: agent)
     agents.append(agent)
   }
 
@@ -74,7 +72,7 @@ public func runDummy() throws {
   var elapsed = Float(0.0)
   let simulationStartTime = simulator.time
   for _ in 0..<100000000 {
-    try simulator.step()
+    try! simulator.step()
     let interval = Date().timeIntervalSince1970 - startTime
     if interval > 1.0 {
       elapsed += Float(interval)
@@ -82,6 +80,6 @@ public func runDummy() throws {
       logger.info("\(speed) simulation steps per second.")
       startTime = Date().timeIntervalSince1970
     }
-    try painter.draw()
+    try! painter.draw()
   }
 }

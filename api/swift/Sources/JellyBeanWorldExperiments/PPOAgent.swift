@@ -28,7 +28,7 @@ public enum NetworkType {
   case contextual
 }
 
-public func runPPO(batchSize: Int = 32) throws {
+public func runPPOExperiment(batchSize: Int = 32) throws {
   let logger = Logger(label: "Jelly Bean World - PPO Agent")
 
   // let reward = Reward(item: jellyBean, value: 1.0) + Reward(item: onion, value: -1.0)
