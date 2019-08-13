@@ -249,11 +249,18 @@ public:
 		glfwSetCursorPosCallback(window, cursor_position_callback<SimulatorType>);
 		glfwSetKeyCallback(window, key_callback<SimulatorType>);
 
+		// We need to get the actual framebuffer width and height because HiDPI sometimes scale the
+		// actual framebuffer size relative to the window size.
+		int framebuffer_width, framebuffer_height;
+		glfwGetFramebufferSize(window, &framebuffer_width, &framebuffer_height);
+		width = (uint32_t) framebuffer_width;
+		height = (uint32_t) framebuffer_height;
+
 		uint32_t extension_count = 0;
 		const char** required_extensions = glfwGetRequiredInstanceExtensions(&extension_count);
 		if (!init(renderer, "JBW Visualizer", 0, "no engine", 0,
 				required_extensions, extension_count, device_selector::FIRST_ANY,
-				glfw_surface(window), window_width, window_height, 2, false, false, true))
+				glfw_surface(window), width, height, 2, false, false, true))
 		{
 			free(vertex_shader_src); free(fragment_shader_src);
 			throw new std::runtime_error("visualizer ERROR: Failed to initializer renderer.");

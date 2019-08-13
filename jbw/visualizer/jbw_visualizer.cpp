@@ -195,7 +195,7 @@ bool run_locally(uint64_t track_agent_id)
 	config.item_types[3].color[1] = 0.5f;
 	config.item_types[3].color[2] = 0.5f;
 	config.item_types[3].required_item_counts[3] = 1;
-	config.item_types[3].blocks_movement = false;
+	config.item_types[3].blocks_movement = true;
 	config.item_types.length = item_type_count;
 
 	config.item_types[0].intensity_fn.fn = constant_intensity_fn;
