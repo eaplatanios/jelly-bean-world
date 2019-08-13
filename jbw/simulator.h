@@ -1142,7 +1142,7 @@ bool write(const patch_state& patch, Stream& out, const simulator_config& config
     return write(patch.patch_position, out) && write(patch.fixed, out)
         && write(patch.item_count, out) && write(patch.agent_count, out)
         && write(patch.scent != nullptr, out)
-        && write(patch.scent, out, n * n * config.scent_dimension)
+        && (patch.scent == nullptr || write(patch.scent, out, n * n * config.scent_dimension))
         && write(patch.vision, out, n * n * config.color_dimension)
         && write(patch.items, out, patch.item_count)
         && write(patch.agent_positions, out, patch.agent_count)
@@ -1616,14 +1616,18 @@ public:
         world.world_to_patch_coordinates(bottom_left_corner, bottom_left_patch_position);
         world.world_to_patch_coordinates(top_right_corner, top_right_patch_position);
 
-        std::unique_lock<std::mutex> lock(agent_states_lock);
+        while (!agent_states_lock.try_lock()) { }
         for (int64_t y = bottom_left_patch_position.y - 1; y < top_right_patch_position.y + 1; y++)
         {
-            if (!patches.ensure_capacity(patches.length + 1))
+            if (!patches.ensure_capacity(patches.length + 1)) {
+                agent_states_lock.unlock();
                 return status::OUT_OF_MEMORY;
+            }
             array<patch_state>& current_row = patches[patches.length];
-            if (!array_init(current_row, 16))
+            if (!array_init(current_row, 16)) {
+                agent_states_lock.unlock();
                 return status::OUT_OF_MEMORY;
+            }
             patches.length++;
 
             for (int64_t x = bottom_left_patch_position.x - 1; x < top_right_patch_position.x + 1; x++)
@@ -1631,13 +1635,19 @@ public:
                 const patch_type* patch = world.get_patch_if_exists({x, y});
                 if (patch == NULL) continue;
 
-                if (!current_row.ensure_capacity(current_row.length + 1))
+                if (!current_row.ensure_capacity(current_row.length + 1)) {
+                    agent_states_lock.unlock();
                     return status::OUT_OF_MEMORY;
+                }
                 patch_state& state = current_row[current_row.length];
                 if (!init<GetScentMap>(state, config.patch_size,
                     config.scent_dimension, config.color_dimension,
                     (unsigned int) patch->items.length,
-                    (unsigned int) patch->data.agents.length)) return status::OUT_OF_MEMORY;
+                    (unsigned int) patch->data.agents.length))
+                {
+                    agent_states_lock.unlock();
+                    return status::OUT_OF_MEMORY;
+                }
                 current_row.length++;
 
                 state.patch_position = position(x, y);
@@ -1702,6 +1712,7 @@ public:
             }
         }
 
+        agent_states_lock.unlock();
         return status::OK;
     }
 

@@ -8,7 +8,7 @@ jbw/map_test
 jbw/network_test
 jbw/simulator_test
 jbw/visualizer/renderer_test
-jbw/visualizer/visualizer_test
+jbw/visualizer/jbw_visualizer
 
 # IntelliJ
 **/.idea/**/*

@@ -1,15 +1,122 @@
 #include "visualizer.h"
 #include <thread>
 #include <condition_variable>
+#include <core/lex.h>
+
+#if defined(WIN32)
+#include <windows.h>
+#else
+#include <signal.h>
+#endif
 
 using namespace jbw;
 
-struct empty_data {
-	static inline void move(const empty_data& src, const empty_data& dst) { }
-	static inline void free(const empty_data& data) { }
-};
+bool connected_to_server = false;
+client<visualizer_client_data> sim;
 
-constexpr bool init(const empty_data& data, const empty_data& src) { return true; }
+#if defined(WIN32)
+BOOL WINAPI signal_handler(DWORD sig_num) 
+{
+    if (sig_num == CTRL_C_EVENT || sig_num ==  CTRL_CLOSE_EVENT
+	 || sig_num ==  CTRL_LOGOFF_EVENT || sig_num ==  CTRL_SHUTDOWN_EVENT) 
+    {
+		if (connected_to_server)
+			remove_client(sim);
+        return TRUE;
+    }
+    return FALSE;
+}
+#else
+void signal_handler(int sig_num) {
+	if (connected_to_server)
+		remove_client(sim);
+	exit(EXIT_SUCCESS);
+}
+#endif
+
+bool parse_address(
+	const char* arg, bool& fail,
+	char*& address, const char*& port)
+{
+	if (arg[0] == '-' && arg[1] == '-')
+		return false;
+
+	unsigned int colon_index = 0;
+	while (arg[colon_index] != ':' && arg[colon_index] != '\0')
+		colon_index++;
+
+	if (arg[colon_index] == '\0') {
+		fprintf(stderr, "ERROR: The server address must be of the form <address>:<port>.\n");
+		fail = true; return true;
+	}
+
+	address = (char*) malloc(sizeof(char) * (colon_index + 1));
+	if (address == nullptr) {
+		fprintf(stderr, "parse_address ERROR: Out of memory.\n");
+		fail = true; return true;
+	}
+
+	for (unsigned int i = 0; i < colon_index; i++)
+		address[i] = arg[i];
+	address[colon_index] = '\0';
+
+	port = arg + colon_index + 1;
+	return true;
+}
+
+inline bool parse_option(const char* arg,
+		bool& fail, const char* to_match)
+{
+	return (strcmp(arg, to_match) == 0);
+}
+
+inline bool parse_option(
+		const char* arg, bool& fail,
+		const char* to_match, uint64_t& out)
+{
+	unsigned int length = strlen(to_match);
+	if (strncmp(arg, to_match, length) != 0)
+		return false;
+	const char* option = arg + length;
+
+	unsigned long long value;
+	if (!parse_ulonglong(string(option), value)) {
+		fprintf(stderr, "ERROR: Unable to parse option '%s'.\n", arg);
+		fail = true; return true;
+	}
+	out = (uint64_t) value;
+	return true;
+}
+
+template<typename Stream>
+void print_usage(Stream& out) {
+	fprintf(out, "Usage: jbw_visualizer <address>:<port> [options]\n"
+		"Connects to the JBW server at the given address visualizes the simulated environment.\n"
+		"\n"
+		"Available options:\n"
+		"  --track=ID   Starts tracking the agent with the given ID.\n"
+		"  --local      Starts a simulation locally, rather than connecting to a server.\n"
+		"  --help       Prints this usage text.\n");
+}
+
+template<typename Stream>
+void print_controls(Stream& out) {
+	fprintf(out, "\nControls:\n"
+		"Click and drag with left mouse button to move camera.\n"
+		"  +/= key: Zoom in.\n"
+		"  -/_ key: Zoom out.\n"
+		"  b key:   Toggle drawing of the background grid and scent map.\n"
+		"  0 key:   Disable agent tracking.\n"
+		"  1 key:   Track agent with ID 1.\n"
+		"  2 key:   Track agent with ID 2.\n"
+		"  3 key:   Track agent with ID 3.\n"
+		"  4 key:   Track agent with ID 4.\n"
+		"  5 key:   Track agent with ID 5.\n"
+		"  6 key:   Track agent with ID 6.\n"
+		"  7 key:   Track agent with ID 7.\n"
+		"  8 key:   Track agent with ID 8.\n"
+		"  9 key:   Track agent with ID 9.\n");
+}
 
 inline void set_interaction_args(
 		item_properties* item_types, unsigned int first_item_type,
@@ -29,7 +136,7 @@ inline void on_step(const simulator<empty_data>* sim,
 		const hash_map<uint64_t, agent_state*>& agents, uint64_t time)
 { }
 
-int main(int argc, const char** argv)
+bool run_locally(uint64_t track_agent_id)
 {
 	simulator_config config;
 	config.max_steps_per_movement = 1;
@@ -137,8 +244,8 @@ int main(int argc, const char** argv)
 
 	uint64_t agent_id; agent_state* agent;
 	if (sim.add_agent(agent_id, agent) != status::OK) {
-		fprintf(stderr, "ERROR: Unable to add new agent.\n");
-		return EXIT_FAILURE;
+		fprintf(stderr, "run_locally ERROR: Unable to add new agent.\n");
+		return false;
 	}
 
 	unsigned int move_count = 0;
@@ -151,7 +258,7 @@ int main(int argc, const char** argv)
 		for (unsigned int t = 0; simulation_running && t < 1000000; t++)
 		{
 			if (sim.move(agent_id, (rand() % 2 == 0) ? direction::UP : direction::RIGHT, 1) != status::OK) {
-				fprintf(stderr, "ERROR: Unable to move agent.\n");
+				fprintf(stderr, "run_locally ERROR: Unable to move agent.\n");
 				break;
 			}
 			move_count++;
@@ -165,8 +272,8 @@ int main(int argc, const char** argv)
 	timer stopwatch;
 	unsigned long long elapsed = 0;
 	unsigned int frame_count = 0;
-	visualizer<empty_data> visualizer(sim, 800, 800);
-	visualizer.track_agent(agent_id);
+	visualizer<simulator<empty_data>> visualizer(sim, 800, 800, track_agent_id);
+	print_controls(stdout); fflush(stdout);
 	while (simulation_running) {
 		if (visualizer.is_window_closed())
 			break;
@@ -194,6 +301,95 @@ int main(int argc, const char** argv)
 			simulation_worker.join();
 		} catch (...) { }
 	}
+	return true;
+}
 
+bool run(
+		const char* server_address,
+		const char* server_port,
+		uint64_t track_agent_id)
+{
+	uint64_t client_id;
+	uint64_t simulation_time = connect_client(sim, server_address, server_port, client_id);
+	if (simulation_time == UINT64_MAX) {
+		fprintf(stderr, "ERROR: Unable to connect to '%s:%s'.\n", server_address, server_port);
+		return false;
+	}
+	connected_to_server = true;
+
+	visualizer<client<visualizer_client_data>> visualizer(sim, 800, 800, track_agent_id);
+	print_controls(stdout); fflush(stdout);
+	while (sim.client_running) {
+		if (visualizer.is_window_closed())
+			break;
+
+		visualizer.draw_frame();
+	}
+
+	return remove_client(sim);
+}
+
+int main(int argc, const char** argv)
+{
+#if defined(WIN32)
+	SetConsoleCtrlHandler(signal_handler, TRUE);
+#else
+	signal(SIGINT, signal_handler);
+	signal(SIGTERM, signal_handler);
+#endif
+
+	if (argc <= 1) {
+		fprintf(stderr, "Not enough arguments.\n");
+		print_usage(stderr);
+		return EXIT_FAILURE;
+	}
+
+	uint64_t track_agent_id = 1;
+	char* server_address = nullptr;
+	const char* server_port = nullptr;
+	bool local = false;
+
+	/* parse command-line arguments */
+	bool fail = false;
+	for (int i = 1; i < argc && !fail; i++) {
+		if (parse_address(argv[i], fail, server_address, server_port)) continue;
+		if (parse_option(argv[i], fail, "--track=", track_agent_id)) continue;
+		if (parse_option(argv[i], fail, "--local")) { local = true; continue; }
+		if (parse_option(argv[i], fail, "--help")) {
+			print_usage(stdout);
+			fflush(stdout);
+			if (server_address != nullptr)
+				free(server_address);
+			return EXIT_SUCCESS;
+		}
+	}
+
+	if (fail) {
+		if (server_address != nullptr)
+			free(server_address);
+		return EXIT_FAILURE;
+	}
+
+	if (local) {
+		if (server_address != nullptr) {
+			free(server_address);
+			server_address = nullptr;
+		}
+		if (!run_locally(track_agent_id))
+			return EXIT_FAILURE;
+	} else {
+		if (server_address == nullptr || server_port == nullptr) {
+			fprintf(stderr, "ERROR: Address of JBW server not provided.\n");
+			return EXIT_FAILURE;
+		}
+
+		if (!run(server_address, server_port, track_agent_id)) {
+			free(server_address);
+			return EXIT_FAILURE;
+		}
+	}
+
+	if (server_address != nullptr)
+		free(server_address);
 	return EXIT_SUCCESS;
 }

@@ -287,7 +287,8 @@ To connect to an existing server, for example at `localhost:54353`, we use the
 ```c++
   client<empty_data> new_client;
   uint64_t client_id;
-  if (!connect_client(new_client, "localhost", 54353, client_id)) { /* process error */ }
+  uint64_t simulation_time = connect_client(new_client, "localhost", 54353, client_id);
+  if (simulation_time == UINT64_MAX) { /* process error */ }
 ```
 The commands may be sent to the server using the functions `send_add_agent`,
 `send_move`, `send_turn`, etc. When the client receives responses from the

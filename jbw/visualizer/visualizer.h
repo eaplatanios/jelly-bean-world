@@ -1,7 +1,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include "vulkan_renderer.h"
-#include "../simulator.h"
+#include "../mpi.h"
 
 #include <thread>
 #include <condition_variable>
@@ -12,12 +12,12 @@ using namespace core;
 using namespace mirage;
 
 /* forward declaration */
-template<typename SimulatorData> class visualizer;
+template<typename SimulatorType> class visualizer;
 
-template<typename SimulatorData>
+template<typename SimulatorType>
 inline void cursor_position_callback(GLFWwindow* window, double x, double y)
 {
-	visualizer<SimulatorData>* v = (visualizer<SimulatorData>*) glfwGetWindowUserPointer(window);
+	visualizer<SimulatorType>* v = (visualizer<SimulatorType>*) glfwGetWindowUserPointer(window);
 	if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_RELEASE) {
 		v->left_mouse_button_pressed = false;
 		return;
@@ -37,10 +37,10 @@ inline void cursor_position_callback(GLFWwindow* window, double x, double y)
 	v->last_cursor_y = y;
 }
 
-template<typename SimulatorData>
+template<typename SimulatorType>
 inline void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
-	visualizer<SimulatorData>* v = (visualizer<SimulatorData>*) glfwGetWindowUserPointer(window);
+	visualizer<SimulatorType>* v = (visualizer<SimulatorType>*) glfwGetWindowUserPointer(window);
 
 	if (action == GLFW_PRESS) {
 		if (key == GLFW_KEY_MINUS) {
@@ -92,7 +92,38 @@ inline void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 	}
 }
 
-template<typename SimulatorData>
+struct visualizer_client_data {
+	visualizer<client<visualizer_client_data>>* painter = nullptr;
+
+	bool waiting_for_get_map;
+	float get_map_left;
+	float get_map_right;
+	float get_map_bottom;
+	float get_map_top;
+	bool get_map_render_background;
+
+	status get_map_response;
+	array<array<patch_state>>* map;
+
+	bool waiting_for_get_agent_states;
+	uint64_t track_agent_id;
+
+	status get_agent_states_response;
+	const agent_state* agent_states;
+	size_t agent_state_count;
+};
+
+template <typename SimulatorData>
+const simulator_config& get_config(const simulator<SimulatorData>& sim) {
+	return sim.get_config();
+}
+
+template <typename ClientData>
+const simulator_config& get_config(const client<ClientData>& c) {
+	return c.config;
+}
+
+template<typename SimulatorType>
 class visualizer
 {
 	struct vertex {
@@ -133,7 +164,7 @@ class visualizer
 	float camera_position[2];
 	float pixel_density;
 
-	simulator<SimulatorData>& sim;
+	SimulatorType& sim;
 
 	vulkan_renderer renderer;
 	shader background_vertex_shader, background_fragment_shader;
@@ -182,11 +213,11 @@ class visualizer
 	bool render_background;
 
 public:
-	visualizer(simulator<SimulatorData>& sim, uint32_t window_width, uint32_t window_height) :
+	visualizer(SimulatorType& sim, uint32_t window_width, uint32_t window_height, uint64_t track_agent_id) :
 			width(window_width), height(window_height), sim(sim),
 			background_binding(0, sizeof(vertex)), item_binding(0, sizeof(item_vertex)),
-			track_agent_id(0), tracking_animating(false), running(true), scene_ready(false),
-			render_background(true)
+			track_agent_id(track_agent_id), tracking_animating(false),
+			running(true), scene_ready(false), render_background(true)
 	{
 		camera_position[0] = 0.5f;
 		camera_position[1] = 0.5f;
@@ -215,8 +246,8 @@ public:
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 		window = glfwCreateWindow(window_width, window_height, "Renderer Test", nullptr, nullptr);
 		glfwSetWindowUserPointer(window, this);
-		glfwSetCursorPosCallback(window, cursor_position_callback<SimulatorData>);
-		glfwSetKeyCallback(window, key_callback<SimulatorData>);
+		glfwSetCursorPosCallback(window, cursor_position_callback<SimulatorType>);
+		glfwSetKeyCallback(window, key_callback<SimulatorType>);
 
 		uint32_t extension_count = 0;
 		const char** required_extensions = glfwGetRequiredInstanceExtensions(&extension_count);
@@ -314,8 +345,8 @@ public:
 			throw new std::runtime_error("visualizer ERROR: Failed to create descriptor_set_layout.");
 		}
 
-		texture_width = window_width + 2 * sim.get_config().patch_size;
-		texture_height = window_height + 2 * sim.get_config().patch_size;
+		texture_width = window_width + 2 * get_config(sim).patch_size;
+		texture_height = window_height + 2 * get_config(sim).patch_size;
 		size_t image_size = sizeof(pixel) * texture_width * texture_height;
 		if (!renderer.create_dynamic_texture_image(scent_map_texture, image_size, texture_width, texture_height, image_format::R8G8B8A8_UNORM)) {
 			renderer.delete_descriptor_set_layout(layout);
@@ -359,15 +390,18 @@ public:
 			throw new std::runtime_error("visualizer ERROR: Failed to initialize rendering pipeline.");
 		}
 
-		array<array<patch_state>> patches(64);
-		prepare_scene<true>(patches);
-		for (array<patch_state>& row : patches) {
-			for (patch_state& patch : row) free(patch);
-			free(row);
+		prepare_scene(sim);
+
+		if (track_agent_id != 0) {
+			/* since we're just starting, move camera immediately to target agent */
+			translate_start_position[0] = translate_end_position[0];
+			translate_start_position[1] = translate_end_position[1];
+			camera_position[0] = translate_end_position[0];
+			camera_position[1] = translate_end_position[1];
 		}
 
-		map_retriever = std::thread([this]() {
-			run_map_retriever();
+		map_retriever = std::thread([&,this]() {
+			run_map_retriever(sim);
 		});
 	}
 
@@ -439,27 +473,21 @@ public:
 				-0.5f * (width / pixel_density), 0.5f * (width / pixel_density),
 				-0.5f * (height / pixel_density), 0.5f * (height / pixel_density), -100.0f, 100.0f);
 		uniform_data.pixel_density = pixel_density;
-		uniform_data.patch_size = sim.get_config().patch_size;
+		uniform_data.patch_size = get_config(sim).patch_size;
 
 		auto reset_command_buffers = [&]() {
 			cleanup_renderer();
 			renderer.delete_dynamic_texture_image(scent_map_texture);
 
-			texture_width = width + 2 * sim.get_config().patch_size;
-			texture_height = height + 2 * sim.get_config().patch_size;
+			texture_width = width + 2 * get_config(sim).patch_size;
+			texture_height = height + 2 * get_config(sim).patch_size;
 			size_t image_size = sizeof(pixel) * texture_width * texture_height;
 			if (!renderer.create_dynamic_texture_image(scent_map_texture, image_size, texture_width, texture_height, image_format::R8G8B8A8_UNORM))
 				return false;
 
 			if (!setup_renderer()) return false;
 
-			array<array<patch_state>> patches(64);
-			prepare_scene<true>(patches);
-			for (array<patch_state>& row : patches) {
-				for (patch_state& patch : row) free(patch);
-				free(row);
-			}
-			return true;
+			return prepare_scene(sim);
 		};
 
 		auto get_window_dimensions = [&](uint32_t& out_width, uint32_t& out_height) {
@@ -481,52 +509,17 @@ public:
 
 private:
 	template<bool HasLock>
-	bool prepare_scene(array<array<patch_state>>& patches)
+	bool prepare_scene_helper(
+			const array<array<patch_state>>& patches,
+			bool render_background_map,
+			float left, float right, float bottom, float top)
 	{
-		float left = camera_position[0] - 0.5f * (width / pixel_density) - 0.01f;
-		float right = camera_position[0] + 0.5f * (width / pixel_density) + 0.01f;
-		float bottom = camera_position[1] - 0.5f * (height / pixel_density) - 0.01f;
-		float top = camera_position[1] + 0.5f * (height / pixel_density) + 0.01f;
-
-		bool render_background_map = render_background;
-		if (render_background_map) {
-			if (sim.template get_map<true>({(int64_t) left, (int64_t) bottom}, {(int64_t) ceil(right), (int64_t) ceil(top)}, patches) != status::OK) {
-				fprintf(stderr, "visualizer.draw_frame ERROR: Unable to get map from simulator.\n");
-				return false;
-			}
-		} else {
-			if (sim.template get_map<false>({(int64_t) left, (int64_t) bottom}, {(int64_t) ceil(right), (int64_t) ceil(top)}, patches) != status::OK) {
-				fprintf(stderr, "visualizer.draw_frame ERROR: Unable to get map from simulator.\n");
-				return false;
-			}
-		}
-
-		if (track_agent_id != 0) {
-			agent_state* agent;
-			sim.get_agent_states(&agent, &track_agent_id, 1);
-			if (agent != nullptr) {
-				float new_target_position[] = {agent->current_position.x + 0.5f, agent->current_position.y + 0.5f};
-				agent->lock.unlock();
-
-				if (new_target_position[0] != translate_end_position[0] || new_target_position[1] != translate_end_position[1]) {
-					translate_start_position[0] = camera_position[0];
-					translate_start_position[1] = camera_position[1];
-					translate_end_position[0] = new_target_position[0];
-					translate_end_position[1] = new_target_position[1];
-					translate_animation_start_time = milliseconds();
-					tracking_animating = true;
-				}
-			}
-		} else {
-			tracking_animating = false;
-		}
-
 		size_t new_item_vertex_count = 0;
 		pixel* scent_map_texture_data = (pixel*) scent_map_texture.mapped_memory;
-		const unsigned int patch_size = sim.get_config().patch_size;
-		const unsigned int scent_dimension = sim.get_config().scent_dimension;
-		const array<item_properties>& item_types = sim.get_config().item_types;
-		const float* agent_color = sim.get_config().agent_color;
+		const unsigned int patch_size = get_config(sim).patch_size;
+		const unsigned int scent_dimension = get_config(sim).scent_dimension;
+		const array<item_properties>& item_types = get_config(sim).item_types;
+		const float* agent_color = get_config(sim).agent_color;
 		if (patches.length > 0) {
 			/* find position of the bottom-left corner and the top-right corner */
 			size_t required_item_vertices = 0;
@@ -547,7 +540,7 @@ private:
 				if (!HasLock) scene_lock.lock();
 				renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
 				if (!renderer.create_dynamic_vertex_buffer(item_quad_buffer, new_capacity * sizeof(item_vertex))) {
-					fprintf(stderr, "visualizer.draw_frame ERROR: Unable to expand `item_quad_buffer`.\n");
+					fprintf(stderr, "visualizer.prepare_scene_helper ERROR: Unable to expand `item_quad_buffer`.\n");
 					if (!HasLock) scene_lock.unlock();
 					return false;
 				}
@@ -762,12 +755,13 @@ private:
 		draw_scent_map.vertex_buffer_offsets[0] = 0;
 		draw_scent_map.descriptor_sets[0] = set;
 
-		draw_call<0, 1, 0> draw_items;
+		draw_call<0, 1, 1> draw_items;
 		draw_items.pipeline = item_pipeline;
 		draw_items.first_vertex = 0;
 		draw_items.vertex_count = item_vertex_count;
 		draw_items.dynamic_vertex_buffers[0] = item_quad_buffer;
 		draw_items.dynamic_vertex_buffer_offsets[0] = 0;
+		draw_items.descriptor_sets[0] = set;
 
 		float clear_color[] = { 1.0f, 1.0f, 1.0f, 1.0f };
 		if (render_background_map) {
@@ -791,20 +785,200 @@ private:
 		return true;
 	}
 
-	inline void run_map_retriever()
+	template<bool HasLock>
+	inline bool prepare_scene_helper(array<array<patch_state>>& patches)
+	{
+		float left = camera_position[0] - 0.5f * (width / pixel_density) - 0.01f;
+		float right = camera_position[0] + 0.5f * (width / pixel_density) + 0.01f;
+		float bottom = camera_position[1] - 0.5f * (height / pixel_density) - 0.01f;
+		float top = camera_position[1] + 0.5f * (height / pixel_density) + 0.01f;
+
+		bool render_background_map = render_background;
+		if (render_background_map) {
+			if (sim.template get_map<true>({(int64_t) left, (int64_t) bottom}, {(int64_t) ceil(right), (int64_t) ceil(top)}, patches) != status::OK) {
+				fprintf(stderr, "visualizer.prepare_scene_helper ERROR: Unable to get map from simulator.\n");
+				return false;
+			}
+		} else {
+			if (sim.template get_map<false>({(int64_t) left, (int64_t) bottom}, {(int64_t) ceil(right), (int64_t) ceil(top)}, patches) != status::OK) {
+				fprintf(stderr, "visualizer.prepare_scene_helper ERROR: Unable to get map from simulator.\n");
+				return false;
+			}
+		}
+
+		if (track_agent_id != 0) {
+			agent_state* agent;
+			sim.get_agent_states(&agent, &track_agent_id, 1);
+			if (agent != nullptr) {
+				float new_target_position[] = {agent->current_position.x + 0.5f, agent->current_position.y + 0.5f};
+				agent->lock.unlock();
+
+				if (new_target_position[0] != translate_end_position[0] || new_target_position[1] != translate_end_position[1]) {
+					translate_start_position[0] = camera_position[0];
+					translate_start_position[1] = camera_position[1];
+					translate_end_position[0] = new_target_position[0];
+					translate_end_position[1] = new_target_position[1];
+				}
+				if (!tracking_animating) {
+					translate_animation_start_time = milliseconds();
+					tracking_animating = true;
+				}
+			} else {
+				fprintf(stderr, "Agent with ID %" PRIu64 " does not exist in the simulation.\n", track_agent_id);
+				track_agent_id = 0;
+			}
+		} else {
+			tracking_animating = false;
+		}
+
+		return prepare_scene_helper<HasLock>(patches, render_background_map, left, right, bottom, top);
+	}
+
+	template<typename SimulatorData>
+	inline void run_map_retriever(simulator<SimulatorData>& sim)
 	{
 		array<array<patch_state>> patches(64);
 		while (running) {
+			/* wait until the renderer thread has finished drawing the previous scene */
 			while (running && scene_ready) { }
 			if (!running) break;
 
-			prepare_scene<false>(patches);
+			prepare_scene_helper<false>(patches);
+
 			for (array<patch_state>& row : patches) {
 				for (patch_state& patch : row) free(patch);
 				free(row);
 			}
 			patches.clear();
 		}
+	}
+
+	template<typename SimulatorData>
+	bool prepare_scene(simulator<SimulatorData>& sim)
+	{
+		array<array<patch_state>> patches(64);
+		bool result = prepare_scene_helper<true>(patches);
+		for (array<patch_state>& row : patches) {
+			for (patch_state& patch : row) free(patch);
+			free(row);
+		}
+		return result;
+	}
+
+	inline bool send_mpi_requests(client<visualizer_client_data>& sim)
+	{
+		float left = camera_position[0] - 0.5f * (width / pixel_density) - 0.01f;
+		float right = camera_position[0] + 0.5f * (width / pixel_density) + 0.01f;
+		float bottom = camera_position[1] - 0.5f * (height / pixel_density) - 0.01f;
+		float top = camera_position[1] + 0.5f * (height / pixel_density) + 0.01f;
+
+		/* send new `get_map` and `get_agent_states` messages to the server */
+		sim.data.waiting_for_get_map = true;
+		sim.data.get_map_left = left;
+		sim.data.get_map_right = right;
+		sim.data.get_map_bottom = bottom;
+		sim.data.get_map_top = top;
+		sim.data.get_map_render_background = render_background;
+		if (!send_get_map(sim, {(int64_t) left, (int64_t) bottom}, {(int64_t) ceil(right), (int64_t) ceil(top)}, sim.data.get_map_render_background)) {
+			fprintf(stderr, "visualizer.send_mpi_requests ERROR: Unable to send `get_map` message to server.\n");
+			sim.data.waiting_for_get_map = false;
+			return false;
+		}
+		sim.data.track_agent_id = track_agent_id;
+		if (sim.data.track_agent_id != 0) {
+			sim.data.waiting_for_get_agent_states = true;
+			if (!send_get_agent_states(sim, &sim.data.track_agent_id, 1)) {
+				fprintf(stderr, "visualizer.send_mpi_requests ERROR: Unable to send `get_agent_states` message to server.\n");
+				sim.data.waiting_for_get_agent_states = false;
+				return false;
+			}
+		} else {
+			sim.data.waiting_for_get_agent_states = false;
+			sim.data.get_agent_states_response = status::OK;
+		}
+		return true;
+	}
+
+	template<bool HasLock>
+	inline void process_mpi_response(visualizer_client_data& response)
+	{
+		if (response.get_agent_states_response == status::OK && response.track_agent_id != 0) {
+			if (response.agent_state_count > 0) {
+				float new_target_position[] = {response.agent_states[0].current_position.x + 0.5f, response.agent_states[0].current_position.y + 0.5f};
+
+				if (new_target_position[0] != translate_end_position[0] || new_target_position[1] != translate_end_position[1]) {
+					translate_start_position[0] = camera_position[0];
+					translate_start_position[1] = camera_position[1];
+					translate_end_position[0] = new_target_position[0];
+					translate_end_position[1] = new_target_position[1];
+				}
+				if (!tracking_animating) {
+					translate_animation_start_time = milliseconds();
+					tracking_animating = true;
+				}
+			} else {
+				fprintf(stderr, "Agent with ID %" PRIu64 " does not exist in the simulation.\n", response.track_agent_id);
+				track_agent_id = 0;
+			}
+		} else {
+			tracking_animating = false;
+		}
+
+		if (response.get_map_response == status::OK) {
+			prepare_scene_helper<HasLock>(*response.map, response.get_map_render_background,
+				response.get_map_left, response.get_map_right, response.get_map_bottom, response.get_map_top);
+
+			for (array<patch_state>& row : *response.map) {
+				for (patch_state& patch : row) free(patch);
+				free(row);
+			}
+			free(*response.map);
+			free(response.map);
+		}
+	}
+
+	inline void run_map_retriever(client<visualizer_client_data>& sim)
+	{
+		while (running) {
+			/* wait until we get responses from the server and the renderer thread has finished drawing the previous scene */
+			while (running && sim.client_running && (scene_ready || sim.data.waiting_for_get_map || sim.data.waiting_for_get_agent_states)) { }
+			if (!running || !sim.client_running) break;
+
+			if (sim.data.get_map_response != status::OK)
+				fprintf(stderr, "visualizer.run_map_retriever ERROR: `get_map` failed.\n");
+			if (sim.data.get_agent_states_response != status::INVALID_AGENT_ID
+			 && sim.data.get_agent_states_response != status::OK)
+				fprintf(stderr, "visualizer.run_map_retriever ERROR: `get_agent_states` failed.\n");
+
+			/* copy the response so we can send the next MPI requests */
+			visualizer_client_data response = sim.data;
+
+			if (!send_mpi_requests(sim))
+				continue;
+
+			process_mpi_response<false>(response);
+		}
+	}
+
+	bool prepare_scene(client<visualizer_client_data>& sim)
+	{
+		sim.data.painter = this;
+		if (!send_mpi_requests(sim))
+			return false;
+
+		/* wait until we get responses from the server and the renderer thread has finished drawing the previous scene */
+		while (sim.client_running && (scene_ready || sim.data.waiting_for_get_map || sim.data.waiting_for_get_agent_states)) { }
+		if (!sim.client_running) return false;
+
+		if (sim.data.get_map_response != status::OK)
+			fprintf(stderr, "visualizer.prepare_scene ERROR: `get_map` failed.\n");
+		if (sim.data.get_agent_states_response != status::INVALID_AGENT_ID
+		 && sim.data.get_agent_states_response != status::OK)
+			fprintf(stderr, "visualizer.prepare_scene ERROR: `get_agent_states` failed.\n");
+
+		process_mpi_response<true>(sim.data);
+
+		return send_mpi_requests(sim);
 	}
 
 	bool setup_renderer() {
@@ -816,13 +990,15 @@ private:
 			return false;
 		} else if (!renderer.create_graphics_pipeline(scent_map_pipeline, pass,
 				background_vertex_shader, "main", background_fragment_shader, "main",
-				primitive_topology::TRIANGLE_STRIP, false, 1.0f, background_binding, background_shader_attributes, &layout, 1))
+				primitive_topology::TRIANGLE_STRIP, false, 1.0f,
+				background_binding, background_shader_attributes, &layout, 1))
 		{
 			renderer.delete_render_pass(pass);
 			return false;
 		} else if (!renderer.create_graphics_pipeline(item_pipeline, pass,
 				item_vertex_shader, "main", item_fragment_shader, "main",
-				primitive_topology::TRIANGLE_LIST, false, 1.0f, item_binding, item_shader_attributes, &layout, 1))
+				primitive_topology::TRIANGLE_LIST, false, 1.0f,
+				item_binding, item_shader_attributes, &layout, 1))
 		{
 			renderer.delete_graphics_pipeline(scent_map_pipeline);
 			renderer.delete_render_pass(pass);
@@ -950,6 +1126,84 @@ private:
 
 	template<typename A> friend void cursor_position_callback(GLFWwindow*, double, double);
 	template<typename A> friend void key_callback(GLFWwindow*, int, int, int, int);
+	friend void on_lost_connection(client<visualizer_client_data>&);
 };
+
+void on_add_agent(
+		client<visualizer_client_data>& c, uint64_t agent_id,
+		status response, const agent_state& state)
+{
+	fprintf(stderr, "WARNING: `on_add_agent` should not be called.\n");
+}
+
+void on_remove_agent(client<visualizer_client_data>& c,
+		uint64_t agent_id, status response)
+{
+	fprintf(stderr, "WARNING: `on_remove_agent` should not be called.\n");
+}
+
+void on_move(client<visualizer_client_data>& c, uint64_t agent_id, status response)
+{
+	fprintf(stderr, "WARNING: `on_move` should not be called.\n");
+}
+
+void on_turn(client<visualizer_client_data>& c, uint64_t agent_id, status response)
+{
+	fprintf(stderr, "WARNING: `on_turn` should not be called.\n");
+}
+
+void on_do_nothing(client<visualizer_client_data>& c, uint64_t agent_id, status response)
+{
+	fprintf(stderr, "WARNING: `on_do_nothing` should not be called.\n");
+}
+
+void on_get_map(client<visualizer_client_data>& c,
+		status response, array<array<patch_state>>* map)
+{
+	c.data.map = map;
+	c.data.get_map_response = response;
+	c.data.waiting_for_get_map = false;
+}
+
+void on_get_agent_ids(
+		client<visualizer_client_data>& c, status response,
+		const uint64_t* agent_ids, size_t count)
+{
+	fprintf(stderr, "WARNING: `on_get_agent_ids` should not be called.\n");
+}
+
+void on_get_agent_states(
+		client<visualizer_client_data>& c, status response,
+		const uint64_t* agent_ids,
+		const agent_state* agent_states, size_t count)
+{
+	c.data.get_agent_states_response = response;
+	c.data.agent_states = agent_states;
+	c.data.agent_state_count = count;
+	c.data.waiting_for_get_agent_states = false;
+}
+
+void on_set_active(client<visualizer_client_data>& c, uint64_t agent_id, status response)
+{
+	fprintf(stderr, "WARNING: `on_set_active` should not be called.\n");
+}
+
+void on_is_active(client<visualizer_client_data>& c, uint64_t agent_id, status response, bool active)
+{
+	fprintf(stderr, "WARNING: `on_is_active` should not be called.\n");
+}
+
+inline void on_step(client<visualizer_client_data>& c,
+		status response,
+		const array<uint64_t>& agent_ids,
+		const agent_state* agent_state_array)
+{ }
+
+void on_lost_connection(client<visualizer_client_data>& c) {
+	fprintf(stderr, "Lost connection to the server.\n");
+	c.client_running = false;
+	c.data.painter->running = false;
+	c.data.painter->scene_ready_cv.notify_all();
+}
 
 } /* namespace jbw */
