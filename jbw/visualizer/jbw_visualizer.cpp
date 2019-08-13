@@ -11,8 +11,9 @@
 
 using namespace jbw;
 
-bool connected_to_server = false;
+bool simulation_running = true;
 client<visualizer_client_data> sim;
+std::atomic_bool* visualizer_running = nullptr;
 
 #if defined(WIN32)
 BOOL WINAPI signal_handler(DWORD sig_num) 
@@ -28,9 +29,11 @@ BOOL WINAPI signal_handler(DWORD sig_num)
 }
 #else
 void signal_handler(int sig_num) {
-	if (connected_to_server)
+	if (visualizer_running != nullptr) {
+		*visualizer_running = false;
 		remove_client(sim);
-	exit(EXIT_SUCCESS);
+	}
+	simulation_running = false;
 }
 #endif
 
@@ -38,7 +41,7 @@ bool parse_address(
 	const char* arg, bool& fail,
 	char*& address, const char*& port)
 {
-	if (arg[0] == '-' && arg[1] == '-')
+	if (address != nullptr || (arg[0] == '-' && arg[1] == '-'))
 		return false;
 
 	unsigned int colon_index = 0;
@@ -88,15 +91,35 @@ inline bool parse_option(
 	return true;
 }
 
+inline bool parse_option(
+		const char* arg, bool& fail,
+		const char* to_match, float& out)
+{
+	unsigned int length = strlen(to_match);
+	if (strncmp(arg, to_match, length) != 0)
+		return false;
+	const char* option = arg + length;
+
+	double value;
+	if (!parse_float(string(option), value)) {
+		fprintf(stderr, "ERROR: Unable to parse option '%s'.\n", arg);
+		fail = true; return true;
+	}
+	out = (float) value;
+	return true;
+}
+
 template<typename Stream>
 void print_usage(Stream& out) {
 	fprintf(out, "Usage: jbw_visualizer <address>:<port> [options]\n"
 		"Connects to the JBW server at the given address visualizes the simulated environment.\n"
 		"\n"
 		"Available options:\n"
-		"  --track=ID   Starts tracking the agent with the given ID.\n"
-		"  --local      Starts a simulation locally, rather than connecting to a server.\n"
-		"  --help       Prints this usage text.\n");
+		"  --track=ID             Starts tracking the agent with the given ID.\n"
+		"  --pixels-per-cell=NUM  Sets the initial number of pixels per cell.\n"
+		"  --local                Starts a simulation locally, rather than connecting to\n"
+		"                         a server (any specified address is ignored).\n"
+		"  --help                 Prints this usage text.\n");
 }
 
 template<typename Stream>
@@ -136,7 +159,7 @@ inline void on_step(const simulator<empty_data>* sim,
 		const hash_map<uint64_t, agent_state*>& agents, uint64_t time)
 { }
 
-bool run_locally(uint64_t track_agent_id)
+bool run_locally(uint64_t track_agent_id, float pixels_per_cell)
 {
 	simulator_config config;
 	config.max_steps_per_movement = 1;
@@ -249,7 +272,6 @@ bool run_locally(uint64_t track_agent_id)
 	}
 
 	unsigned int move_count = 0;
-	bool simulation_running = true;
 	std::mutex lock;
 	std::condition_variable cv;
 	unsigned int max_steps_per_frame = 1;
@@ -274,7 +296,7 @@ bool run_locally(uint64_t track_agent_id)
 	timer stopwatch;
 	unsigned long long elapsed = 0;
 	unsigned int frame_count = 0;
-	visualizer<simulator<empty_data>> visualizer(sim, 800, 800, track_agent_id);
+	visualizer<simulator<empty_data>> visualizer(sim, 800, 800, track_agent_id, pixels_per_cell);
 	while (simulation_running) {
 		if (visualizer.is_window_closed())
 			break;
@@ -289,7 +311,8 @@ bool run_locally(uint64_t track_agent_id)
 
 		if (stopwatch.milliseconds() >= 1000) {
 			elapsed += stopwatch.milliseconds();
-			printf("Completed %u moves: %lf simulation steps per second. (%lf fps)\n", move_count, ((double) sim.time / elapsed) * 1000, ((double) frame_count / elapsed) * 1000);
+			printf("Completed %u moves: %lf simulation steps per second. (%lf fps)\n",
+				move_count, ((double) sim.time / elapsed) * 1000, ((double) frame_count / elapsed) * 1000);
 			stopwatch.start();
 		}
 	}
@@ -308,7 +331,8 @@ bool run_locally(uint64_t track_agent_id)
 bool run(
 		const char* server_address,
 		const char* server_port,
-		uint64_t track_agent_id)
+		uint64_t track_agent_id,
+		float pixels_per_cell)
 {
 	uint64_t client_id;
 	uint64_t simulation_time = connect_client(sim, server_address, server_port, client_id);
@@ -316,12 +340,12 @@ bool run(
 		fprintf(stderr, "ERROR: Unable to connect to '%s:%s'.\n", server_address, server_port);
 		return false;
 	}
-	connected_to_server = true;
 
 	print_controls(stdout); fflush(stdout);
 
-	visualizer<client<visualizer_client_data>> visualizer(sim, 800, 800, track_agent_id);
-	while (sim.client_running) {
+	visualizer<client<visualizer_client_data>> visualizer(sim, 800, 800, track_agent_id, pixels_per_cell);
+	visualizer_running = &visualizer.running;
+	while (simulation_running && sim.client_running) {
 		if (visualizer.is_window_closed())
 			break;
 
@@ -349,6 +373,7 @@ int main(int argc, const char** argv)
 	uint64_t track_agent_id = 1;
 	char* server_address = nullptr;
 	const char* server_port = nullptr;
+	float pixels_per_cell = 6.0f;
 	bool local = false;
 
 	/* parse command-line arguments */
@@ -356,6 +381,7 @@ int main(int argc, const char** argv)
 	for (int i = 1; i < argc && !fail; i++) {
 		if (parse_address(argv[i], fail, server_address, server_port)) continue;
 		if (parse_option(argv[i], fail, "--track=", track_agent_id)) continue;
+		if (parse_option(argv[i], fail, "--pixels-per-cell=", pixels_per_cell)) continue;
 		if (parse_option(argv[i], fail, "--local")) { local = true; continue; }
 		if (parse_option(argv[i], fail, "--help")) {
 			print_usage(stdout);
@@ -364,6 +390,9 @@ int main(int argc, const char** argv)
 				free(server_address);
 			return EXIT_SUCCESS;
 		}
+
+		fprintf(stderr, "ERROR: Unrecognized command-line argument '%s'.\n", argv[i]);
+		fail = true;
 	}
 
 	if (fail) {
@@ -377,7 +406,7 @@ int main(int argc, const char** argv)
 			free(server_address);
 			server_address = nullptr;
 		}
-		if (!run_locally(track_agent_id))
+		if (!run_locally(track_agent_id, pixels_per_cell))
 			return EXIT_FAILURE;
 	} else {
 		if (server_address == nullptr || server_port == nullptr) {
@@ -385,7 +414,7 @@ int main(int argc, const char** argv)
 			return EXIT_FAILURE;
 		}
 
-		if (!run(server_address, server_port, track_agent_id)) {
+		if (!run(server_address, server_port, track_agent_id, pixels_per_cell)) {
 			free(server_address);
 			return EXIT_FAILURE;
 		}

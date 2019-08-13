@@ -202,11 +202,11 @@ static pair<float*, Py_ssize_t> PyArg_ParseFloatList(PyObject* arg, Py_ssize_t s
 static inline bool build_py_agent(
         const agent_state& agent,
         const simulator_config& config,
-        PyObject*& py_position,
+        PyArrayObject*& py_position,
         PyObject*& py_direction,
-        PyObject*& py_scent,
-        PyObject*& py_vision,
-        PyObject*& py_items)
+        PyArrayObject*& py_scent,
+        PyArrayObject*& py_vision,
+        PyArrayObject*& py_items)
 {
     /* first copy all arrays in 'agent' */
     int64_t* positions = (int64_t*) malloc(sizeof(int64_t) * 2);
@@ -247,11 +247,15 @@ static inline bool build_py_agent(
             2 * (npy_intp) config.vision_range + 1,
             (npy_intp) config.color_dimension};
     npy_intp items_dim[] = {(npy_intp) config.item_types.length};
-    py_position = PyArray_SimpleNewFromData(1, pos_dim, NPY_INT64, positions);
+    py_position = (PyArrayObject*) PyArray_SimpleNewFromData(1, pos_dim, NPY_INT64, positions);
     py_direction = PyLong_FromSize_t((size_t) agent.current_direction);
-    py_scent = PyArray_SimpleNewFromData(1, scent_dim, NPY_FLOAT, scent);
-    py_vision = PyArray_SimpleNewFromData(3, vision_dim, NPY_FLOAT, vision);
-    py_items = PyArray_SimpleNewFromData(1, items_dim, NPY_UINT64, items);
+    py_scent = (PyArrayObject*) PyArray_SimpleNewFromData(1, scent_dim, NPY_FLOAT, scent);
+    py_vision = (PyArrayObject*) PyArray_SimpleNewFromData(3, vision_dim, NPY_FLOAT, vision);
+    py_items = (PyArrayObject*) PyArray_SimpleNewFromData(1, items_dim, NPY_UINT64, items);
+    PyArray_ENABLEFLAGS(py_position, NPY_ARRAY_OWNDATA);
+    PyArray_ENABLEFLAGS(py_scent, NPY_ARRAY_OWNDATA);
+    PyArray_ENABLEFLAGS(py_vision, NPY_ARRAY_OWNDATA);
+    PyArray_ENABLEFLAGS(py_items, NPY_ARRAY_OWNDATA);
     return true;
 }
 
@@ -271,8 +275,8 @@ static PyObject* build_py_agent(
         const simulator_config& config,
         uint64_t agent_id)
 {
-    PyObject* py_position; PyObject* py_direction;
-    PyObject* py_scent; PyObject* py_vision; PyObject* py_items;
+    PyArrayObject* py_position; PyObject* py_direction;
+    PyArrayObject* py_scent; PyArrayObject* py_vision; PyArrayObject* py_items;
     if (!build_py_agent(agent, config, py_position, py_direction, py_scent, py_vision, py_items))
         return NULL;
     PyObject* py_agent_id = PyLong_FromUnsignedLongLong(agent_id);
@@ -1746,13 +1750,16 @@ static PyObject* build_py_map(
 
             npy_intp scent_dim[] = {n, n, (npy_intp) config.scent_dimension};
             npy_intp vision_dim[] = {n, n, (npy_intp) config.color_dimension};
-            PyObject* py_vision = PyArray_SimpleNewFromData(3, vision_dim, NPY_FLOAT, vision);
+            PyArrayObject* py_vision = (PyArrayObject*) PyArray_SimpleNewFromData(3, vision_dim, NPY_FLOAT, vision);
+            PyArray_ENABLEFLAGS(py_vision, NPY_ARRAY_OWNDATA);
             PyObject* py_scent;
             if (patch.scent == nullptr) {
                 py_scent = Py_None;
                 Py_INCREF(Py_None);
             } else {
-                py_scent = PyArray_SimpleNewFromData(3, scent_dim, NPY_FLOAT, scent);
+                PyArrayObject* py_scent_array = (PyArrayObject*) PyArray_SimpleNewFromData(3, scent_dim, NPY_FLOAT, scent);
+                PyArray_ENABLEFLAGS(py_scent_array, NPY_ARRAY_OWNDATA);
+                py_scent = (PyObject*) py_scent_array;
             }
 
             PyObject* fixed = patch.fixed ? Py_True : Py_False;

@@ -44,9 +44,9 @@ inline void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 
 	if (action == GLFW_PRESS) {
 		if (key == GLFW_KEY_MINUS) {
-			if (v->target_pixel_density / 1.3 <= 1.0f) {
+			if (v->target_pixel_density / 1.3 <= 1 / get_config(v->sim).patch_size) {
 				/* TODO: handle the case where the pixel density is smaller than 1 (we segfault currently since the texture for the scent visualization could become too small) */
-				fprintf(stderr, "Zoom beyond the point where the pixel density is smaller than 1 is unsupported.\n");
+				fprintf(stderr, "Zoom beyond the point where the pixel density is smaller than 1/patch_size is unsupported.\n");
 			} else {
 				v->zoom_animation_start_time = milliseconds();
 				v->zoom_start_pixel_density = v->pixel_density;
@@ -95,7 +95,7 @@ inline void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 struct visualizer_client_data {
 	visualizer<client<visualizer_client_data>>* painter = nullptr;
 
-	bool waiting_for_get_map = false;
+	std::atomic_bool waiting_for_get_map;
 	float get_map_left;
 	float get_map_right;
 	float get_map_bottom;
@@ -105,12 +105,30 @@ struct visualizer_client_data {
 	status get_map_response = status::OK;
 	array<array<patch_state>>* map = nullptr;
 
-	bool waiting_for_get_agent_states = false;
+	std::atomic_bool waiting_for_get_agent_states;
 	uint64_t track_agent_id = 0;
 
 	status get_agent_states_response = status::OK;
 	const agent_state* agent_states = nullptr;
 	size_t agent_state_count = 0;
+
+	visualizer_client_data() {
+		waiting_for_get_map.store(false);
+		waiting_for_get_agent_states.store(false);
+	}
+
+	visualizer_client_data(const visualizer_client_data& src) :
+		get_map_left(src.get_map_left), get_map_right(src.get_map_right),
+		get_map_bottom(src.get_map_bottom), get_map_top(src.get_map_top),
+		get_map_render_background(src.get_map_render_background),
+		get_map_response(src.get_map_response), map(src.map),
+		track_agent_id(src.track_agent_id),
+		get_agent_states_response(src.get_agent_states_response),
+		agent_states(src.agent_states), agent_state_count(src.agent_state_count)
+	{
+		waiting_for_get_map.store(src.waiting_for_get_map.load());
+		waiting_for_get_agent_states.store(src.waiting_for_get_agent_states.load());
+	}
 };
 
 template <typename SimulatorData>
@@ -153,7 +171,7 @@ class visualizer
 	struct uniform_buffer_data {
 		model_view_matrix mvp;
 		float pixel_density;
-		float patch_size;
+		float patch_size_texels;
 	};
 
 	GLFWwindow* window;
@@ -163,6 +181,7 @@ class visualizer
 	uint32_t texture_height;
 	float camera_position[2];
 	float pixel_density;
+	unsigned int current_patch_size_texels;
 
 	SimulatorType& sim;
 
@@ -208,22 +227,26 @@ class visualizer
 	std::thread map_retriever;
 	std::mutex scene_lock;
 	std::condition_variable scene_ready_cv;
-	std::atomic_bool running, scene_ready;
+	std::atomic_bool scene_ready;
 	float left_bound, right_bound, bottom_bound, top_bound;
 	bool render_background;
 
 public:
-	visualizer(SimulatorType& sim, uint32_t window_width, uint32_t window_height, uint64_t track_agent_id) :
+	std::atomic_bool running;
+
+	visualizer(SimulatorType& sim,
+		uint32_t window_width, uint32_t window_height,
+		uint64_t track_agent_id, float pixels_per_cell) :
 			width(window_width), height(window_height), sim(sim),
 			background_binding(0, sizeof(vertex)), item_binding(0, sizeof(item_vertex)),
 			track_agent_id(track_agent_id), tracking_animating(false),
-			running(true), scene_ready(false), render_background(true)
+			scene_ready(false), render_background(true), running(true)
 	{
 		camera_position[0] = 0.5f;
 		camera_position[1] = 0.5f;
 		translate_end_position[0] = camera_position[0];
 		translate_end_position[1] = camera_position[1];
-		pixel_density = 6.0f;
+		pixel_density = pixels_per_cell;
 		target_pixel_density = pixel_density;
 		zoom_start_pixel_density = pixel_density;
 		zoom_animation_start_time = milliseconds();
@@ -480,7 +503,7 @@ public:
 				-0.5f * (width / pixel_density), 0.5f * (width / pixel_density),
 				-0.5f * (height / pixel_density), 0.5f * (height / pixel_density), -100.0f, 100.0f);
 		uniform_data.pixel_density = pixel_density;
-		uniform_data.patch_size = get_config(sim).patch_size;
+		uniform_data.patch_size_texels = current_patch_size_texels;
 
 		auto reset_command_buffers = [&]() {
 			cleanup_renderer();
@@ -521,9 +544,12 @@ private:
 			bool render_background_map,
 			float left, float right, float bottom, float top)
 	{
+		const unsigned int texel_cell_length = (unsigned int) ceil(1 / pixel_density);
+
 		size_t new_item_vertex_count = 0;
 		pixel* scent_map_texture_data = (pixel*) scent_map_texture.mapped_memory;
 		const unsigned int patch_size = get_config(sim).patch_size;
+		const unsigned int patch_size_texels = (unsigned int) ceil((float) patch_size / texel_cell_length);
 		const unsigned int scent_dimension = get_config(sim).scent_dimension;
 		const array<item_properties>& item_types = get_config(sim).item_types;
 		const float* agent_color = get_config(sim).agent_color;
@@ -554,8 +580,8 @@ private:
 				if (!HasLock) scene_lock.unlock();
 			}
 
-			unsigned int texture_width_cells = (unsigned int) (top_right_corner.x - bottom_left_corner.x + 1) * patch_size;
-			unsigned int texture_height_cells = (unsigned int) (top_right_corner.y - bottom_left_corner.y + 1) * patch_size;
+			unsigned int texture_width_cells = (unsigned int) (top_right_corner.x - bottom_left_corner.x + 1) * patch_size_texels;
+			unsigned int texture_height_cells = (unsigned int) (top_right_corner.y - bottom_left_corner.y + 1) * patch_size_texels;
 
 			unsigned int y_index = 0;
 			item_vertex* item_vertices = (item_vertex*) item_quad_buffer.mapped_memory;
@@ -569,8 +595,8 @@ private:
 							p.a = 255;
 						}
 
-						const int64_t offset_y = patch_offset_y * patch_size;
-						for (unsigned int b = 0; b < patch_size; b++) {
+						const int64_t offset_y = patch_offset_y * patch_size_texels;
+						for (unsigned int b = 0; b < patch_size_texels; b++) {
 							for (unsigned int a = 0; a < texture_width_cells; a++) {
 								position texture_position = position(a, b + offset_y);
 								pixel& p = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
@@ -585,15 +611,15 @@ private:
 				unsigned int x_index = 0;
 				for (int64_t x = bottom_left_corner.x; x <= top_right_corner.x; x++) {
 					const position patch_offset = position(x, y) - bottom_left_corner;
-					const position offset = patch_offset * patch_size;
+					const position offset = patch_offset * patch_size_texels;
 					if (x_index == row.length || x != row[x_index].patch_position.x) {
 						/* fill this patch with empty pixels */
 						if (render_background_map) {
 							pixel& p = scent_map_texture_data[patch_offset.y * texture_width + patch_offset.x];
 							p.a = 255;
 
-							for (unsigned int b = 0; b < patch_size; b++) {
-								for (unsigned int a = 0; a < patch_size; a++) {
+							for (unsigned int b = 0; b < patch_size_texels; b++) {
+								for (unsigned int a = 0; a < patch_size_texels; a++) {
 									position texture_position = position(a, b) + offset;
 									pixel& p = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
 									p.r = 255; p.g = 255; p.b = 255;
@@ -612,19 +638,36 @@ private:
 							p.a = 229;
 						}
 
-						for (unsigned int b = 0; b < patch_size; b++) {
-							for (unsigned int a = 0; a < patch_size; a++) {
+						for (unsigned int b = 0; b < patch_size_texels; b++) {
+							for (unsigned int a = 0; a < patch_size_texels; a++) {
+								/* first average the scent across the cells in this texel */
+								float average_scent[3] = { 0 };
+								unsigned int cell_count = 0;
+								for (unsigned int a_inner = 0; a_inner < texel_cell_length; a_inner++) {
+									if (a*texel_cell_length + a_inner == patch_size) break;
+									for (unsigned int b_inner = 0; b_inner < texel_cell_length; b_inner++) {
+										if (b*texel_cell_length + b_inner == patch_size) break;
+										float* cell_scent = patch.scent + (((a*texel_cell_length + a_inner)*patch_size + b*texel_cell_length + b_inner)*scent_dimension);
+										average_scent[0] += cell_scent[0];
+										average_scent[1] += cell_scent[1];
+										average_scent[2] += cell_scent[2];
+										cell_count++;
+									}
+								}
+
+								average_scent[0] /= cell_count;
+								average_scent[1] /= cell_count;
+								average_scent[2] /= cell_count;
+
 								position texture_position = position(a, b) + offset;
 								pixel& current_pixel = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
-
-								float* cell_scent = patch.scent + ((a*patch_size + b)*scent_dimension);
-								scent_to_color(cell_scent, current_pixel);
+								scent_to_color(average_scent, current_pixel);
 							}
 						}
 					}
 
 					/* iterate over all items in this patch, creating a quad
-					for each (we use a triangle list so we need two triangles) */
+					   for each (we use a triangle list so we need two triangles) */
 					for (unsigned int i = 0; i < patch.item_count; i++) {
 						const item& it = patch.items[i];
 						const item_properties& item_props = item_types[it.item_type];
@@ -728,6 +771,7 @@ private:
 			/* transfer all data to GPU */
 			if (!HasLock) scene_lock.lock();
 			item_vertex_count = new_item_vertex_count;
+			current_patch_size_texels = patch_size_texels;
 			renderer.transfer_dynamic_vertex_buffer(item_quad_buffer, sizeof(item_vertex) * item_vertex_count);
 			if (render_background_map) {
 				renderer.transfer_dynamic_texture_image(scent_map_texture, image_format::R8G8B8A8_UNORM);
@@ -825,6 +869,7 @@ private:
 					translate_start_position[1] = camera_position[1];
 					translate_end_position[0] = new_target_position[0];
 					translate_end_position[1] = new_target_position[1];
+					tracking_animating = false;
 				}
 				if (!tracking_animating) {
 					translate_animation_start_time = milliseconds();
@@ -918,6 +963,7 @@ private:
 					translate_start_position[1] = camera_position[1];
 					translate_end_position[0] = new_target_position[0];
 					translate_end_position[1] = new_target_position[1];
+					tracking_animating = false;
 				}
 				if (!tracking_animating) {
 					translate_animation_start_time = milliseconds();
@@ -952,7 +998,7 @@ private:
 			remove_client(sim);
 			return false;
 		} else if (sim.data.get_map_response != status::OK) {
-			fprintf(stderr, "visualizer.run_map_retriever ERROR: `get_map` failed.\n");
+			fprintf(stderr, "visualizer.process_mpi_status ERROR: `get_map` failed.\n");
 			running = false;
 			remove_client(sim);
 			return false;
@@ -965,7 +1011,7 @@ private:
 		} else if (sim.data.get_agent_states_response != status::INVALID_AGENT_ID
 				&& sim.data.get_agent_states_response != status::OK)
 		{
-			fprintf(stderr, "visualizer.run_map_retriever ERROR: `get_agent_states` failed.\n");
+			fprintf(stderr, "visualizer.process_mpi_status ERROR: `get_agent_states` failed.\n");
 		}
 		return true;
 	}
