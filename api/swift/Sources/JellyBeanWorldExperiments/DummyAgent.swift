@@ -52,7 +52,7 @@ public func runDummy() throws {
   let mpl = Python.import("matplotlib")
   mpl.use("TkAgg")
 
-  let simulator = try Simulator(using: configuration)
+  let simulator = try Simulator(using: simulatorConfiguration)
 
   // Create the agents.
   print("Creating agents.")
