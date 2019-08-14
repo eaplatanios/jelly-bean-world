@@ -192,4 +192,4 @@ let experiment = Experiment(
   batchSize: batchSize,
   stepCount: stepCount,
   stepCountPerUpdate: stepCountPerUpdate)
-try! experiment.run(resultsFile: resultsFile, logFrequency: 10)
+try! experiment.run(resultsFile: resultsFile, writeFrequency: 100, logFrequency: 1000)

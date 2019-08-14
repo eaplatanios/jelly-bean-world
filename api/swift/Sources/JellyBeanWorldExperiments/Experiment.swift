@@ -44,7 +44,11 @@ public struct Experiment {
     self.stepCountPerUpdate = stepCountPerUpdate
   }
 
-  public func run(resultsFile: URL? = nil, logFrequency: Int = 100) throws {
+  public func run(
+    resultsFile: URL? = nil,
+    writeFrequency: Int = 100,
+    logFrequency: Int = 1000
+  ) throws {
     let configurations = (0..<batchSize).map { _ in
       JellyBeanWorld.Environment.Configuration(
         simulatorConfiguration: simulatorConfiguration,
@@ -61,21 +65,28 @@ public struct Experiment {
     }()
     resultsFileHandle?.seekToEndOfFile()
     var environmentStep = 0
-    for _ in 0..<stepCount {
+    var accumulatedValue = Float(0.0)
+    for _ in 0..<(stepCount / stepCountPerUpdate) {
       try agent.update(
         using: &environment,
         maxSteps: stepCountPerUpdate * batchSize,
         callbacks: [{ (environment, trajectory) in
-          environmentStep += 1
-          let row = "\(environmentStep)\t\(trajectory.reward.mean().scalarized())\n"
-          resultsFileHandle?.write(row.data(using: .utf8)!)
+          if environmentStep % writeFrequency == 0 {
+            let reward = accumulatedValue / Float(writeFrequency)
+            resultsFileHandle?.write("\(environmentStep)\t\(reward)\n".data(using: .utf8)!)
+            accumulatedValue = Float(0.0)
+          }
+          if environmentStep % logFrequency == 0 {
+            let rewards = totalCumulativeReward.value()
+            let rewardRate = environmentStep == 0 ?
+              0.0 :
+              rewards.reduce(0, +) / Float(environmentStep * 1000 * rewards.count)
+            logger.info("Step: \(environmentStep) | Reward Rate: \(rewardRate)/s")
+          }
           totalCumulativeReward.update(using: trajectory)
+          environmentStep += 1
+          accumulatedValue += trajectory.reward.mean().scalarized()
         }])
-      if environmentStep % (logFrequency * stepCountPerUpdate) == 0 {
-        let rewards = totalCumulativeReward.value()
-        let rewardRate = rewards.reduce(0, +) / Float(environmentStep * 1000 * rewards.count)
-        logger.info("Step: \(environmentStep) | Reward Rate: \(rewardRate)/s")
-      }
     }
     resultsFileHandle?.closeFile()
   }

@@ -166,10 +166,14 @@ bool run_locally(uint64_t track_agent_id, float pixels_per_cell)
 	config.scent_dimension = 3;
 	config.color_dimension = 3;
 	config.vision_range = 5;
-	for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
-		config.allowed_movement_directions[i] = action_policy::ALLOWED;
-	for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
-		config.allowed_rotations[i] = action_policy::ALLOWED;
+	config.allowed_movement_directions[0] = action_policy::ALLOWED;
+	config.allowed_movement_directions[1] = action_policy::DISALLOWED;
+	config.allowed_movement_directions[2] = action_policy::DISALLOWED;
+	config.allowed_movement_directions[3] = action_policy::DISALLOWED;
+	config.allowed_rotations[0] = action_policy::DISALLOWED;
+	config.allowed_rotations[1] = action_policy::DISALLOWED;
+	config.allowed_rotations[2] = action_policy::ALLOWED;
+	config.allowed_rotations[3] = action_policy::ALLOWED;
 	config.no_op_allowed = false;
 	config.patch_size = 32;
 	config.mcmc_iterations = 4000;
@@ -279,8 +283,17 @@ bool run_locally(uint64_t track_agent_id, float pixels_per_cell)
 	std::thread simulation_worker = std::thread([&]() {
 		for (unsigned int t = 0; simulation_running && t < 1000000; t++)
 		{
-			if (sim.move(agent_id, (rand() % 2 == 0) ? direction::UP : direction::RIGHT, 1) != status::OK) {
-				fprintf(stderr, "run_locally ERROR: Unable to move agent.\n");
+			auto action = rand() % 20;
+			status result = status::OK;
+			if (action % 20 == 0 || action % 20 == 5) {
+				result = sim.turn(agent_id, direction::LEFT);
+			} else if (action % 20 == 10 || action % 20 == 15) {
+				result = sim.turn(agent_id, direction::RIGHT);
+			} else {
+				result = sim.move(agent_id, direction::UP, 1);
+			}
+			if (result != status::OK) {
+				fprintf(stderr, "run_locally ERROR: Unable to perform agent action.\n");
 				break;
 			}
 			move_count++;
