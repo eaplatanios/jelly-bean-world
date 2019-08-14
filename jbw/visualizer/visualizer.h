@@ -662,6 +662,15 @@ private:
 						}
 					}
 
+					auto patch_is_fixed = patch.fixed;
+					auto process_item_color = [patch_is_fixed] (float color) {
+						if (patch_is_fixed) {
+							return color;
+						} else {
+							return 0.8f * color;
+						}
+					};
+
 					/* iterate over all items in this patch, creating a quad
 					   for each (we use a triangle list so we need two triangles) */
 					for (unsigned int i = 0; i < patch.item_count; i++) {
@@ -670,9 +679,9 @@ private:
 						item_vertices[new_item_vertex_count].position[0] = it.location.x + 0.5f - 0.4f;
 						item_vertices[new_item_vertex_count].position[1] = it.location.y + 0.5f - 0.4f;
 						if (item_props.blocks_movement) {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j] + 2.0f;
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = process_item_color(item_props.color[j]) + 2.0f;
 						} else {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j];
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = process_item_color(item_props.color[j]);
 						}
 						item_vertices[new_item_vertex_count].tex_coord[0] = 0.0f;
 						item_vertices[new_item_vertex_count++].tex_coord[1] = 0.0f;
@@ -680,9 +689,9 @@ private:
 						item_vertices[new_item_vertex_count].position[0] = it.location.x + 0.5f - 0.4f;
 						item_vertices[new_item_vertex_count].position[1] = it.location.y + 0.5f + 0.4f;
 						if (item_props.blocks_movement) {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j] + 2.0f;
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = process_item_color(item_props.color[j]) + 2.0f;
 						} else {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j];
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = process_item_color(item_props.color[j]);
 						}
 						item_vertices[new_item_vertex_count].tex_coord[0] = 0.0f;
 						item_vertices[new_item_vertex_count++].tex_coord[1] = 1.0f;
@@ -690,9 +699,9 @@ private:
 						item_vertices[new_item_vertex_count].position[0] = it.location.x + 0.5f + 0.4f;
 						item_vertices[new_item_vertex_count].position[1] = it.location.y + 0.5f - 0.4f;
 						if (item_props.blocks_movement) {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j] + 2.0f;
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = process_item_color(item_props.color[j]) + 2.0f;
 						} else {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j];
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = process_item_color(item_props.color[j]);
 						}
 						item_vertices[new_item_vertex_count].tex_coord[0] = 1.0f;
 						item_vertices[new_item_vertex_count++].tex_coord[1] = 0.0f;
@@ -700,9 +709,9 @@ private:
 						item_vertices[new_item_vertex_count].position[0] = it.location.x + 0.5f + 0.4f;
 						item_vertices[new_item_vertex_count].position[1] = it.location.y + 0.5f + 0.4f;
 						if (item_props.blocks_movement) {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j] + 2.0f;
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = process_item_color(item_props.color[j]) + 2.0f;
 						} else {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j];
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = process_item_color(item_props.color[j]);
 						}
 						item_vertices[new_item_vertex_count].tex_coord[0] = 1.0f;
 						item_vertices[new_item_vertex_count++].tex_coord[1] = 1.0f;
@@ -710,9 +719,9 @@ private:
 						item_vertices[new_item_vertex_count].position[0] = it.location.x + 0.5f + 0.4f;
 						item_vertices[new_item_vertex_count].position[1] = it.location.y + 0.5f - 0.4f;
 						if (item_props.blocks_movement) {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j] + 2.0f;
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = process_item_color(item_props.color[j]) + 2.0f;
 						} else {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j];
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = process_item_color(item_props.color[j]);
 						}
 						item_vertices[new_item_vertex_count].tex_coord[0] = 1.0f;
 						item_vertices[new_item_vertex_count++].tex_coord[1] = 0.0f;
@@ -720,9 +729,9 @@ private:
 						item_vertices[new_item_vertex_count].position[0] = it.location.x + 0.5f - 0.4f;
 						item_vertices[new_item_vertex_count].position[1] = it.location.y + 0.5f + 0.4f;
 						if (item_props.blocks_movement) {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j] + 2.0f;
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = process_item_color(item_props.color[j]) + 2.0f;
 						} else {
-							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = item_props.color[j];
+							for (unsigned int j = 0; j < 3; j++) item_vertices[new_item_vertex_count].color[j] = process_item_color(item_props.color[j]);
 						}
 						item_vertices[new_item_vertex_count].tex_coord[0] = 0.0f;
 						item_vertices[new_item_vertex_count++].tex_coord[1] = 1.0f;
