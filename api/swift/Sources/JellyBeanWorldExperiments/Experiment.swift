@@ -76,10 +76,16 @@ public struct Experiment {
         simulatorConfiguration: simulatorConfiguration,
         rewardSchedule: reward.schedule)
     }
-    var environment = try JellyBeanWorld.Environment(configurations: configurations)
+    var environment = try JellyBeanWorld.Environment(
+      configurations: configurations,
+      parallelizedBatchProcessing: true)
     var rewardWriteDeque = Deque<Float>(size: writeFrequency)
     var rewardLogDeque = Deque<Float>(size: logFrequency)
-    var agent = self.agent.create(in: environment, network: network, observation: observation)
+    var agent = self.agent.create(
+      in: environment,
+      network: network,
+      observation: observation,
+      batchSize: batchSize)
     let resultsFileHandle = try? FileHandle(forWritingTo: resultsFile)
     resultsFileHandle?.seekToEndOfFile()
     var environmentStep = 0
@@ -119,8 +125,9 @@ extension JellyBeanWorldExperiments.Agent {
   public func create(
     in environment: JellyBeanWorld.Environment,
     network: Network,
-    observation: Observation
-   ) -> AnyAgent<JellyBeanWorld.Environment> {
+    observation: Observation,
+    batchSize: Int
+   ) -> AnyAgent<JellyBeanWorld.Environment, LSTMState<Float>> {
     let learningRate = FixedLearningRate(Float(1e-4))
     let advantageFunction = GeneralizedAdvantageEstimation(
       discountFactor: 0.99,
@@ -137,6 +144,7 @@ extension JellyBeanWorldExperiments.Agent {
       return AnyAgent(PPOAgent(
         for: environment,
         network: network,
+        initialState: network.initialState(batchSize: batchSize),
         optimizer: AMSGrad(for: network),
         learningRate: learningRate,
         advantageFunction: advantageFunction,
@@ -152,6 +160,7 @@ extension JellyBeanWorldExperiments.Agent {
       return AnyAgent(PPOAgent(
         for: environment,
         network: network,
+        initialState: network.initialState(batchSize: batchSize),
         optimizer: AMSGrad(for: network),
         learningRate: learningRate,
         advantageFunction: advantageFunction,
@@ -167,6 +176,7 @@ extension JellyBeanWorldExperiments.Agent {
       return AnyAgent(PPOAgent(
         for: environment,
         network: network,
+        initialState: network.initialState(batchSize: batchSize),
         optimizer: AMSGrad(for: network),
         learningRate: learningRate,
         advantageFunction: advantageFunction,
