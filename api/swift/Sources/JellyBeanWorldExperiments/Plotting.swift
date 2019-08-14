@@ -94,6 +94,11 @@ public struct ResultsPlot {
       }
     }
 
+    // Use exponential notation for the x-axis labels.
+    let xAxisFormatter = mpl.ticker.ScalarFormatter()
+    xAxisFormatter.set_powerlimits([-3, 3])
+    ax.xaxis.set_major_formatter(xAxisFormatter)
+
     // Add axis labels.
     ax.set_xlabel(
       "Time Step",
