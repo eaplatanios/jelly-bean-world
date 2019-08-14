@@ -190,17 +190,52 @@ extension Line {
 }
 
 extension Array where Element == Line {
+  // TODO: This function can be made much faster.
   fileprivate func plotWithStandardDeviation(
     on axes: PythonObject,
     label: String,
-    color: PythonObject
+    color: PythonObject,
+    pointCount: Int = 1000
   ) {
     precondition(!isEmpty)
-    precondition(allSatisfy({ $0.x == first!.x }))
-    let x = first!.x
-    let y = map { $0.y } .transposed()
-    let yMean = y.map { $0.mean }
-    let yStandardDeviation = y.map { $0.standardDeviation }
+    var x = [Float]()
+    var yMean = [Float]()
+    var yStandardDeviation = [Float]()
+    x.reserveCapacity(pointCount)
+    yMean.reserveCapacity(pointCount)
+    yStandardDeviation.reserveCapacity(pointCount)
+    var indices = [Int](repeating: 0, count: count)
+    let xMin = map { $0.x.min() ?? 0.0 } .min() ?? 0.0
+    let xMax = map { $0.x.max() ?? 0.0 } .max() ?? 0.0
+    let interval = (xMax - xMin) / Float(pointCount - 1)
+    for i in 0..<pointCount {
+      let currentX = xMin + Float(i) * interval
+      x.append(currentX)
+      var ys = [Float]()
+      ys.reserveCapacity(count)
+      for j in self.indices {
+        while self[j].x[indices[j]] < currentX && indices[j] < self[j].x.count - 1 {
+          if self[j].x[indices[j] + 1] > currentX { break }
+          indices[j] += 1
+        }
+        if self[j].x[indices[j]] == currentX {
+          ys.append(self[j].y[indices[j]])
+          continue
+        }
+        if indices[j] == self[j].x.count - 1 {
+          continue
+        }
+        // TODO: Can do better than linear interpolation
+        // by accounting for the in-between `y` values.
+        let xLow = self[j].x[indices[j]]
+        let xHigh = self[j].x[indices[j] + 1]
+        let yLow = self[j].y[indices[j]]
+        let yHigh = self[j].y[indices[j] + 1]
+        ys.append((yLow * (xHigh - currentX) + yHigh * (currentX - xLow)) / (xHigh - xLow))
+      }
+      yMean.append(ys.mean)
+      yStandardDeviation.append(ys.standardDeviation)
+    }
     axes.plot(x, yMean, label: label, color: color, linewidth: 2)
     axes.fill_between(
       x,
