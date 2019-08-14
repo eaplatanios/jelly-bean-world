@@ -657,7 +657,7 @@ private:
 
 								position texture_position = position(a, b) + offset;
 								pixel& current_pixel = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
-								scent_to_color(average_scent, current_pixel);
+								scent_to_color(average_scent, current_pixel, patch.fixed);
 							}
 						}
 					}
@@ -1120,14 +1120,25 @@ private:
 		renderer.delete_render_pass(pass);
 	}
 
-	static inline void scent_to_color(const float* cell_scent, pixel& out) {
+	static inline void scent_to_color(const float* cell_scent, pixel& out, bool is_patch_fixed) {
 		float x = max(0.0f, min(1.0f, log(pow(cell_scent[0], 0.4f) + 1.0f) / 0.9f));
 		float y = max(0.0f, min(1.0f, log(pow(cell_scent[1], 0.4f) + 1.0f) / 0.9f));
 		float z = max(0.0f, min(1.0f, log(pow(cell_scent[2], 0.4f) + 1.0f) / 0.9f));
 
-		out.r = 255 - (uint8_t) (255 * ((y + z) / 2));
-		out.g = 255 - (uint8_t) (255 * ((x + z) / 2));
-		out.b = 255 - (uint8_t) (255 * ((x + y) / 2));
+		float r = 255 * (1 - (y + z) / 2);
+		float g = 255 * (1 - (x + z) / 2);
+		float b = 255 * (1 - (x + y) / 2);
+
+		if (is_patch_fixed) {
+			out.r = r;
+			out.g = g;
+			out.b = b;
+		} else {
+			float black_alpha = 0.2;
+			out.r = (uint8_t) ((1 - black_alpha) * r);
+			out.g = (uint8_t) ((1 - black_alpha) * g);
+			out.b = (uint8_t) ((1 - black_alpha) * b);
+		}
 	}
 
 	static inline void cross(float (&out)[3],
