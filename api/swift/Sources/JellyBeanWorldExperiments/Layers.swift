@@ -97,8 +97,8 @@ public struct ScentActorCritic: Module {
   public func callAsFunction(
     _ input: JellyBeanWorld.Environment.Observation
   ) -> ActorCriticOutput<Categorical<Int32>> {
-    let outerDimCount = input.scent.rank - 3
-    let outerDims = [Int](input.scent.shape.dimensions[0..<outerDimCount])
+    let outerDimCount = input.vision.rank - 3
+    let outerDims = [Int](input.vision.shape.dimensions[0..<outerDimCount])
     let scent = input.scent.flattenedBatch(outerDimCount: outerDimCount)
     let hidden = leakyRelu(scentLayer(scent))
     let actionLogits = denseAction(hidden)

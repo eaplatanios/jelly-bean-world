@@ -24,7 +24,7 @@ public enum Error: Swift.Error {
   case invalidArgument
 }
 
-public enum Reward: String, CustomStringConvertible {
+public enum Reward: String, CaseIterable, CustomStringConvertible {
   case collectJellyBeans
 
   public var description: String {
@@ -42,7 +42,7 @@ extension Reward: StringEnumArgument {
   }
 }
 
-public enum Agent: String, CustomStringConvertible {
+public enum Agent: String, CaseIterable, CustomStringConvertible {
   case reinforce, a2c, ppo, dqn
 
   public var description: String {
@@ -66,7 +66,7 @@ extension Agent: StringEnumArgument {
   }
 }
 
-public enum Observation: String, CustomStringConvertible {
+public enum Observation: String, CaseIterable, CustomStringConvertible {
   case vision, scent, visionAndScent
 
   public var description: String {
@@ -88,7 +88,7 @@ extension Observation: StringEnumArgument {
   }
 }
 
-public enum Network: String, CustomStringConvertible {
+public enum Network: String, CaseIterable, CustomStringConvertible {
   case plain, contextual
 
   public var description: String {
@@ -132,25 +132,27 @@ let batchSizeArg: OptionArgument<Int> = parser.add(
   kind: Int.self,
   usage: "Batch size to use for the experiments. Defaults to 32.")
 let stepCountArg: OptionArgument<Int> = parser.add(
-  option: "--step-count-per-update",
+  option: "--step-count",
   kind: Int.self,
   usage: "Total number of steps to run. Defaults to 1000000.")
 let stepCountPerUpdateArg: OptionArgument<Int> = parser.add(
   option: "--step-count-per-update",
   kind: Int.self,
   usage: "Number of steps between model updates. Defaults to 128.")
+let rewardRatePeriodArg: OptionArgument<Int> = parser.add(
+  option: "--reward-rate-period",
+  kind: Int.self,
+  usage: "Moving average period used when computing the reward rate. Defaults to 100000.")
 let resultsDirArg: OptionArgument<PathArgument> = parser.add(
   option: "--results-dir",
   kind: PathArgument.self,
   usage: "Path to the results directory.")
 
-let fileManager = FileManager.default
-
 // The first argument is always the executable, and so we drop it.
 let arguments = Array(ProcessInfo.processInfo.arguments.dropFirst())
 let parsedArguments = try parser.parse(arguments)
-let currentDir = URL(fileURLWithPath: fileManager.currentDirectoryPath)
-var resultsDir: Foundation.URL = {
+let currentDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+let resultsDir: Foundation.URL = {
   if let argument = parsedArguments.get(resultsDirArg) {
     return URL(fileURLWithPath: argument.path.pathString)
   }
@@ -163,33 +165,25 @@ guard let network = parsedArguments.get(networkArg) else { throw Error.invalidAr
 let batchSize = parsedArguments.get(batchSizeArg) ?? 32
 let stepCount = parsedArguments.get(stepCountArg) ?? 1000000
 let stepCountPerUpdate = parsedArguments.get(stepCountPerUpdateArg) ?? 128
+let rewardRatePeriod = parsedArguments.get(rewardRatePeriodArg) ?? 100000
 
-// Create the results file.
-resultsDir = resultsDir
-  .appendingPathComponent(reward.description)
-  .appendingPathComponent(agent.description)
-  .appendingPathComponent(observation.description)
-  .appendingPathComponent(network.description)
-if !fileManager.fileExists(atPath: resultsDir.path) {
-  try fileManager.createDirectory(
-    at: resultsDir,
-    withIntermediateDirectories: true)
-}
-let runIDs = try fileManager.contentsOfDirectory(at: resultsDir, includingPropertiesForKeys: nil)
-  .filter { $0.pathExtension == "tsv" }
-  .compactMap { Int($0.deletingPathExtension().lastPathComponent) }
-var runID = 0
-while runIDs.contains(runID) { runID += 1 }
-let resultsFile = resultsDir.appendingPathComponent("\(runID).tsv")
-fileManager.createFile(atPath: resultsFile.path, contents: "step\treward\n".data(using: .utf8))
+// let resultsPlotter = ResultsPlot(
+//   reward: reward,
+//   agent: agent,
+//   observations: [.scent, .vision],
+//   networks: [.plain],
+//   rewardRatePeriod: rewardRatePeriod,
+//   resultsDir: resultsDir)
+// try! resultsPlotter.plot()
 
 // Run the experiment.
-let experiment = Experiment(
+let experiment = try! Experiment(
   reward: reward,
   agent: agent,
   observation: observation,
   network: network,
   batchSize: batchSize,
   stepCount: stepCount,
-  stepCountPerUpdate: stepCountPerUpdate)
-try! experiment.run(resultsFile: resultsFile, writeFrequency: 100, logFrequency: 1000)
+  stepCountPerUpdate: stepCountPerUpdate,
+  resultsDir: resultsDir)
+try! experiment.run(writeFrequency: 100, logFrequency: 1000)
