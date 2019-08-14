@@ -25,6 +25,7 @@ public struct Experiment {
   public let batchSize: Int
   public let stepCount: Int
   public let stepCountPerUpdate: Int
+  public let runID: Int
   public let resultsFile: URL
 
   public init(
@@ -64,6 +65,7 @@ public struct Experiment {
     }
     var runID = 0
     while runIDs.contains(runID) { runID += 1 }
+    self.runID = runID
     self.resultsFile = resultsDir.appendingPathComponent("\(runID).tsv")
     FileManager.default.createFile(
       atPath: self.resultsFile.path,
@@ -73,7 +75,7 @@ public struct Experiment {
   public func run(writeFrequency: Int = 100, logFrequency: Int = 1000) throws {
     let configurations = (0..<batchSize).map { _ in
       JellyBeanWorld.Environment.Configuration(
-        simulatorConfiguration: simulatorConfiguration,
+        simulatorConfiguration: simulatorConfiguration(randomSeed: UInt32(runID)),
         rewardSchedule: reward.schedule)
     }
     var environment = try JellyBeanWorld.Environment(
@@ -81,34 +83,36 @@ public struct Experiment {
       parallelizedBatchProcessing: true)
     var rewardWriteDeque = Deque<Float>(size: writeFrequency)
     var rewardLogDeque = Deque<Float>(size: logFrequency)
-    var agent = self.agent.create(
-      in: environment,
-      network: network,
-      observation: observation,
-      batchSize: batchSize)
-    let resultsFileHandle = try? FileHandle(forWritingTo: resultsFile)
-    resultsFileHandle?.seekToEndOfFile()
-    var environmentStep = 0
-    for _ in 0..<(stepCount / stepCountPerUpdate) {
-      try agent.update(
-        using: &environment,
-        maxSteps: stepCountPerUpdate * batchSize,
-        callbacks: [{ (environment, trajectory) in
-          let reward = trajectory.reward.mean().scalarized()
-          rewardWriteDeque.push(reward)
-          rewardLogDeque.push(reward)
-          if environmentStep % writeFrequency == 0 {
-            let reward = rewardWriteDeque.sum()
-            resultsFileHandle?.write("\(environmentStep)\t\(reward)\n".data(using: .utf8)!)
-          }
-          if environmentStep % logFrequency == 0 {
-            let rewardRate = rewardLogDeque.mean()
-            logger.info("Step: \(environmentStep) | Reward Rate: \(rewardRate)/s")
-          }
-          environmentStep += 1
-        }])
+    try withRandomSeedForTensorFlow((Int32(runID), Int32(runID))) {
+      var agent = self.agent.create(
+        in: environment,
+        network: network,
+        observation: observation,
+        batchSize: batchSize)
+      let resultsFileHandle = try? FileHandle(forWritingTo: resultsFile)
+      defer { resultsFileHandle?.closeFile() }
+      resultsFileHandle?.seekToEndOfFile()
+      var environmentStep = 0
+      for _ in 0..<(stepCount / stepCountPerUpdate) {
+        try agent.update(
+          using: &environment,
+          maxSteps: stepCountPerUpdate * batchSize,
+          callbacks: [{ (environment, trajectory) in
+            let reward = trajectory.reward.mean().scalarized()
+            rewardWriteDeque.push(reward)
+            rewardLogDeque.push(reward)
+            if environmentStep % writeFrequency == 0 {
+              let reward = rewardWriteDeque.sum()
+              resultsFileHandle?.write("\(environmentStep)\t\(reward)\n".data(using: .utf8)!)
+            }
+            if environmentStep % logFrequency == 0 {
+              let rewardRate = rewardLogDeque.mean()
+              logger.info("Step: \(environmentStep) | Reward Rate: \(rewardRate)/s")
+            }
+            environmentStep += 1
+          }])
+      }
     }
-    resultsFileHandle?.closeFile()
   }
 }
 
