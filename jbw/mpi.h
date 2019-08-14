@@ -480,7 +480,7 @@ inline bool receive_remove_agent(
 	uint64_t agent_id = UINT64_MAX;
 	status response;
 	bool success = true;
-	client_state* cstate_ptr;
+	client_state* cstate_ptr = nullptr;
 	if (!read(agent_id, in)) {
 		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
