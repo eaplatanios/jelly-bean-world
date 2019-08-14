@@ -80,7 +80,7 @@ public struct Experiment {
     }
     var environment = try JellyBeanWorld.Environment(
       configurations: configurations,
-      parallelizedBatchProcessing: true)
+      parallelizedBatchProcessing: batchSize > 1)
     var rewardWriteDeque = Deque<Float>(size: writeFrequency)
     var rewardLogDeque = Deque<Float>(size: logFrequency)
     try withRandomSeedForTensorFlow((Int32(runID), Int32(runID))) {
