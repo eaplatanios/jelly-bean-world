@@ -76,10 +76,14 @@ public struct ResultsPlot {
         let resultsDir = self.resultsDir
           .appendingPathComponent(observation.description)
           .appendingPathComponent(network.description)
-        let lines = try FileManager.default.contentsOfDirectory(
+        guard let resultFiles = try? FileManager.default.contentsOfDirectory(
           at: resultsDir,
           includingPropertiesForKeys: nil
-        ).compactMap { (try? Line(fromFile: $0))?.movingAverage(period: rewardRatePeriod) }
+        ) else { continue }
+        let lines = resultFiles
+          .compactMap { (try? Line(fromFile: $0))?
+          .movingAverage(period: rewardRatePeriod) }
+        if lines.isEmpty { continue }
 
         // Plot a line for this observation-network combination.
         let colorPalette = network == .plain ? bluePalette : redPalette

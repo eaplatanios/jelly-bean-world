@@ -415,8 +415,13 @@ TODOs:
 
 - [ ] Per-client permissions.
 
-Example for running a Swift experiment:
+Example command for running a Swift experiment:
 ```bash
-swift run -c release JellyBeanWorldExperiments --reward collectJellyBeans --agent ppo --observation vision --network plain
+swift run -c release JellyBeanWorldExperiments run --reward collectJellyBeans --agent ppo --observation vision --network plain
+```
+
+Example command for plotting experiment results:
+```bash
+swift run -c release JellyBeanWorldExperiments plot --reward collectJellyBeans --agent ppo
 ```
 -->
