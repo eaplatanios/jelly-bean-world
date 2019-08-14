@@ -390,7 +390,7 @@ public:
 			throw new std::runtime_error("visualizer ERROR: Failed to create `scent_map_texture`.");
 		}
 
-		if (!renderer.create_sampler(tex_sampler, filter::LINEAR, filter::LINEAR,
+		if (!renderer.create_sampler(tex_sampler, filter::NEAREST, filter::NEAREST,
 				sampler_address_mode::CLAMP_TO_EDGE, sampler_address_mode::CLAMP_TO_EDGE,
 				sampler_address_mode::CLAMP_TO_EDGE, false, 1.0f))
 		{
