@@ -27,7 +27,7 @@ void main() {
             fill_weight = 1.0f;
         }
 
-        out_color = fill_weight * vec4(frag_color - 4.0f, 1.0f) + (1.0 - fill_weight) * vec4(0.0f, 0.0f, 0.0f, 0.0f);
+        out_color = fill_weight * vec4(frag_color - 4.0f, 1.0f) + (1.0 - fill_weight) * vec4(frag_color - 4.0f, 0.0f);
 
     } else if (frag_color.x >= 2.0f) {
         /* this item blocks movement, so render it as a square */
@@ -47,6 +47,6 @@ void main() {
             fill_weight = 1.0f;
         }
 
-        out_color = fill_weight * vec4(frag_color, 1.0f) + (1.0 - fill_weight) * vec4(0.0f, 0.0f, 0.0f, 0.0f);
+        out_color = fill_weight * vec4(frag_color, 1.0f) + (1.0 - fill_weight) * vec4(frag_color, 0.0f);
     }
 }
