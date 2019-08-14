@@ -132,7 +132,11 @@ extension JellyBeanWorldExperiments.Agent {
     observation: Observation,
     batchSize: Int
    ) -> AnyAgent<JellyBeanWorld.Environment, LSTMState<Float>> {
-    let learningRate = FixedLearningRate(Float(1e-4))
+    let learningRate = ExponentiallyDecayedLearningRate(
+      baseLearningRate: FixedLearningRate(Float(1e-4)),
+      decayRate: 0.999,
+      decayStepCount: 1,
+      lowerBound: 1e-6)
     let advantageFunction = GeneralizedAdvantageEstimation(
       discountFactor: 0.99,
       discountWeight: 0.95)
