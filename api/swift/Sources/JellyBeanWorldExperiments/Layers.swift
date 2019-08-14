@@ -71,7 +71,7 @@ public struct VisionActorCritic: Module {
     let outerDimCount = input.vision.rank - 3
     let outerDims = [Int](input.vision.shape.dimensions[0..<outerDimCount])
     let vision = input.vision.flattenedBatch(outerDimCount: outerDimCount)
-    let hidden = leakyRelu(visionLayer(vision))
+    let hidden = selu(visionLayer(vision))
     let actionLogits = denseAction(hidden)
     let flattenedValue = denseValue(hidden)
     let flattenedActionDistribution = Categorical<Int32>(logits: actionLogits)
@@ -100,7 +100,7 @@ public struct ScentActorCritic: Module {
     let outerDimCount = input.vision.rank - 3
     let outerDims = [Int](input.vision.shape.dimensions[0..<outerDimCount])
     let scent = input.scent.flattenedBatch(outerDimCount: outerDimCount)
-    let hidden = leakyRelu(scentLayer(scent))
+    let hidden = selu(scentLayer(scent))
     let actionLogits = denseAction(hidden)
     let flattenedValue = denseValue(hidden)
     let flattenedActionDistribution = Categorical<Int32>(logits: actionLogits)
@@ -132,8 +132,8 @@ public struct VisionAndScentActorCritic: Module {
     let outerDims = [Int](input.vision.shape.dimensions[0..<outerDimCount])
     let vision = input.vision.flattenedBatch(outerDimCount: outerDimCount)
     let scent = input.scent.flattenedBatch(outerDimCount: outerDimCount)
-    let visionHidden = leakyRelu(visionLayer(vision))
-    let scentHidden = leakyRelu(scentLayer(scent))
+    let visionHidden = selu(visionLayer(vision))
+    let scentHidden = selu(scentLayer(scent))
     let hidden = visionHidden + scentHidden
     let actionLogits = denseAction(hidden)
     let flattenedValue = denseValue(hidden)

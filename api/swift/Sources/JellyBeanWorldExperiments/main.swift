@@ -195,7 +195,7 @@ case .run:
     stepCount: stepCount,
     stepCountPerUpdate: stepCountPerUpdate,
     resultsDir: resultsDir)
-  try! experiment.run(writeFrequency: 100, logFrequency: 100000)
+  try! experiment.run(writeFrequency: 100, logFrequency: 1000)
 case .plot:
   let resultsPlotter = ResultsPlot(
     reward: reward,

@@ -177,8 +177,8 @@ extension Line {
         buffer.append(y[j])
         j -= 1
       }
-      let interval = x[i] - (j >= 0 ? x[j] : 0.0)
-      yMovingAverage.append(buffer.sum / interval)
+      // TODO: let interval = x[i] - (j >= 0 ? x[j] : 0.0)
+      yMovingAverage.append(buffer.sum / period)
     }
     return Line(x: x, y: yMovingAverage)
   }
