@@ -82,7 +82,7 @@ public func simulatorConfiguration(randomSeed: UInt32) -> Simulator.Configuratio
     patchSize: 32,
     mcmcIterations: 4000,
     items: [banana, onion, jellyBean, wall],
-    agentColor: [0.0, 0.0, 1.0],
+    agentColor: [0.0, 0.0, 0.0],
     moveConflictPolicy: .firstComeFirstServe,
     scentDecay: 0.4,
     scentDiffusion: 0.14,

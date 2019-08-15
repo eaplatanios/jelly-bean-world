@@ -81,8 +81,8 @@ public struct Experiment {
     var environment = try JellyBeanWorld.Environment(
       configurations: configurations,
       parallelizedBatchProcessing: batchSize > 1)
+    var totalReward = Float(0.0)
     var rewardWriteDeque = Deque<Float>(size: writeFrequency)
-    var rewardLogDeque = Deque<Float>(size: logFrequency)
     try withRandomSeedForTensorFlow((Int32(runID), Int32(runID))) {
       var agent = self.agent.create(
         in: environment,
@@ -99,15 +99,15 @@ public struct Experiment {
           maxSteps: stepCountPerUpdate * batchSize,
           callbacks: [{ (environment, trajectory) in
             let reward = trajectory.reward.mean().scalarized()
+            totalReward += reward
             rewardWriteDeque.push(reward)
-            rewardLogDeque.push(reward)
+            if environmentStep % logFrequency == 0 {
+              let rewardRate = totalReward / Float(environmentStep)
+              logger.info("Step: \(environmentStep) | Reward Rate: \(rewardRate)/s")
+            }
             if environmentStep % writeFrequency == 0 {
               let reward = rewardWriteDeque.sum()
               resultsFileHandle?.write("\(environmentStep)\t\(reward)\n".data(using: .utf8)!)
-            }
-            if environmentStep % logFrequency == 0 {
-              let rewardRate = rewardLogDeque.mean()
-              logger.info("Step: \(environmentStep) | Reward Rate: \(rewardRate)/s")
             }
             environmentStep += 1
           }])
@@ -131,12 +131,11 @@ extension JellyBeanWorldExperiments.Agent {
     network: Network,
     observation: Observation,
     batchSize: Int
-   ) -> AnyAgent<JellyBeanWorld.Environment, LSTMState<Float>> {
+   ) -> AnyAgent<JellyBeanWorld.Environment, LSTMCell<Float>.State> {
     let learningRate = ExponentiallyDecayedLearningRate(
       baseLearningRate: FixedLearningRate(Float(1e-4)),
       decayRate: 0.999,
-      decayStepCount: 1,
-      lowerBound: 1e-6)
+      decayStepCount: 1)
     let advantageFunction = GeneralizedAdvantageEstimation(
       discountFactor: 0.99,
       discountWeight: 0.95)
