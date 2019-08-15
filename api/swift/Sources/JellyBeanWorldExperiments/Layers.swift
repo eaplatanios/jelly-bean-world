@@ -21,6 +21,7 @@ public struct VisionLayer: Layer {
   public var conv2: Conv2D<Float>
   public var dense: Dense<Float>
 
+  @inlinable
   public init(outputSize: Int) {
     conv1 = Conv2D<Float>(filterShape: (3, 3, 3, 16), strides: (2, 2))
     conv2 = Conv2D<Float>(filterShape: (2, 2, 16, 16), strides: (1, 1))
@@ -40,6 +41,7 @@ public struct ScentLayer: Layer {
   public var dense1: Dense<Float>
   public var dense2: Dense<Float>
 
+  @inlinable
   public init(outputSize: Int) {
     dense1 = Dense<Float>(inputSize: 3, outputSize: 32)
     dense2 = Dense<Float>(inputSize: 32, outputSize: outputSize)
@@ -56,15 +58,18 @@ public struct LSTMCell<Scalar: TensorFlowFloatingPoint>: Layer {
   public var inputWeight, updateWeight, forgetWeight, outputWeight: Tensor<Scalar>
   public var inputBias, updateBias, forgetBias, outputBias: Tensor<Scalar>
 
+  @inlinable
   public func stateShape(batchSize: Int) -> TensorShape {
     TensorShape([batchSize, inputWeight.shape[1]])
   }
 
+  @inlinable
   public func zeroState(batchSize: Int) -> LSTMState<Scalar> {
     let stateShape = self.stateShape(batchSize: batchSize)
     return LSTMState(cell: Tensor(zeros: stateShape), hidden: Tensor(zeros: stateShape))
   }
 
+  @inlinable
   public init(
     inputSize: Int,
     hiddenSize: Int,
@@ -83,6 +88,7 @@ public struct LSTMCell<Scalar: TensorFlowFloatingPoint>: Layer {
     self.outputBias = Tensor(zeros: gateBiasShape)
   }
 
+  @inlinable
   @differentiable
   public func callAsFunction(_ input: LSTMValue<Scalar>) -> LSTMValue<Scalar> {
     let gateInput = input.value.concatenated(with: input.state.hidden, alongAxis: 1)
@@ -127,15 +133,17 @@ public struct VisionActorCritic: Module {
   public var denseAction: Dense<Float>
   public var denseValue: Dense<Float>
 
+  @inlinable
   public func initialState(batchSize: Int) -> LSTMState<Float> {
     hiddenLSTMCell.zeroState(batchSize: batchSize)
   }
 
+  @inlinable
   public init(hiddenSize: Int = 64) {
     visionLayer = VisionLayer(outputSize: hiddenSize)
     hiddenLSTMCell = LSTMCell<Float>(inputSize: hiddenSize, hiddenSize: hiddenSize)
-    denseAction = Dense<Float>(inputSize: hiddenSize, outputSize: 3)
-    denseValue = Dense<Float>(inputSize: hiddenSize, outputSize: 1)
+    denseAction = Dense<Float>(inputSize: 2 * hiddenSize, outputSize: 3)
+    denseValue = Dense<Float>(inputSize: 2 * hiddenSize, outputSize: 1)
   }
 
   @inlinable
@@ -150,8 +158,9 @@ public struct VisionActorCritic: Module {
     let hidden = selu(visionLayer(vision))
     let state = withoutDerivative(at: input.state).flattenedBatch(outerDimCount: outerDimCount)
     let hiddenLSTMOutput = hiddenLSTMCell(LSTMValue<Float>(value: hidden, state: state))
-    let actionLogits = denseAction(hiddenLSTMOutput.value)
-    let flattenedValue = denseValue(hiddenLSTMOutput.value)
+    let hiddenConcatenated = hidden.concatenated(with: hiddenLSTMOutput.value, alongAxis: -1)
+    let actionLogits = denseAction(hiddenConcatenated)
+    let flattenedValue = denseValue(hiddenConcatenated)
     let flattenedActionDistribution = Categorical<Int32>(logits: actionLogits)
     return ActorCriticOutput(
       actionDistribution: flattenedActionDistribution.unflattenedBatch(outerDims: outerDims),
@@ -166,15 +175,17 @@ public struct ScentActorCritic: Module {
   public var denseAction: Dense<Float>
   public var denseValue: Dense<Float>
 
+  @inlinable
   public func initialState(batchSize: Int) -> LSTMState<Float> {
     hiddenLSTMCell.zeroState(batchSize: batchSize)
   }
 
+  @inlinable
   public init(hiddenSize: Int = 64) {
     scentLayer = ScentLayer(outputSize: hiddenSize)
     hiddenLSTMCell = LSTMCell<Float>(inputSize: hiddenSize, hiddenSize: hiddenSize)
-    denseAction = Dense<Float>(inputSize: hiddenSize, outputSize: 3)
-    denseValue = Dense<Float>(inputSize: hiddenSize, outputSize: 1)
+    denseAction = Dense<Float>(inputSize: 2 * hiddenSize, outputSize: 3)
+    denseValue = Dense<Float>(inputSize: 2 * hiddenSize, outputSize: 1)
   }
 
   @inlinable
@@ -189,8 +200,9 @@ public struct ScentActorCritic: Module {
     let hidden = selu(scentLayer(scent))
     let state = withoutDerivative(at: input.state).flattenedBatch(outerDimCount: outerDimCount)
     let hiddenLSTMOutput = hiddenLSTMCell(LSTMValue<Float>(value: hidden, state: state))
-    let actionLogits = denseAction(hiddenLSTMOutput.value)
-    let flattenedValue = denseValue(hiddenLSTMOutput.value)
+    let hiddenConcatenated = hidden.concatenated(with: hiddenLSTMOutput.value, alongAxis: -1)
+    let actionLogits = denseAction(hiddenConcatenated)
+    let flattenedValue = denseValue(hiddenConcatenated)
     let flattenedActionDistribution = Categorical<Int32>(logits: actionLogits)
     return ActorCriticOutput(
       actionDistribution: flattenedActionDistribution.unflattenedBatch(outerDims: outerDims),
@@ -206,16 +218,18 @@ public struct VisionAndScentActorCritic: Module {
   public var denseAction: Dense<Float>
   public var denseValue: Dense<Float>
 
+  @inlinable
   public func initialState(batchSize: Int) -> LSTMState<Float> {
     hiddenLSTMCell.zeroState(batchSize: batchSize)
   }
 
+  @inlinable
   public init(hiddenSize: Int = 64) {
     visionLayer = VisionLayer(outputSize: hiddenSize)
     scentLayer = ScentLayer(outputSize: hiddenSize)
-    hiddenLSTMCell = LSTMCell<Float>(inputSize: hiddenSize, hiddenSize: hiddenSize)
-    denseAction = Dense<Float>(inputSize: hiddenSize, outputSize: 3)
-    denseValue = Dense<Float>(inputSize: hiddenSize, outputSize: 1)
+    hiddenLSTMCell = LSTMCell<Float>(inputSize: 2 * hiddenSize, hiddenSize: hiddenSize)
+    denseAction = Dense<Float>(inputSize: 3 * hiddenSize, outputSize: 3)
+    denseValue = Dense<Float>(inputSize: 3 * hiddenSize, outputSize: 1)
   }
 
   @inlinable
@@ -230,11 +244,12 @@ public struct VisionAndScentActorCritic: Module {
     let scent = observation.scent.flattenedBatch(outerDimCount: outerDimCount)
     let visionHidden = selu(visionLayer(vision))
     let scentHidden = selu(scentLayer(scent))
-    let hidden = visionHidden + scentHidden
+    let hidden = visionHidden.concatenated(with: scentHidden, alongAxis: -1)
     let state = withoutDerivative(at: input.state).flattenedBatch(outerDimCount: outerDimCount)
     let hiddenLSTMOutput = hiddenLSTMCell(LSTMValue<Float>(value: hidden, state: state))
-    let actionLogits = denseAction(hiddenLSTMOutput.value)
-    let flattenedValue = denseValue(hiddenLSTMOutput.value)
+    let hiddenConcatenated = hidden.concatenated(with: hiddenLSTMOutput.value, alongAxis: -1)
+    let actionLogits = denseAction(hiddenConcatenated)
+    let flattenedValue = denseValue(hiddenConcatenated)
     let flattenedActionDistribution = Categorical<Int32>(logits: actionLogits)
     return ActorCriticOutput(
       actionDistribution: flattenedActionDistribution.unflattenedBatch(outerDims: outerDims),

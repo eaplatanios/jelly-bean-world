@@ -153,7 +153,7 @@ extension JellyBeanWorldExperiments.Agent {
         for: environment,
         network: network,
         initialState: network.initialState(batchSize: batchSize),
-        optimizer: AMSGrad(for: network),
+        optimizer: { AMSGrad(for: $0) },
         learningRate: learningRate,
         advantageFunction: advantageFunction,
         advantagesNormalizer: nil,
@@ -162,14 +162,14 @@ extension JellyBeanWorldExperiments.Agent {
         penalty: ppoPenalty,
         valueEstimationLoss: ppoValueEstimationLoss,
         entropyRegularization: ppoEntropyRegularization,
-        iterationCountPerUpdate: 1))
+        iterationCountPerUpdate: 4))
     case (.ppo, .plain, .scent):
       let network = ScentActorCritic()
       return AnyAgent(PPOAgent(
         for: environment,
         network: network,
         initialState: network.initialState(batchSize: batchSize),
-        optimizer: AMSGrad(for: network),
+        optimizer: { AMSGrad(for: $0) },
         learningRate: learningRate,
         advantageFunction: advantageFunction,
         advantagesNormalizer: nil,
@@ -178,14 +178,14 @@ extension JellyBeanWorldExperiments.Agent {
         penalty: ppoPenalty,
         valueEstimationLoss: ppoValueEstimationLoss,
         entropyRegularization: ppoEntropyRegularization,
-        iterationCountPerUpdate: 1))
+        iterationCountPerUpdate: 4))
     case (.ppo, .plain, .visionAndScent):
       let network = VisionAndScentActorCritic()
       return AnyAgent(PPOAgent(
         for: environment,
         network: network,
         initialState: network.initialState(batchSize: batchSize),
-        optimizer: AMSGrad(for: network),
+        optimizer: { AMSGrad(for: $0) },
         learningRate: learningRate,
         advantageFunction: advantageFunction,
         advantagesNormalizer: nil,
@@ -194,7 +194,7 @@ extension JellyBeanWorldExperiments.Agent {
         penalty: ppoPenalty,
         valueEstimationLoss: ppoValueEstimationLoss,
         entropyRegularization: ppoEntropyRegularization,
-        iterationCountPerUpdate: 1))
+        iterationCountPerUpdate: 4))
     case (.ppo, .contextual, _): fatalError("Not supported yet.")
     case (.dqn, _, _): fatalError("Not supported yet.")
     }

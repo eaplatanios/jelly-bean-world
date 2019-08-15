@@ -179,7 +179,7 @@ guard let reward = parsedArguments.get(rewardArg) else { throw Error.invalidArgu
 guard let agent = parsedArguments.get(agentArg) else { throw Error.invalidArgument }
 let batchSize = parsedArguments.get(batchSizeArg) ?? 32
 let stepCount = parsedArguments.get(stepCountArg) ?? 10_000_000
-let stepCountPerUpdate = parsedArguments.get(stepCountPerUpdateArg) ?? 128
+let stepCountPerUpdate = parsedArguments.get(stepCountPerUpdateArg) ?? 512
 let rewardRatePeriod = parsedArguments.get(rewardRatePeriodArg) ?? 100_000
 
 switch parsedArguments.get(commandArg) {
