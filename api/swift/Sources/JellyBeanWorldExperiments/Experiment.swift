@@ -132,13 +132,14 @@ extension JellyBeanWorldExperiments.Agent {
     observation: Observation,
     batchSize: Int
    ) -> AnyAgent<JellyBeanWorld.Environment, LSTMCell<Float>.State> {
-    let learningRate = ExponentiallyDecayedLearningRate(
-      baseLearningRate: FixedLearningRate(Float(1e-4)),
-      decayRate: 0.999,
-      decayStepCount: 1)
+    // let learningRate = ExponentiallyDecayedLearningRate(
+    //   baseLearningRate: FixedLearningRate(Float(1e-4)),
+    //   decayRate: 0.999,
+    //   decayStepCount: 1)
+    let learningRate = FixedLearningRate(Float(1e-4))
     let advantageFunction = GeneralizedAdvantageEstimation(
       discountFactor: 0.99,
-      discountWeight: 0.95)
+      discountWeight: 0.9)
     let ppoClip = PPOClip(epsilon: 0.1)
     let ppoPenalty = PPOPenalty(klCutoffFactor: 0.5)
     let ppoValueEstimationLoss = PPOValueEstimationLoss(weight: 0.5, clipThreshold: 0.1)
@@ -154,6 +155,7 @@ extension JellyBeanWorldExperiments.Agent {
         initialState: network.initialState(batchSize: batchSize),
         optimizer: { AMSGrad(for: $0) },
         learningRate: learningRate,
+        maxGradientNorm: 0.5,
         advantageFunction: advantageFunction,
         advantagesNormalizer: nil,
         useTDLambdaReturn: true,
@@ -170,6 +172,7 @@ extension JellyBeanWorldExperiments.Agent {
         initialState: network.initialState(batchSize: batchSize),
         optimizer: { AMSGrad(for: $0) },
         learningRate: learningRate,
+        maxGradientNorm: 0.5,
         advantageFunction: advantageFunction,
         advantagesNormalizer: nil,
         useTDLambdaReturn: true,
@@ -186,6 +189,7 @@ extension JellyBeanWorldExperiments.Agent {
         initialState: network.initialState(batchSize: batchSize),
         optimizer: { AMSGrad(for: $0) },
         learningRate: learningRate,
+        maxGradientNorm: 0.5,
         advantageFunction: advantageFunction,
         advantagesNormalizer: nil,
         useTDLambdaReturn: true,
