@@ -407,7 +407,7 @@ TODOs:
 - [x] 2.5. Add support for obtaining list of agents from simulator and specific agent positions/states.
 - [x] 3. Visualizer should connect to a simulation server (add CLI support for starting the visualizer).
 - [x] 4. White boundary?
-- [ ] 4.5. Black background outside the map (option or default or whatever).
+- [x] 4.5. Black background outside the map (option or default or whatever).
 - [x] 5. Resize window.
 - [x] 6. Zoom/movement.
 - [x] 7. Default to tracking agent 0 (agent always in the center of the window).
@@ -415,8 +415,13 @@ TODOs:
 
 - [ ] Per-client permissions.
 
-Example for running a Swift experiment:
+Example command for running a Swift experiment:
 ```bash
-swift run -c release JellyBeanWorldExperiments --reward collectJellyBeans --agent ppo --observation vision --network plain
+swift run -c release JellyBeanWorldExperiments run --reward collectJellyBeans --agent ppo --observation vision --network plain
+```
+
+Example command for plotting experiment results:
+```bash
+swift run -c release JellyBeanWorldExperiments plot --reward collectJellyBeans --agent ppo
 ```
 -->

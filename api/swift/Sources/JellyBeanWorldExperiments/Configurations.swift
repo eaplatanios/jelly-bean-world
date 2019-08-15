@@ -69,20 +69,22 @@ public let wall = Item(
     interactionFns: [
       .cross(itemId: 3, 10.0, 15.0, 20.0, -200.0, -20.0, 1.0)]))
 
-public let simulatorConfiguration = Simulator.Configuration(
-  randomSeed: 1234567890,
-  maxStepsPerMove: 1,
-  scentDimensionality: 3,
-  colorDimensionality: 3,
-  visionRange: 5,
-  movePolicies: [.up: .allowed],
-  turnPolicies: [.left: .allowed, .right: .allowed],
-  noOpAllowed: false,
-  patchSize: 32,
-  mcmcIterations: 4000,
-  items: [banana, onion, jellyBean, wall],
-  agentColor: [0.0, 0.0, 1.0],
-  moveConflictPolicy: .firstComeFirstServe,
-  scentDecay: 0.4,
-  scentDiffusion: 0.14,
-  removedItemLifetime: 2000)
+public func simulatorConfiguration(randomSeed: UInt32) -> Simulator.Configuration {
+  Simulator.Configuration(
+    randomSeed: randomSeed,
+    maxStepsPerMove: 1,
+    scentDimensionality: 3,
+    colorDimensionality: 3,
+    visionRange: 5,
+    movePolicies: [.up: .allowed],
+    turnPolicies: [.left: .allowed, .right: .allowed],
+    noOpAllowed: false,
+    patchSize: 32,
+    mcmcIterations: 4000,
+    items: [banana, onion, jellyBean, wall],
+    agentColor: [0.0, 0.0, 1.0],
+    moveConflictPolicy: .firstComeFirstServe,
+    scentDecay: 0.4,
+    scentDiffusion: 0.14,
+    removedItemLifetime: 2000)
+}

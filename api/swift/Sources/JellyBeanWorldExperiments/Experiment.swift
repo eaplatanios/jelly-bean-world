@@ -25,6 +25,8 @@ public struct Experiment {
   public let batchSize: Int
   public let stepCount: Int
   public let stepCountPerUpdate: Int
+  public let runID: Int
+  public let resultsFile: URL
 
   public init(
     reward: Reward,
@@ -33,8 +35,9 @@ public struct Experiment {
     network: Network,
     batchSize: Int,
     stepCount: Int,
-    stepCountPerUpdate: Int
-  ) {
+    stepCountPerUpdate: Int,
+    resultsDir: URL
+  ) throws {
     self.reward = reward
     self.agent = agent
     self.observation = observation
@@ -42,53 +45,74 @@ public struct Experiment {
     self.batchSize = batchSize
     self.stepCount = stepCount
     self.stepCountPerUpdate = stepCountPerUpdate
+    
+    // Create the results file.
+    let resultsDir = resultsDir
+      .appendingPathComponent(reward.description)
+      .appendingPathComponent(agent.description)
+      .appendingPathComponent(observation.description)
+      .appendingPathComponent(network.description)
+    if !FileManager.default.fileExists(atPath: resultsDir.path) {
+      try FileManager.default.createDirectory(
+        at: resultsDir,
+        withIntermediateDirectories: true)
+    }
+    let runIDs = try FileManager.default.contentsOfDirectory(
+      at: resultsDir,
+      includingPropertiesForKeys: nil
+    ).filter { $0.pathExtension == "tsv" } .compactMap {
+      Int($0.deletingPathExtension().lastPathComponent)
+    }
+    var runID = 0
+    while runIDs.contains(runID) { runID += 1 }
+    self.runID = runID
+    self.resultsFile = resultsDir.appendingPathComponent("\(runID).tsv")
+    FileManager.default.createFile(
+      atPath: self.resultsFile.path,
+      contents: "step\treward\n".data(using: .utf8))
   }
 
-  public func run(
-    resultsFile: URL? = nil,
-    writeFrequency: Int = 100,
-    logFrequency: Int = 1000
-  ) throws {
+  public func run(writeFrequency: Int = 100, logFrequency: Int = 1000) throws {
     let configurations = (0..<batchSize).map { _ in
       JellyBeanWorld.Environment.Configuration(
-        simulatorConfiguration: simulatorConfiguration,
+        simulatorConfiguration: simulatorConfiguration(randomSeed: UInt32(runID)),
         rewardSchedule: reward.schedule)
     }
-    var environment = try JellyBeanWorld.Environment(configurations: configurations)
-    var totalCumulativeReward = TotalCumulativeReward(for: environment)
-    var agent = self.agent.create(in: environment, network: network, observation: observation)
-    let resultsFileHandle: FileHandle? = {
-      if let file = resultsFile {
-        return try? FileHandle(forWritingTo: file)
+    var environment = try JellyBeanWorld.Environment(
+      configurations: configurations,
+      parallelizedBatchProcessing: batchSize > 1)
+    var rewardWriteDeque = Deque<Float>(size: writeFrequency)
+    var rewardLogDeque = Deque<Float>(size: logFrequency)
+    try withRandomSeedForTensorFlow((Int32(runID), Int32(runID))) {
+      var agent = self.agent.create(
+        in: environment,
+        network: network,
+        observation: observation,
+        batchSize: batchSize)
+      let resultsFileHandle = try? FileHandle(forWritingTo: resultsFile)
+      defer { resultsFileHandle?.closeFile() }
+      resultsFileHandle?.seekToEndOfFile()
+      var environmentStep = 0
+      for _ in 0..<(stepCount / stepCountPerUpdate) {
+        try agent.update(
+          using: &environment,
+          maxSteps: stepCountPerUpdate * batchSize,
+          callbacks: [{ (environment, trajectory) in
+            let reward = trajectory.reward.mean().scalarized()
+            rewardWriteDeque.push(reward)
+            rewardLogDeque.push(reward)
+            if environmentStep % writeFrequency == 0 {
+              let reward = rewardWriteDeque.sum()
+              resultsFileHandle?.write("\(environmentStep)\t\(reward)\n".data(using: .utf8)!)
+            }
+            if environmentStep % logFrequency == 0 {
+              let rewardRate = rewardLogDeque.mean()
+              logger.info("Step: \(environmentStep) | Reward Rate: \(rewardRate)/s")
+            }
+            environmentStep += 1
+          }])
       }
-      return nil
-    }()
-    resultsFileHandle?.seekToEndOfFile()
-    var environmentStep = 0
-    var accumulatedValue = Float(0.0)
-    for _ in 0..<(stepCount / stepCountPerUpdate) {
-      try agent.update(
-        using: &environment,
-        maxSteps: stepCountPerUpdate * batchSize,
-        callbacks: [{ (environment, trajectory) in
-          if environmentStep % writeFrequency == 0 {
-            let reward = accumulatedValue / Float(writeFrequency)
-            resultsFileHandle?.write("\(environmentStep)\t\(reward)\n".data(using: .utf8)!)
-            accumulatedValue = Float(0.0)
-          }
-          if environmentStep % logFrequency == 0 {
-            let rewards = totalCumulativeReward.value()
-            let rewardRate = environmentStep == 0 ?
-              0.0 :
-              rewards.reduce(0, +) / Float(environmentStep * 1000 * rewards.count)
-            logger.info("Step: \(environmentStep) | Reward Rate: \(rewardRate)/s")
-          }
-          totalCumulativeReward.update(using: trajectory)
-          environmentStep += 1
-          accumulatedValue += trajectory.reward.mean().scalarized()
-        }])
     }
-    resultsFileHandle?.closeFile()
   }
 }
 
@@ -105,9 +129,14 @@ extension JellyBeanWorldExperiments.Agent {
   public func create(
     in environment: JellyBeanWorld.Environment,
     network: Network,
-    observation: Observation
-   ) -> AnyAgent<JellyBeanWorld.Environment> {
-    let learningRate = FixedLearningRate(Float(1e-4))
+    observation: Observation,
+    batchSize: Int
+   ) -> AnyAgent<JellyBeanWorld.Environment, LSTMState<Float>> {
+    let learningRate = ExponentiallyDecayedLearningRate(
+      baseLearningRate: FixedLearningRate(Float(1e-4)),
+      decayRate: 0.999,
+      decayStepCount: 1,
+      lowerBound: 1e-6)
     let advantageFunction = GeneralizedAdvantageEstimation(
       discountFactor: 0.99,
       discountWeight: 0.95)
@@ -123,6 +152,7 @@ extension JellyBeanWorldExperiments.Agent {
       return AnyAgent(PPOAgent(
         for: environment,
         network: network,
+        initialState: network.initialState(batchSize: batchSize),
         optimizer: AMSGrad(for: network),
         learningRate: learningRate,
         advantageFunction: advantageFunction,
@@ -138,6 +168,7 @@ extension JellyBeanWorldExperiments.Agent {
       return AnyAgent(PPOAgent(
         for: environment,
         network: network,
+        initialState: network.initialState(batchSize: batchSize),
         optimizer: AMSGrad(for: network),
         learningRate: learningRate,
         advantageFunction: advantageFunction,
@@ -153,6 +184,7 @@ extension JellyBeanWorldExperiments.Agent {
       return AnyAgent(PPOAgent(
         for: environment,
         network: network,
+        initialState: network.initialState(batchSize: batchSize),
         optimizer: AMSGrad(for: network),
         learningRate: learningRate,
         advantageFunction: advantageFunction,

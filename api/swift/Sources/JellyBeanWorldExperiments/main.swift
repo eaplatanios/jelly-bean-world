@@ -21,10 +21,23 @@ import SPMUtility
 let logger = Logger(label: "Jelly Bean World Experiment")
 
 public enum Error: Swift.Error {
-  case invalidArgument
+  case invalidCommand, invalidArgument
 }
 
-public enum Reward: String, CustomStringConvertible {
+public enum Command: String {
+  case run, plot
+}
+
+extension Command: StringEnumArgument {
+  public static var completion: ShellCompletion {
+    return .values([
+      (Command.run.rawValue, "Runs a Jelly Bean World experiment."),
+      (Command.plot.rawValue, "Plots the results of previously run Jelly Bean World experiments.")
+    ])
+  }
+}
+
+public enum Reward: String, CaseIterable, CustomStringConvertible {
   case collectJellyBeans
 
   public var description: String {
@@ -42,7 +55,7 @@ extension Reward: StringEnumArgument {
   }
 }
 
-public enum Agent: String, CustomStringConvertible {
+public enum Agent: String, CaseIterable, CustomStringConvertible {
   case reinforce, a2c, ppo, dqn
 
   public var description: String {
@@ -66,7 +79,7 @@ extension Agent: StringEnumArgument {
   }
 }
 
-public enum Observation: String, CustomStringConvertible {
+public enum Observation: String, CaseIterable, CustomStringConvertible {
   case vision, scent, visionAndScent
 
   public var description: String {
@@ -88,7 +101,7 @@ extension Observation: StringEnumArgument {
   }
 }
 
-public enum Network: String, CustomStringConvertible {
+public enum Network: String, CaseIterable, CustomStringConvertible {
   case plain, contextual
 
   public var description: String {
@@ -111,6 +124,10 @@ extension Network: StringEnumArgument {
 let parser = ArgumentParser(
   usage: "<options>",
   overview: "This executable can be used to run Jelly Bean World experiments.")
+let commandArg: PositionalArgument<Command> = parser.add(
+  positional: "command",
+  kind: Command.self,
+  usage: "Experiment command to invoke. Can be one of: `run` and `plot`.")
 let rewardArg: OptionArgument<Reward> = parser.add(
   option: "--reward",
   kind: Reward.self,
@@ -132,25 +149,27 @@ let batchSizeArg: OptionArgument<Int> = parser.add(
   kind: Int.self,
   usage: "Batch size to use for the experiments. Defaults to 32.")
 let stepCountArg: OptionArgument<Int> = parser.add(
-  option: "--step-count-per-update",
+  option: "--step-count",
   kind: Int.self,
-  usage: "Total number of steps to run. Defaults to 1000000.")
+  usage: "Total number of steps to run. Defaults to `10_000_000`.")
 let stepCountPerUpdateArg: OptionArgument<Int> = parser.add(
   option: "--step-count-per-update",
   kind: Int.self,
   usage: "Number of steps between model updates. Defaults to 128.")
+let rewardRatePeriodArg: OptionArgument<Int> = parser.add(
+  option: "--reward-rate-period",
+  kind: Int.self,
+  usage: "Moving average period used when computing the reward rate. Defaults to `100_000`.")
 let resultsDirArg: OptionArgument<PathArgument> = parser.add(
   option: "--results-dir",
   kind: PathArgument.self,
   usage: "Path to the results directory.")
 
-let fileManager = FileManager.default
-
 // The first argument is always the executable, and so we drop it.
 let arguments = Array(ProcessInfo.processInfo.arguments.dropFirst())
 let parsedArguments = try parser.parse(arguments)
-let currentDir = URL(fileURLWithPath: fileManager.currentDirectoryPath)
-var resultsDir: Foundation.URL = {
+let currentDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+let resultsDir: Foundation.URL = {
   if let argument = parsedArguments.get(resultsDirArg) {
     return URL(fileURLWithPath: argument.path.pathString)
   }
@@ -158,38 +177,33 @@ var resultsDir: Foundation.URL = {
 }()
 guard let reward = parsedArguments.get(rewardArg) else { throw Error.invalidArgument }
 guard let agent = parsedArguments.get(agentArg) else { throw Error.invalidArgument }
-guard let observation = parsedArguments.get(observationArg) else { throw Error.invalidArgument }
-guard let network = parsedArguments.get(networkArg) else { throw Error.invalidArgument }
 let batchSize = parsedArguments.get(batchSizeArg) ?? 32
-let stepCount = parsedArguments.get(stepCountArg) ?? 1000000
+let stepCount = parsedArguments.get(stepCountArg) ?? 10_000_000
 let stepCountPerUpdate = parsedArguments.get(stepCountPerUpdateArg) ?? 128
+let rewardRatePeriod = parsedArguments.get(rewardRatePeriodArg) ?? 100_000
 
-// Create the results file.
-resultsDir = resultsDir
-  .appendingPathComponent(reward.description)
-  .appendingPathComponent(agent.description)
-  .appendingPathComponent(observation.description)
-  .appendingPathComponent(network.description)
-if !fileManager.fileExists(atPath: resultsDir.path) {
-  try fileManager.createDirectory(
-    at: resultsDir,
-    withIntermediateDirectories: true)
+switch parsedArguments.get(commandArg) {
+case .run:
+  guard let observation = parsedArguments.get(observationArg) else { throw Error.invalidArgument }
+  guard let network = parsedArguments.get(networkArg) else { throw Error.invalidArgument }
+  let experiment = try! Experiment(
+    reward: reward,
+    agent: agent,
+    observation: observation,
+    network: network,
+    batchSize: batchSize,
+    stepCount: stepCount,
+    stepCountPerUpdate: stepCountPerUpdate,
+    resultsDir: resultsDir)
+  try! experiment.run(writeFrequency: 100, logFrequency: 1000)
+case .plot:
+  let resultsPlotter = ResultsPlot(
+    reward: reward,
+    agent: agent,
+    observations: [Observation](Observation.allCases),
+    networks: [Network](Network.allCases),
+    rewardRatePeriod: rewardRatePeriod,
+    resultsDir: resultsDir)
+  try! resultsPlotter.plot()
+case _: throw Error.invalidCommand
 }
-let runIDs = try fileManager.contentsOfDirectory(at: resultsDir, includingPropertiesForKeys: nil)
-  .filter { $0.pathExtension == "tsv" }
-  .compactMap { Int($0.deletingPathExtension().lastPathComponent) }
-var runID = 0
-while runIDs.contains(runID) { runID += 1 }
-let resultsFile = resultsDir.appendingPathComponent("\(runID).tsv")
-fileManager.createFile(atPath: resultsFile.path, contents: "step\treward\n".data(using: .utf8))
-
-// Run the experiment.
-let experiment = Experiment(
-  reward: reward,
-  agent: agent,
-  observation: observation,
-  network: network,
-  batchSize: batchSize,
-  stepCount: stepCount,
-  stepCountPerUpdate: stepCountPerUpdate)
-try! experiment.run(resultsFile: resultsFile, writeFrequency: 100, logFrequency: 1000)

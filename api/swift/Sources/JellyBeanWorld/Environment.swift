@@ -21,19 +21,26 @@ public struct Environment: ReinforcementLearning.Environment {
   public let configurations: [Configuration]
   public let actionSpace: Discrete
   public let observationSpace: ObservationSpace
+  public let parallelizedBatchProcessing: Bool
 
   @usableFromInline internal var states: [State]
   @usableFromInline internal var step: Step<Observation, Tensor<Float>>
 
   @inlinable public var currentStep: Step<Observation, Tensor<Float>> { step }
 
+  /// Dispatch queue used to synchronize updates on mutable shared objects when using parallelized
+  /// batch processing.
+  @usableFromInline internal let dispatchQueue: DispatchQueue =
+    DispatchQueue(label: "Jelly Bean World Environment")
+
   @inlinable
-  public init(configurations: [Configuration]) throws {
+  public init(configurations: [Configuration], parallelizedBatchProcessing: Bool = true) throws {
     let batchSize = configurations.count
     self.batchSize = batchSize
     self.configurations = configurations
     self.actionSpace = Discrete(withSize: 3, batchSize: batchSize)
     self.observationSpace = ObservationSpace(batchSize: batchSize)
+    self.parallelizedBatchProcessing = parallelizedBatchProcessing
     self.states = try configurations.map { configuration -> State in
       let simulator = try Simulator(using: configuration.simulatorConfiguration)
       let agent = Agent()
@@ -55,31 +62,55 @@ public struct Environment: ReinforcementLearning.Environment {
       reward: Tensor<Float>(zeros: [batchSize]))
   }
 
-  /// Updates the environment according to the provided action.
+  /// Performs a step in this environment using the provided action and returns information about
+  /// the performed step.
   @inlinable
   @discardableResult
   public mutating func step(
     taking action: Tensor<Int32>
   ) throws -> Step<Observation, Tensor<Float>> {
     let actions = action.unstacked()
-    step = Step<Observation, Tensor<Float>>.stack(try states.indices.map { i in
-      let previousAgentState = states[i].simulator.agentStates.values.first!
-      states[i].agent.nextAction = Int(actions[i].scalarized())
-      try states[i].simulator.step()
-      let agentState = states[i].simulator.agentStates.values.first!
-      let rewardFunction = configurations[i].rewardSchedule.reward(
-        forStep: states[i].simulator.time)
-      let observation = Observation(
-        vision: Tensor<Float>(agentState.vision),
-        scent: Tensor<Float>(agentState.scent),
-        moved: Tensor<Bool>(agentState.position != previousAgentState.position),
-        rewardFunction: rewardFunction)
-      let reward = Tensor<Float>(rewardFunction(for: AgentTransition(
-        previousState: previousAgentState,
-        currentState: agentState)))
-      return Step(kind: StepKind.transition(), observation: observation, reward: reward)
+
+    // Check if we need to use the parallelized version.
+    if parallelizedBatchProcessing {
+      var steps = [Step<Observation, Tensor<Float>>?](repeating: nil, count: batchSize)
+      DispatchQueue.concurrentPerform(iterations: batchSize) { batchIndex in
+        // TODO: What if self.step throws?
+        let step = try! self.step(taking: actions[batchIndex], batchIndex: batchIndex)
+        dispatchQueue.sync { steps[batchIndex] = step }
+      }
+      step = Step<Observation, Tensor<Float>>.stack(steps.map { $0! })
+      return step
+    }
+
+    step = Step<Observation, Tensor<Float>>.stack(try (0..<batchSize).map { batchIndex in
+      try self.step(taking: actions[batchIndex], batchIndex: batchIndex)
     })
     return step
+  }
+
+  /// Performs a step in this environment for the specified batch index, using the provided action,
+  /// and returns information about the performed step.
+  @inlinable
+  internal mutating func step(
+    taking action: Tensor<Int32>,
+    batchIndex: Int
+  ) throws -> Step<Observation, Tensor<Float>> {
+    let previousAgentState = states[batchIndex].simulator.agentStates.values.first!
+    states[batchIndex].agent.nextAction = Int(action.scalarized())
+    try states[batchIndex].simulator.step()
+    let agentState = states[batchIndex].simulator.agentStates.values.first!
+    let rewardFunction = configurations[batchIndex].rewardSchedule.reward(
+      forStep: states[batchIndex].simulator.time)
+    let observation = Observation(
+      vision: Tensor<Float>(agentState.vision),
+      scent: Tensor<Float>(agentState.scent),
+      moved: Tensor<Bool>(agentState.position != previousAgentState.position),
+      rewardFunction: rewardFunction)
+    let reward = Tensor<Float>(rewardFunction(for: AgentTransition(
+      previousState: previousAgentState,
+      currentState: agentState)))
+    return Step(kind: StepKind.transition(), observation: observation, reward: reward)
   }
 
   /// Resets the environment.
