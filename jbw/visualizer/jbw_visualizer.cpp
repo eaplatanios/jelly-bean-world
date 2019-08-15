@@ -129,7 +129,6 @@ void print_controls(Stream& out) {
 		"  +/= key: Zoom in.\n"
 		"  -/_ key: Zoom out.\n"
 		"  b key:   Toggle drawing of the background grid and scent map.\n"
-		"  0 key:   Disable agent tracking.\n"
 		"  1 key:   Track agent with ID 1.\n"
 		"  2 key:   Track agent with ID 2.\n"
 		"  3 key:   Track agent with ID 3.\n"
@@ -138,7 +137,8 @@ void print_controls(Stream& out) {
 		"  6 key:   Track agent with ID 6.\n"
 		"  7 key:   Track agent with ID 7.\n"
 		"  8 key:   Track agent with ID 8.\n"
-		"  9 key:   Track agent with ID 9.\n\n");
+		"  9 key:   Track agent with ID 9.\n"
+		"  0 key:   Disable agent tracking.\n\n");
 }
 
 inline void set_interaction_args(
