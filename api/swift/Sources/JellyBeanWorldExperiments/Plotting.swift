@@ -171,19 +171,18 @@ extension Line {
   }
 
   fileprivate func movingAverage(period: Int) -> Line {
-    // TODO: This can be made much faster.
     let period = Float(period)
     var yMovingAverage = [Float]()
     yMovingAverage.reserveCapacity(y.count)
+    var sum = Float(0.0)
+    var low = 0
     for i in x.indices {
-      var buffer = [Float]()
-      var j = i
-      while j >= 0 && x[j] >= x[i] - period {
-        buffer.append(y[j])
-        j -= 1
+      sum += y[i]
+      while x[low] < x[i] - period {
+        sum -= y[low]
+        low += 1
       }
-      // TODO: let interval = x[i] - (j >= 0 ? x[j] : 0.0)
-      yMovingAverage.append(buffer.sum / period)
+      yMovingAverage.append(sum / period)
     }
     return Line(x: x, y: yMovingAverage)
   }
