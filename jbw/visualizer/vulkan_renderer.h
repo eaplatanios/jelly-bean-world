@@ -673,7 +673,7 @@ private:
 	template<size_t VertexBufferCount, size_t DescriptorSetCount, typename... DrawCallTypes>
 	inline void make_draw_calls(VkCommandBuffer command,
 			const vk_draw_call<VertexBufferCount, DescriptorSetCount>& draw,
-			const DrawCallTypes&&... draw_calls)
+			DrawCallTypes&&... draw_calls)
 	{
 		vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, draw.pipeline.pipeline);
 		if (VertexBufferCount > 0)
@@ -682,7 +682,7 @@ private:
 			vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS, draw.pipeline.layout, 0, DescriptorSetCount, draw.descriptor_sets, 0, nullptr);
 		vkCmdDraw(command, draw.vertex_count, 1, draw.first_vertex, 0);
 
-		make_draw_calls(command, draw_calls...);
+		make_draw_calls(command, std::forward<DrawCallTypes>(draw_calls)...);
 	}
 
 public:

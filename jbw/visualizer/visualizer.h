@@ -216,15 +216,16 @@ class visualizer
 	vulkan_renderer renderer;
 	shader background_vertex_shader, background_fragment_shader;
 	shader item_vertex_shader, item_fragment_shader;
+	shader visual_field_fragment_shader;
 	render_pass pass;
-	graphics_pipeline scent_map_pipeline, item_pipeline;
+	graphics_pipeline scent_map_pipeline, item_pipeline, visual_field_pipeline;
 	frame_buffer fb;
 	command_buffer cb;
-	descriptor_set_layout layout;
-	descriptor_pool pool;
-	descriptor_set set;
+	descriptor_set_layout background_layout, item_layout, visual_field_layout;
+	descriptor_pool background_ds_pool, item_ds_pool, visual_field_ds_pool;
+	descriptor_set background_ds, item_ds, visual_field_ds;
 	uniform_buffer ub;
-	dynamic_texture_image scent_map_texture;
+	dynamic_texture_image scent_map_texture, visual_field_texture;
 	sampler tex_sampler;
 	vertex_buffer scent_quad_buffer;
 	dynamic_vertex_buffer item_quad_buffer;
@@ -258,6 +259,7 @@ class visualizer
 	std::atomic_bool scene_ready;
 	float left_bound, right_bound, bottom_bound, top_bound;
 	bool render_background;
+	bool render_agent_visual_field;
 
 public:
 	std::atomic_bool running;
@@ -270,7 +272,7 @@ public:
 			semaphore(0), semaphore_signal_time(0),
 			background_binding(0, sizeof(vertex)), item_binding(0, sizeof(item_vertex)),
 			track_agent_id(track_agent_id), tracking_animating(false),
-			scene_ready(false), render_background(draw_scent_map),
+			scene_ready(false), render_background(draw_scent_map), render_agent_visual_field(true),
 			running(true)
 	{
 		semaphore_signal_period = round(1000.0f / max_steps_per_second);
@@ -374,7 +376,28 @@ public:
 		item_shader_attributes.set<1>(0, 1, attribute_type::FLOAT3, offsetof(item_vertex, color));
 		item_shader_attributes.set<2>(0, 2, attribute_type::FLOAT2, offsetof(item_vertex, tex_coord));
 
-		if (!renderer.create_vertex_buffer(scent_quad_buffer, sizeof(vertex) * 4)) {
+		fragment_shader_src = read_file<true>("visual_field_fragment_shader.spv", fragment_shader_size);
+		if (fragment_shader_src == nullptr) {
+			free(vertex_shader_src); free(fragment_shader_src);
+			renderer.delete_shader(item_vertex_shader);
+			renderer.delete_shader(item_fragment_shader);
+			renderer.delete_shader(background_vertex_shader);
+			renderer.delete_shader(background_fragment_shader);
+			glfwDestroyWindow(window); glfwTerminate();
+			throw new std::runtime_error("visualizer ERROR: Failed to load fragment shader from file.");
+		}
+
+		if (!renderer.create_shader(visual_field_fragment_shader, fragment_shader_src, fragment_shader_size)) {
+			free(vertex_shader_src); free(fragment_shader_src);
+			renderer.delete_shader(item_vertex_shader);
+			renderer.delete_shader(item_fragment_shader);
+			renderer.delete_shader(background_vertex_shader);
+			renderer.delete_shader(background_fragment_shader);
+			glfwDestroyWindow(window); glfwTerminate();
+			throw new std::runtime_error("visualizer ERROR: Failed to create fragment shader.");
+		}
+
+		if (!renderer.create_vertex_buffer(scent_quad_buffer, sizeof(vertex) * 8)) {
 			renderer.delete_shader(item_vertex_shader);
 			renderer.delete_shader(item_fragment_shader);
 			renderer.delete_shader(background_vertex_shader);
@@ -389,6 +412,7 @@ public:
 			renderer.delete_shader(item_fragment_shader);
 			renderer.delete_shader(background_vertex_shader);
 			renderer.delete_shader(background_fragment_shader);
+			renderer.delete_shader(visual_field_fragment_shader);
 			glfwDestroyWindow(window); glfwTerminate();
 			throw new std::runtime_error("visualizer ERROR: Failed to vertex buffer for scent textured quad.");
 		}
@@ -397,13 +421,41 @@ public:
 		descriptor_type types[] = { descriptor_type::UNIFORM_BUFFER, descriptor_type::COMBINED_IMAGE_SAMPLER };
 		uint32_t descriptor_counts[] = { 1, 1 };
 		shader_stage visibilities[] = { shader_stage::ALL, shader_stage::FRAGMENT };
-		if (!renderer.create_descriptor_set_layout(layout, binding_indices, types, descriptor_counts, visibilities, 2)) {
+		if (!renderer.create_descriptor_set_layout(background_layout, binding_indices, types, descriptor_counts, visibilities, 2)) {
 			renderer.delete_vertex_buffer(scent_quad_buffer);
 			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
 			renderer.delete_shader(item_vertex_shader);
 			renderer.delete_shader(item_fragment_shader);
 			renderer.delete_shader(background_vertex_shader);
 			renderer.delete_shader(background_fragment_shader);
+			renderer.delete_shader(visual_field_fragment_shader);
+			glfwDestroyWindow(window); glfwTerminate();
+			throw new std::runtime_error("visualizer ERROR: Failed to create descriptor_set_layout.");
+		}
+
+		if (!renderer.create_descriptor_set_layout(item_layout, binding_indices, types, descriptor_counts, visibilities, 1)) {
+			renderer.delete_descriptor_set_layout(background_layout);
+			renderer.delete_vertex_buffer(scent_quad_buffer);
+			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
+			renderer.delete_shader(item_vertex_shader);
+			renderer.delete_shader(item_fragment_shader);
+			renderer.delete_shader(background_vertex_shader);
+			renderer.delete_shader(background_fragment_shader);
+			renderer.delete_shader(visual_field_fragment_shader);
+			glfwDestroyWindow(window); glfwTerminate();
+			throw new std::runtime_error("visualizer ERROR: Failed to create descriptor_set_layout.");
+		}
+
+		if (!renderer.create_descriptor_set_layout(visual_field_layout, binding_indices, types, descriptor_counts, visibilities, 2)) {
+			renderer.delete_descriptor_set_layout(item_layout);
+			renderer.delete_descriptor_set_layout(background_layout);
+			renderer.delete_vertex_buffer(scent_quad_buffer);
+			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
+			renderer.delete_shader(item_vertex_shader);
+			renderer.delete_shader(item_fragment_shader);
+			renderer.delete_shader(background_vertex_shader);
+			renderer.delete_shader(background_fragment_shader);
+			renderer.delete_shader(visual_field_fragment_shader);
 			glfwDestroyWindow(window); glfwTerminate();
 			throw new std::runtime_error("visualizer ERROR: Failed to create descriptor_set_layout.");
 		}
@@ -412,13 +464,39 @@ public:
 		texture_height = window_height + 2 * get_config(sim).patch_size;
 		size_t image_size = sizeof(pixel) * texture_width * texture_height;
 		if (!renderer.create_dynamic_texture_image(scent_map_texture, image_size, texture_width, texture_height, image_format::R8G8B8A8_UNORM)) {
-			renderer.delete_descriptor_set_layout(layout);
+			renderer.delete_descriptor_set_layout(visual_field_layout);
+			renderer.delete_descriptor_set_layout(item_layout);
+			renderer.delete_descriptor_set_layout(background_layout);
 			renderer.delete_vertex_buffer(scent_quad_buffer);
 			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
 			renderer.delete_shader(item_vertex_shader);
 			renderer.delete_shader(item_fragment_shader);
 			renderer.delete_shader(background_vertex_shader);
 			renderer.delete_shader(background_fragment_shader);
+			renderer.delete_shader(visual_field_fragment_shader);
+			glfwDestroyWindow(window); glfwTerminate();
+			throw new std::runtime_error("visualizer ERROR: Failed to create `scent_map_texture`.");
+		}
+
+		unsigned int vision_range = get_config(sim).vision_range;
+		if (!renderer.create_dynamic_texture_image(
+			visual_field_texture,
+			/* image_size */ sizeof(pixel) * (2 * vision_range + 1) * (2 * vision_range + 1),
+			/* texture_width */ 2 * vision_range + 1,
+			/* texture_height */ 2 * vision_range + 1,
+			image_format::R8G8B8A8_UNORM)
+		) {
+			renderer.delete_dynamic_texture_image(scent_map_texture);
+			renderer.delete_descriptor_set_layout(visual_field_layout);
+			renderer.delete_descriptor_set_layout(item_layout);
+			renderer.delete_descriptor_set_layout(background_layout);
+			renderer.delete_vertex_buffer(scent_quad_buffer);
+			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
+			renderer.delete_shader(item_vertex_shader);
+			renderer.delete_shader(item_fragment_shader);
+			renderer.delete_shader(background_vertex_shader);
+			renderer.delete_shader(background_fragment_shader);
+			renderer.delete_shader(visual_field_fragment_shader);
 			glfwDestroyWindow(window); glfwTerminate();
 			throw new std::runtime_error("visualizer ERROR: Failed to create `scent_map_texture`.");
 		}
@@ -427,28 +505,36 @@ public:
 				sampler_address_mode::CLAMP_TO_EDGE, sampler_address_mode::CLAMP_TO_EDGE,
 				sampler_address_mode::CLAMP_TO_EDGE, false, 1.0f))
 		{
+			renderer.delete_dynamic_texture_image(visual_field_texture);
 			renderer.delete_dynamic_texture_image(scent_map_texture);
-			renderer.delete_descriptor_set_layout(layout);
+			renderer.delete_descriptor_set_layout(visual_field_layout);
+			renderer.delete_descriptor_set_layout(item_layout);
+			renderer.delete_descriptor_set_layout(background_layout);
 			renderer.delete_vertex_buffer(scent_quad_buffer);
 			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
 			renderer.delete_shader(item_vertex_shader);
 			renderer.delete_shader(item_fragment_shader);
 			renderer.delete_shader(background_vertex_shader);
 			renderer.delete_shader(background_fragment_shader);
+			renderer.delete_shader(visual_field_fragment_shader);
 			glfwDestroyWindow(window); glfwTerminate();
 			throw new std::runtime_error("visualizer ERROR: Failed to initialize texture sampler.");
 		}
 
 		if (!setup_renderer()) {
 			renderer.delete_sampler(tex_sampler);
+			renderer.delete_dynamic_texture_image(visual_field_texture);
 			renderer.delete_dynamic_texture_image(scent_map_texture);
-			renderer.delete_descriptor_set_layout(layout);
+			renderer.delete_descriptor_set_layout(visual_field_layout);
+			renderer.delete_descriptor_set_layout(item_layout);
+			renderer.delete_descriptor_set_layout(background_layout);
 			renderer.delete_vertex_buffer(scent_quad_buffer);
 			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
 			renderer.delete_shader(item_vertex_shader);
 			renderer.delete_shader(item_fragment_shader);
 			renderer.delete_shader(background_vertex_shader);
 			renderer.delete_shader(background_fragment_shader);
+			renderer.delete_shader(visual_field_fragment_shader);
 			glfwDestroyWindow(window); glfwTerminate();
 			throw new std::runtime_error("visualizer ERROR: Failed to initialize rendering pipeline.");
 		}
@@ -456,14 +542,18 @@ public:
 		if (!create_semaphore(sim)) {
 			cleanup_renderer();
 			renderer.delete_sampler(tex_sampler);
+			renderer.delete_dynamic_texture_image(visual_field_texture);
 			renderer.delete_dynamic_texture_image(scent_map_texture);
-			renderer.delete_descriptor_set_layout(layout);
+			renderer.delete_descriptor_set_layout(visual_field_layout);
+			renderer.delete_descriptor_set_layout(item_layout);
+			renderer.delete_descriptor_set_layout(background_layout);
 			renderer.delete_vertex_buffer(scent_quad_buffer);
 			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
 			renderer.delete_shader(item_vertex_shader);
 			renderer.delete_shader(item_fragment_shader);
 			renderer.delete_shader(background_vertex_shader);
 			renderer.delete_shader(background_fragment_shader);
+			renderer.delete_shader(visual_field_fragment_shader);
 			glfwDestroyWindow(window); glfwTerminate();
 			throw new std::runtime_error("visualizer ERROR: Failed to create simulator semaphore.");
 		}
@@ -514,7 +604,9 @@ public:
 		renderer.wait_until_idle();
 		renderer.delete_sampler(tex_sampler);
 		renderer.delete_dynamic_texture_image(scent_map_texture);
-		renderer.delete_descriptor_set_layout(layout);
+		renderer.delete_descriptor_set_layout(background_layout);
+		renderer.delete_descriptor_set_layout(item_layout);
+		renderer.delete_descriptor_set_layout(visual_field_layout);
 		renderer.delete_vertex_buffer(scent_quad_buffer);
 		renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
 		cleanup_renderer();
@@ -608,6 +700,8 @@ private:
 	template<bool HasLock>
 	bool prepare_scene_helper(
 			const array<array<patch_state>>& patches,
+			position agent_position,
+			float* agent_visual_field,
 			bool render_background_map,
 			float left, float right, float bottom, float top)
 	{
@@ -615,6 +709,7 @@ private:
 
 		size_t new_item_vertex_count = 0;
 		pixel* scent_map_texture_data = (pixel*) scent_map_texture.mapped_memory;
+		pixel* visual_field_texture_data = (pixel*) visual_field_texture.mapped_memory;
 		const unsigned int patch_size = get_config(sim).patch_size;
 		const unsigned int patch_size_texels = (unsigned int) ceil((float) patch_size / texel_cell_length);
 		const unsigned int scent_dimension = get_config(sim).scent_dimension;
@@ -839,12 +934,31 @@ private:
 				}
 			}
 
+			const unsigned int vision_range = get_config(sim).vision_range;
+			if (agent_visual_field != nullptr) {
+				const unsigned int color_dimension = get_config(sim).color_dimension;
+				assert(color_dimension == 3);
+				for (int64_t i = 0; i <= (2 * vision_range + 1) * (2 * vision_range + 1); i++) {
+					pixel& p = visual_field_texture_data[i * color_dimension];
+					p.r = (uint8_t) (255 * agent_visual_field[i]);
+					p.g = (uint8_t) (255 * agent_visual_field[i + 1]);
+					p.b = (uint8_t) (255 * agent_visual_field[i + 2]);
+					p.a = 255;
+				}
+			}
+
 			/* position the background quad */
+			position visual_field_bottom_left = position { agent_position.x - vision_range, agent_position.y - vision_range };
+			position visual_field_top_right = position { agent_position.x + vision_range + 1, agent_position.y + vision_range + 1 };
 			vertex vertices[] = {
 				{{(float) bottom_left_corner.x * patch_size, (float) bottom_left_corner.y * patch_size}, {0.0f, 0.0f}},
 				{{(float) bottom_left_corner.x * patch_size, (float) (top_right_corner.y + 1) * patch_size}, {0.0f, (float) texture_height_cells / texture_height}},
 				{{(float) (top_right_corner.x + 1) * patch_size, (float) bottom_left_corner.y * patch_size}, {(float) texture_width_cells / texture_width, 0.0f}},
-				{{(float) (top_right_corner.x + 1) * patch_size, (float) (top_right_corner.y + 1) * patch_size}, {(float) texture_width_cells / texture_width, (float) texture_height_cells / texture_height}}
+				{{(float) (top_right_corner.x + 1) * patch_size, (float) (top_right_corner.y + 1) * patch_size}, {(float) texture_width_cells / texture_width, (float) texture_height_cells / texture_height}},
+				{{(float) visual_field_bottom_left.x * patch_size, (float) visual_field_bottom_left.y * patch_size}, {0.0f, 0.0f}},
+				{{(float) visual_field_bottom_left.x * patch_size, (float) (visual_field_top_right.y + 1) * patch_size}, {0.0f, 1.0f}},
+				{{(float) (visual_field_top_right.x + 1) * patch_size, (float) visual_field_bottom_left.y * patch_size}, {1.0f, 0.0f}},
+				{{(float) (visual_field_top_right.x + 1) * patch_size, (float) (visual_field_top_right.y + 1) * patch_size}, {1.0f, 1.0f}}
 			};
 
 			/* transfer all data to GPU */
@@ -853,11 +967,16 @@ private:
 			current_patch_size_texels = patch_size_texels;
 			renderer.transfer_dynamic_vertex_buffer(item_quad_buffer, sizeof(item_vertex) * item_vertex_count);
 			renderer.transfer_dynamic_texture_image(scent_map_texture, image_format::R8G8B8A8_UNORM);
-			renderer.fill_vertex_buffer(scent_quad_buffer, vertices, sizeof(vertex) * 4);
+			renderer.transfer_dynamic_texture_image(visual_field_texture, image_format::R8G8B8A8_UNORM);
+			renderer.fill_vertex_buffer(scent_quad_buffer, vertices, sizeof(vertex) * 8);
 
 		} else {
 			/* no patches are visible, so move the quad outside the view */
 			vertex vertices[] = {
+				{{top + 10.0f, top + 10.0f}, {1.0f, 0.0f}},
+				{{top + 10.0f, top + 10.0f}, {1.0f, 1.0f}},
+				{{top + 10.0f, top + 10.0f}, {0.0f, 1.0f}},
+				{{top + 10.0f, top + 10.0f}, {0.0f, 0.0f}},
 				{{top + 10.0f, top + 10.0f}, {1.0f, 0.0f}},
 				{{top + 10.0f, top + 10.0f}, {1.0f, 1.0f}},
 				{{top + 10.0f, top + 10.0f}, {0.0f, 1.0f}},
@@ -866,7 +985,7 @@ private:
 
 			if (!HasLock) while (!scene_lock.try_lock()) { }
 			item_vertex_count = new_item_vertex_count;
-			renderer.fill_vertex_buffer(scent_quad_buffer, vertices, sizeof(vertex) * 4);
+			renderer.fill_vertex_buffer(scent_quad_buffer, vertices, sizeof(vertex) * 8);
 		}
 
 		left_bound = floor(left / patch_size) * patch_size;
@@ -880,7 +999,7 @@ private:
 		draw_scent_map.vertex_count = 4;
 		draw_scent_map.vertex_buffers[0] = scent_quad_buffer;
 		draw_scent_map.vertex_buffer_offsets[0] = 0;
-		draw_scent_map.descriptor_sets[0] = set;
+		draw_scent_map.descriptor_sets[0] = background_ds;
 
 		draw_call<0, 1, 1> draw_items;
 		draw_items.pipeline = item_pipeline;
@@ -888,10 +1007,21 @@ private:
 		draw_items.vertex_count = item_vertex_count;
 		draw_items.dynamic_vertex_buffers[0] = item_quad_buffer;
 		draw_items.dynamic_vertex_buffer_offsets[0] = 0;
-		draw_items.descriptor_sets[0] = set;
+		draw_items.descriptor_sets[0] = item_ds;
+
+		draw_call<1, 0, 1> draw_visual_field;
+		draw_visual_field.pipeline = visual_field_pipeline;
+		draw_visual_field.first_vertex = 0;
+		draw_visual_field.vertex_count = 4;
+		draw_visual_field.vertex_buffers[0] = scent_quad_buffer;
+		draw_visual_field.vertex_buffer_offsets[0] = 4;
+		draw_visual_field.descriptor_sets[0] = visual_field_ds;
 
 		float clear_color[] = { 0.0f, 0.0f, 0.0f, 1.0f };
-		if (!renderer.record_command_buffer(cb, fb, clear_color, pass, draw_scent_map, draw_items)) {
+		if (!renderer.record_command_buffer(
+			cb, fb, clear_color, pass,
+			draw_scent_map, draw_items, draw_visual_field)
+		) {
 			cleanup_renderer();
 			if (!HasLock) scene_lock.unlock();
 			return false;
@@ -925,10 +1055,17 @@ private:
 			}
 		}
 
+		position agent_position;
+		float* agent_visual_field = nullptr;
 		if (track_agent_id != 0) {
 			agent_state* agent;
 			sim.get_agent_states(&agent, &track_agent_id, 1);
 			if (agent != nullptr) {
+				agent_position = agent->current_position;
+				unsigned int color_dimension = sim.get_config().color_dimension;
+				unsigned int visual_field_size = (2 * color_dimension + 1) * (2 * color_dimension + 1);
+				agent_visual_field = (float*) malloc(visual_field_size);
+				memcpy(agent_visual_field, agent->current_vision, visual_field_size * sizeof(float));
 				float new_target_position[] = {agent->current_position.x + 0.5f, agent->current_position.y + 0.5f};
 				agent->lock.unlock();
 
@@ -951,7 +1088,11 @@ private:
 			tracking_animating = false;
 		}
 
-		return prepare_scene_helper<HasLock>(patches, render_background_map, left, right, bottom, top);
+		bool result = prepare_scene_helper<HasLock>(
+			patches, agent_position, agent_visual_field, render_background_map,
+			left, right, bottom, top);
+		if (agent_visual_field != nullptr) { free(agent_visual_field); }
+		return result;
 	}
 
 	template<typename SimulatorData>
@@ -1022,8 +1163,13 @@ private:
 	template<bool HasLock>
 	inline void process_mpi_response(visualizer_client_data& response)
 	{
+		position agent_position;
+		float* agent_visual_field = nullptr;
 		if (response.get_agent_states_response == status::OK && response.track_agent_id != 0) {
 			if (response.agent_state_count > 0) {
+				agent_position = response.agent_states[0].current_position;
+				agent_visual_field = response.agent_states[0].current_vision;
+
 				float new_target_position[] = {response.agent_states[0].current_position.x + 0.5f, response.agent_states[0].current_position.y + 0.5f};
 
 				if (new_target_position[0] != translate_end_position[0] || new_target_position[1] != translate_end_position[1]) {
@@ -1046,8 +1192,11 @@ private:
 		}
 
 		if (response.get_map_response == status::OK) {
-			prepare_scene_helper<HasLock>(*response.map, response.get_map_render_background,
-				response.get_map_left, response.get_map_right, response.get_map_bottom, response.get_map_top);
+			prepare_scene_helper<HasLock>(
+				*response.map, agent_position, agent_visual_field,
+				response.get_map_render_background,
+				response.get_map_left, response.get_map_right,
+				response.get_map_bottom, response.get_map_top);
 
 			for (array<patch_state>& row : *response.map) {
 				for (patch_state& patch : row) free(patch);
@@ -1200,7 +1349,6 @@ private:
 	}
 
 	bool setup_renderer() {
-		dynamic_texture_image dynamic_textures[] = { scent_map_texture };
 		uint32_t texture_bindings[] = { 1 };
 		uint32_t ub_binding = 0;
 		descriptor_type pool_types[] = { descriptor_type::UNIFORM_BUFFER, descriptor_type::COMBINED_IMAGE_SAMPLER };
@@ -1209,44 +1357,109 @@ private:
 		} else if (!renderer.create_graphics_pipeline(scent_map_pipeline, pass,
 				background_vertex_shader, "main", background_fragment_shader, "main",
 				primitive_topology::TRIANGLE_STRIP, false, 1.0f,
-				background_binding, background_shader_attributes, &layout, 1))
+				background_binding, background_shader_attributes, &background_layout, 1))
 		{
 			renderer.delete_render_pass(pass);
 			return false;
 		} else if (!renderer.create_graphics_pipeline(item_pipeline, pass,
 				item_vertex_shader, "main", item_fragment_shader, "main",
 				primitive_topology::TRIANGLE_LIST, false, 1.0f,
-				item_binding, item_shader_attributes, &layout, 1))
+				item_binding, item_shader_attributes, &item_layout, 1))
 		{
 			renderer.delete_graphics_pipeline(scent_map_pipeline);
 			renderer.delete_render_pass(pass);
 			return false;
-		} else if (!renderer.create_frame_buffer(fb, pass)) {
-			renderer.delete_graphics_pipeline(scent_map_pipeline);
+		} else if (!renderer.create_graphics_pipeline(visual_field_pipeline, pass,
+				background_vertex_shader, "main", visual_field_fragment_shader, "main",
+				primitive_topology::TRIANGLE_STRIP, false, 1.0f,
+				background_binding, background_shader_attributes, &visual_field_layout, 1)) {
 			renderer.delete_graphics_pipeline(item_pipeline);
+			renderer.delete_graphics_pipeline(scent_map_pipeline);
+			renderer.delete_render_pass(pass);
+		} else if (!renderer.create_frame_buffer(fb, pass)) {
+			renderer.delete_graphics_pipeline(visual_field_pipeline);
+			renderer.delete_graphics_pipeline(item_pipeline);
+			renderer.delete_graphics_pipeline(scent_map_pipeline);
 			renderer.delete_render_pass(pass);
 			return false;
 		} else if (!renderer.create_uniform_buffer(ub, sizeof(uniform_buffer_data))) {
 			renderer.delete_frame_buffer(fb);
-			renderer.delete_graphics_pipeline(scent_map_pipeline);
+			renderer.delete_graphics_pipeline(visual_field_pipeline);
 			renderer.delete_graphics_pipeline(item_pipeline);
+			renderer.delete_graphics_pipeline(scent_map_pipeline);
 			renderer.delete_render_pass(pass);
 			return false;
-		} else if (!renderer.create_descriptor_pool(pool, pool_types, 2)) {
+		} else if (!renderer.create_descriptor_pool(background_ds_pool, pool_types, 2)) {
 			renderer.delete_uniform_buffer(ub);
 			renderer.delete_frame_buffer(fb);
-			renderer.delete_graphics_pipeline(scent_map_pipeline);
+			renderer.delete_graphics_pipeline(visual_field_pipeline);
 			renderer.delete_graphics_pipeline(item_pipeline);
+			renderer.delete_graphics_pipeline(scent_map_pipeline);
 			renderer.delete_render_pass(pass);
 			return false;
-		} else if (!renderer.create_descriptor_set(set, &ub, &ub_binding, 1, nullptr, nullptr, 0, dynamic_textures, texture_bindings, 1, &tex_sampler, layout, pool)
-				|| !renderer.create_command_buffer(cb))
+		} else if (!renderer.create_descriptor_pool(item_ds_pool, pool_types, 1)) {
+			renderer.delete_descriptor_pool(background_ds_pool);
+			renderer.delete_uniform_buffer(ub);
+			renderer.delete_frame_buffer(fb);
+			renderer.delete_graphics_pipeline(visual_field_pipeline);
+			renderer.delete_graphics_pipeline(item_pipeline);
+			renderer.delete_graphics_pipeline(scent_map_pipeline);
+			renderer.delete_render_pass(pass);
+			return false;
+		} else if (!renderer.create_descriptor_pool(visual_field_ds_pool, pool_types, 2)) {
+			renderer.delete_descriptor_pool(item_ds_pool);
+			renderer.delete_descriptor_pool(background_ds_pool);
+			renderer.delete_uniform_buffer(ub);
+			renderer.delete_frame_buffer(fb);
+			renderer.delete_graphics_pipeline(visual_field_pipeline);
+			renderer.delete_graphics_pipeline(item_pipeline);
+			renderer.delete_graphics_pipeline(scent_map_pipeline);
+			renderer.delete_render_pass(pass);
+			return false;
+		} else if (!renderer.create_descriptor_set(
+			background_ds, &ub, &ub_binding, 1, nullptr, nullptr, 0, &scent_map_texture,
+			texture_bindings, 1, &tex_sampler, background_layout, background_ds_pool))
 		{
+			renderer.delete_descriptor_pool(visual_field_ds_pool);
+			renderer.delete_descriptor_pool(item_ds_pool);
+			renderer.delete_descriptor_pool(background_ds_pool);
 			renderer.delete_uniform_buffer(ub);
-			renderer.delete_descriptor_pool(pool);
 			renderer.delete_frame_buffer(fb);
-			renderer.delete_graphics_pipeline(scent_map_pipeline);
+			renderer.delete_graphics_pipeline(visual_field_pipeline);
 			renderer.delete_graphics_pipeline(item_pipeline);
+			renderer.delete_graphics_pipeline(scent_map_pipeline);
+			renderer.delete_render_pass(pass);
+			return false;
+		} else if (!renderer.create_descriptor_set(
+			item_ds, &ub, &ub_binding, 1, nullptr, nullptr, 0, nullptr,
+			nullptr, 0, &tex_sampler, item_layout, item_ds_pool))
+		{
+			renderer.delete_descriptor_set(background_ds);
+			renderer.delete_descriptor_pool(visual_field_ds_pool);
+			renderer.delete_descriptor_pool(item_ds_pool);
+			renderer.delete_descriptor_pool(background_ds_pool);
+			renderer.delete_uniform_buffer(ub);
+			renderer.delete_frame_buffer(fb);
+			renderer.delete_graphics_pipeline(visual_field_pipeline);
+			renderer.delete_graphics_pipeline(item_pipeline);
+			renderer.delete_graphics_pipeline(scent_map_pipeline);
+			renderer.delete_render_pass(pass);
+			return false;
+		} else if (!renderer.create_descriptor_set(
+			visual_field_ds, &ub, &ub_binding, 1, nullptr, nullptr, 0, &visual_field_texture,
+			texture_bindings, 1, &tex_sampler, visual_field_layout, visual_field_ds_pool
+		) || !renderer.create_command_buffer(cb))
+		{
+			renderer.delete_descriptor_set(item_ds);
+			renderer.delete_descriptor_set(background_ds);
+			renderer.delete_descriptor_pool(visual_field_ds_pool);
+			renderer.delete_descriptor_pool(item_ds_pool);
+			renderer.delete_descriptor_pool(background_ds_pool);
+			renderer.delete_uniform_buffer(ub);
+			renderer.delete_frame_buffer(fb);
+			renderer.delete_graphics_pipeline(visual_field_pipeline);
+			renderer.delete_graphics_pipeline(item_pipeline);
+			renderer.delete_graphics_pipeline(scent_map_pipeline);
 			renderer.delete_render_pass(pass);
 			return false;
 		}
@@ -1257,11 +1470,16 @@ private:
 	{
 		renderer.delete_command_buffer(cb);
 		renderer.delete_uniform_buffer(ub);
-		renderer.delete_descriptor_set(set);
-		renderer.delete_descriptor_pool(pool);
+		renderer.delete_descriptor_set(visual_field_ds);
+		renderer.delete_descriptor_set(item_ds);
+		renderer.delete_descriptor_set(background_ds);
+		renderer.delete_descriptor_pool(visual_field_ds_pool);
+		renderer.delete_descriptor_pool(item_ds_pool);
+		renderer.delete_descriptor_pool(background_ds_pool);
 		renderer.delete_frame_buffer(fb);
-		renderer.delete_graphics_pipeline(scent_map_pipeline);
+		renderer.delete_graphics_pipeline(visual_field_pipeline);
 		renderer.delete_graphics_pipeline(item_pipeline);
+		renderer.delete_graphics_pipeline(scent_map_pipeline);
 		renderer.delete_render_pass(pass);
 	}
 
