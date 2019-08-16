@@ -36,7 +36,8 @@ public struct Experiment {
     batchSize: Int,
     stepCount: Int,
     stepCountPerUpdate: Int,
-    resultsDir: URL
+    resultsDir: URL,
+    minimumRunID: Int
   ) throws {
     self.reward = reward
     self.agent = agent
@@ -63,7 +64,7 @@ public struct Experiment {
     ).filter { $0.pathExtension == "tsv" } .compactMap {
       Int($0.deletingPathExtension().lastPathComponent)
     }
-    var runID = 0
+    var runID = minimumRunID
     while runIDs.contains(runID) { runID += 1 }
     self.runID = runID
     self.resultsFile = resultsDir.appendingPathComponent("\(runID).tsv")

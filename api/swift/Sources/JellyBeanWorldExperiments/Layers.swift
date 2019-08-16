@@ -143,7 +143,7 @@ public struct VisionActorCritic: Module {
   }
 
   @inlinable
-  public init(hiddenSize: Int = 128) {
+  public init(hiddenSize: Int = 512) {
     visionLayer = VisionLayer(outputSize: hiddenSize)
     hiddenLSTMCell = LSTMCell<Float>(inputSize: hiddenSize + 1, hiddenSize: hiddenSize)
     denseAction = Dense<Float>(inputSize: 2 * hiddenSize + 1, outputSize: 3)
@@ -188,7 +188,7 @@ public struct ScentActorCritic: Module {
   }
 
   @inlinable
-  public init(hiddenSize: Int = 128) {
+  public init(hiddenSize: Int = 512) {
     scentLayer = ScentLayer(outputSize: hiddenSize)
     hiddenLSTMCell = LSTMCell<Float>(inputSize: hiddenSize + 1, hiddenSize: hiddenSize)
     denseAction = Dense<Float>(inputSize: 2 * hiddenSize + 1, outputSize: 3)
@@ -234,7 +234,7 @@ public struct VisionAndScentActorCritic: Module {
   }
 
   @inlinable
-  public init(hiddenSize: Int = 128) {
+  public init(hiddenSize: Int = 512) {
     visionLayer = VisionLayer(outputSize: hiddenSize)
     scentLayer = ScentLayer(outputSize: hiddenSize)
     hiddenLSTMCell = LSTMCell<Float>(inputSize: 2 * hiddenSize + 1, hiddenSize: hiddenSize)
