@@ -19,6 +19,15 @@ extension Array where Element == Float {
 
   internal var mean: Float { sum / Float(count) }
 
+  internal var median: Float {
+    let sortedArray = sorted()
+    if count % 2 != 0 {
+      return Float(sortedArray[count / 2])
+    } else {
+      return Float(sortedArray[count / 2] + sortedArray[count / 2 - 1]) / 2.0
+    }
+  }
+
   internal var standardDeviation: Element {
     let mean = self.mean
     let variance = map { ($0 - mean) * ($0 - mean) }
