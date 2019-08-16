@@ -362,7 +362,7 @@ class Simulator(object):
     if self._server_handle == None:
       raise RuntimeError("`get_permissions` requires that the Simulator be a server.")
     perm = Permissions()
-    (perm.add_agent, perm.remove_agent, perm.remove_client, perm.set_active, perm.get_map, perm.get_agent_ids, perm.get_agent_states) = simulator_c.get_permissions(self._server_handle, client_id)
+    (perm.add_agent, perm.remove_agent, perm.remove_client, perm.set_active, perm.get_map, perm.get_agent_ids, perm.get_agent_states, perm.semaphores) = simulator_c.get_permissions(self._server_handle, client_id)
     return perm
 
   def set_permissions(self, client_id, permissions):

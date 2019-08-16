@@ -1,3 +1,19 @@
+/**
+ * Copyright 2019, The Jelly Bean World Authors. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not
+ * use this file except in compliance with the License. You may obtain a copy of
+ * the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+ * License for the specific language governing permissions and limitations under
+ * the License.
+ */
+
 #include "visualizer.h"
 #include <thread>
 #include <condition_variable>
@@ -5,14 +21,13 @@
 
 #if defined(WIN32)
 #include <windows.h>
-#else
-#include <signal.h>
 #endif
+
+#include <signal.h>
 
 using namespace jbw;
 
 bool simulation_running = true;
-client<visualizer_client_data> sim;
 std::atomic_bool* visualizer_running = nullptr;
 
 #if defined(WIN32)
@@ -21,18 +36,17 @@ BOOL WINAPI signal_handler(DWORD sig_num)
     if (sig_num == CTRL_C_EVENT || sig_num ==  CTRL_CLOSE_EVENT
 	 || sig_num ==  CTRL_LOGOFF_EVENT || sig_num ==  CTRL_SHUTDOWN_EVENT) 
     {
-		if (connected_to_server)
-			remove_client(sim);
+		if (visualizer_running != nullptr)
+			*visualizer_running = false;
+		simulation_running = false;
         return TRUE;
     }
     return FALSE;
 }
 #else
 void signal_handler(int sig_num) {
-	if (visualizer_running != nullptr) {
+	if (visualizer_running != nullptr)
 		*visualizer_running = false;
-		remove_client(sim);
-	}
 	simulation_running = false;
 }
 #endif
@@ -115,30 +129,34 @@ void print_usage(Stream& out) {
 		"Connects to the JBW server at the given address visualizes the simulated environment.\n"
 		"\n"
 		"Available options:\n"
-		"  --track=ID             Starts tracking the agent with the given ID.\n"
-		"  --pixels-per-cell=NUM  Sets the initial number of pixels per cell.\n"
-		"  --local                Starts a simulation locally, rather than connecting to\n"
-		"                         a server (any specified address is ignored).\n"
-		"  --help                 Prints this usage text.\n");
+		"  --track=ID               Starts tracking the agent with the given ID.\n"
+		"  --pixels-per-cell=NUM    Sets the initial number of pixels per cell.\n"
+		"  --max-steps-per-sec=NUM  Sets the maximum simulation steps per second.\n"
+		"  --no-scent-map           Disables drawing of the scent map.\n"
+		"  --local                  Starts a simulation locally, rather than connecting\n"
+		"                           to a server (any specified address is ignored).\n"
+		"  --help                   Prints this usage text.\n");
 }
 
 template<typename Stream>
 void print_controls(Stream& out) {
 	fprintf(out, "\nControls:\n"
 		"Click and drag with left mouse button to move camera.\n"
-		"  +/= key: Zoom in.\n"
-		"  -/_ key: Zoom out.\n"
-		"  b key:   Toggle drawing of the background grid and scent map.\n"
-		"  1 key:   Track agent with ID 1.\n"
-		"  2 key:   Track agent with ID 2.\n"
-		"  3 key:   Track agent with ID 3.\n"
-		"  4 key:   Track agent with ID 4.\n"
-		"  5 key:   Track agent with ID 5.\n"
-		"  6 key:   Track agent with ID 6.\n"
-		"  7 key:   Track agent with ID 7.\n"
-		"  8 key:   Track agent with ID 8.\n"
-		"  9 key:   Track agent with ID 9.\n"
-		"  0 key:   Disable agent tracking.\n\n");
+		"  + key: Zoom in.\n"
+		"  - key: Zoom out.\n"
+		"  [ key: Decrease max simulation steps per second.\n"
+		"  ] key: Increase max simulation steps per second.\n"
+		"  b key: Toggle drawing of the scent map.\n"
+		"  1 key: Track agent with ID 1.\n"
+		"  2 key: Track agent with ID 2.\n"
+		"  3 key: Track agent with ID 3.\n"
+		"  4 key: Track agent with ID 4.\n"
+		"  5 key: Track agent with ID 5.\n"
+		"  6 key: Track agent with ID 6.\n"
+		"  7 key: Track agent with ID 7.\n"
+		"  8 key: Track agent with ID 8.\n"
+		"  9 key: Track agent with ID 9.\n"
+		"  0 key: Disable agent tracking.\n\n");
 }
 
 inline void set_interaction_args(
@@ -155,11 +173,29 @@ inline void set_interaction_args(
 		item_types[first_item_type].interaction_fns[second_item_type].args[counter++] = *i;
 }
 
-inline void on_step(const simulator<empty_data>* sim,
-		const hash_map<uint64_t, agent_state*>& agents, uint64_t time)
-{ }
+struct visualizer_data {
+	bool waiting_for_server;
+	std::condition_variable cv;
+	std::mutex lock;
 
-bool run_locally(uint64_t track_agent_id, float pixels_per_cell)
+	visualizer_data() : waiting_for_server(false) { }
+	visualizer_data(const visualizer_data& src) : waiting_for_server(src.waiting_for_server) { }
+};
+
+inline void on_step(simulator<visualizer_data>* sim,
+		const hash_map<uint64_t, agent_state*>& agents, uint64_t time)
+{
+	visualizer_data& data = sim->get_data();
+	std::unique_lock<std::mutex> lock(data.lock);
+	data.waiting_for_server = false;
+	data.cv.notify_one();
+}
+
+bool run_locally(
+		uint64_t track_agent_id,
+		float pixels_per_cell,
+		bool draw_scent_map,
+		float max_steps_per_second)
 {
 	simulator_config config;
 	config.max_steps_per_movement = 1;
@@ -267,7 +303,7 @@ bool run_locally(uint64_t track_agent_id, float pixels_per_cell)
 	set_interaction_args(config.item_types.data, 3, 2, zero_interaction_fn, {});
 	set_interaction_args(config.item_types.data, 3, 3, cross_interaction_fn, {10.0f, 15.0f, 20.0f, -200.0f, -20.0f, 1.0f});
 
-	simulator<empty_data> sim(config, empty_data());
+	simulator<visualizer_data> sim(config, visualizer_data());
 
 	uint64_t agent_id; agent_state* agent;
 	if (sim.add_agent(agent_id, agent) != status::OK) {
@@ -275,16 +311,15 @@ bool run_locally(uint64_t track_agent_id, float pixels_per_cell)
 		return false;
 	}
 
+	print_controls(stdout); fflush(stdout);
+	visualizer<simulator<visualizer_data>> visualizer(sim, 800, 800, track_agent_id, pixels_per_cell, draw_scent_map, max_steps_per_second);
+
 	unsigned int move_count = 0;
-	std::mutex lock;
-	std::condition_variable cv;
-	unsigned int max_steps_per_frame = 1;
-	unsigned int steps_in_current_frame = 0;
 	std::thread simulation_worker = std::thread([&]() {
-		for (unsigned int t = 0; simulation_running && t < 1000000; t++)
-		{
+		while (simulation_running) {
 			auto action = rand() % 20;
 			status result = status::OK;
+			sim.get_data().waiting_for_server = true;
 			if (action % 20 == 0 || action % 20 == 5) {
 				result = sim.turn(agent_id, direction::LEFT);
 			} else if (action % 20 == 10 || action % 20 == 15) {
@@ -292,35 +327,28 @@ bool run_locally(uint64_t track_agent_id, float pixels_per_cell)
 			} else {
 				result = sim.move(agent_id, direction::UP, 1);
 			}
+
 			if (result != status::OK) {
 				fprintf(stderr, "run_locally ERROR: Unable to perform agent action.\n");
 				break;
 			}
 			move_count++;
-			steps_in_current_frame++;
 
-			std::unique_lock<std::mutex> lck(lock);
-			while (simulation_running && steps_in_current_frame == max_steps_per_frame) cv.wait(lck);
+			std::unique_lock<std::mutex> lock(sim.get_data().lock);
+			while (simulation_running && sim.get_data().waiting_for_server)
+				sim.get_data().cv.wait(lock);
 		}
 	});
-
-	print_controls(stdout); fflush(stdout);
 
 	timer stopwatch;
 	unsigned long long elapsed = 0;
 	unsigned int frame_count = 0;
-	visualizer<simulator<empty_data>> visualizer(sim, 800, 800, track_agent_id, pixels_per_cell);
 	while (simulation_running) {
 		if (visualizer.is_window_closed())
 			break;
 
 		visualizer.draw_frame();
 		frame_count++;
-
-		lock.lock();
-		steps_in_current_frame = 0;
-		cv.notify_one();
-		lock.unlock();
 
 		if (stopwatch.milliseconds() >= 1000) {
 			elapsed += stopwatch.milliseconds();
@@ -331,8 +359,10 @@ bool run_locally(uint64_t track_agent_id, float pixels_per_cell)
 	}
 	elapsed += stopwatch.milliseconds();
 	printf("Completed %u moves: %lf simulation steps per second. (%lf fps)\n", move_count, ((double) sim.time / elapsed) * 1000, ((double) frame_count / elapsed) * 1000);
+	std::unique_lock<std::mutex> lock(sim.get_data().lock);
 	simulation_running = false;
-	cv.notify_one();
+	sim.get_data().cv.notify_one();
+	lock.unlock();
 	if (simulation_worker.joinable()) {
 		try {
 			simulation_worker.join();
@@ -345,9 +375,12 @@ bool run(
 		const char* server_address,
 		const char* server_port,
 		uint64_t track_agent_id,
-		float pixels_per_cell)
+		float pixels_per_cell,
+		bool draw_scent_map,
+		float max_steps_per_second)
 {
 	uint64_t client_id;
+	client<visualizer_client_data> sim;
 	uint64_t simulation_time = connect_client(sim, server_address, server_port, client_id);
 	if (simulation_time == UINT64_MAX) {
 		fprintf(stderr, "ERROR: Unable to connect to '%s:%s'.\n", server_address, server_port);
@@ -356,7 +389,7 @@ bool run(
 
 	print_controls(stdout); fflush(stdout);
 
-	visualizer<client<visualizer_client_data>> visualizer(sim, 800, 800, track_agent_id, pixels_per_cell);
+	visualizer<client<visualizer_client_data>> visualizer(sim, 800, 800, track_agent_id, pixels_per_cell, draw_scent_map, max_steps_per_second);
 	visualizer_running = &visualizer.running;
 	while (simulation_running && sim.client_running) {
 		if (visualizer.is_window_closed())
@@ -372,6 +405,7 @@ int main(int argc, const char** argv)
 {
 #if defined(WIN32)
 	SetConsoleCtrlHandler(signal_handler, TRUE);
+    signal(SIGPIPE, SIG_IGN);
 #else
 	signal(SIGINT, signal_handler);
 	signal(SIGTERM, signal_handler);
@@ -387,7 +421,9 @@ int main(int argc, const char** argv)
 	char* server_address = nullptr;
 	const char* server_port = nullptr;
 	float pixels_per_cell = 6.0f;
+	float max_steps_per_second = 10.0f;
 	bool local = false;
+	bool draw_scent_map = true;
 
 	/* parse command-line arguments */
 	bool fail = false;
@@ -395,7 +431,9 @@ int main(int argc, const char** argv)
 		if (parse_address(argv[i], fail, server_address, server_port)) continue;
 		if (parse_option(argv[i], fail, "--track=", track_agent_id)) continue;
 		if (parse_option(argv[i], fail, "--pixels-per-cell=", pixels_per_cell)) continue;
+		if (parse_option(argv[i], fail, "--max-steps-per-sec=", max_steps_per_second)) continue;
 		if (parse_option(argv[i], fail, "--local")) { local = true; continue; }
+		if (parse_option(argv[i], fail, "--no-scent-map")) { draw_scent_map = false; continue; }
 		if (parse_option(argv[i], fail, "--help")) {
 			print_usage(stdout);
 			fflush(stdout);
@@ -405,6 +443,11 @@ int main(int argc, const char** argv)
 		}
 
 		fprintf(stderr, "ERROR: Unrecognized command-line argument '%s'.\n", argv[i]);
+		fail = true;
+	}
+
+	if (pixels_per_cell <= 0.0f) {
+		fprintf(stderr, "ERROR: `pixels per cell` must be positive.\n");
 		fail = true;
 	}
 
@@ -419,7 +462,7 @@ int main(int argc, const char** argv)
 			free(server_address);
 			server_address = nullptr;
 		}
-		if (!run_locally(track_agent_id, pixels_per_cell))
+		if (!run_locally(track_agent_id, pixels_per_cell, draw_scent_map, max_steps_per_second))
 			return EXIT_FAILURE;
 	} else {
 		if (server_address == nullptr || server_port == nullptr) {
@@ -427,7 +470,7 @@ int main(int argc, const char** argv)
 			return EXIT_FAILURE;
 		}
 
-		if (!run(server_address, server_port, track_agent_id, pixels_per_cell)) {
+		if (!run(server_address, server_port, track_agent_id, pixels_per_cell, draw_scent_map, max_steps_per_second)) {
 			free(server_address);
 			return EXIT_FAILURE;
 		}

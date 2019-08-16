@@ -32,6 +32,12 @@ enum class message_type : uint64_t {
 	REMOVE_AGENT,
 	REMOVE_AGENT_RESPONSE,
 	REMOVE_CLIENT,
+	ADD_SEMAPHORE,
+	ADD_SEMAPHORE_RESPONSE,
+	REMOVE_SEMAPHORE,
+	REMOVE_SEMAPHORE_RESPONSE,
+	SIGNAL_SEMAPHORE,
+	SIGNAL_SEMAPHORE_RESPONSE,
 	MOVE,
 	MOVE_RESPONSE,
 	TURN,
@@ -79,6 +85,9 @@ inline bool print(const message_type& type, Stream& out) {
 	case message_type::ADD_AGENT:        return core::print("ADD_AGENT", out);
 	case message_type::REMOVE_AGENT:     return core::print("REMOVE_AGENT", out);
 	case message_type::REMOVE_CLIENT:    return core::print("REMOVE_CLIENT", out);
+	case message_type::ADD_SEMAPHORE:    return core::print("ADD_SEMAPHORE", out);
+	case message_type::REMOVE_SEMAPHORE: return core::print("REMOVE_SEMAPHORE", out);
+	case message_type::SIGNAL_SEMAPHORE: return core::print("SIGNAL_SEMAPHORE", out);
 	case message_type::MOVE:             return core::print("MOVE", out);
 	case message_type::TURN:             return core::print("TURN", out);
 	case message_type::DO_NOTHING:       return core::print("DO_NOTHING", out);
@@ -90,6 +99,9 @@ inline bool print(const message_type& type, Stream& out) {
 
 	case message_type::ADD_AGENT_RESPONSE:        return core::print("ADD_AGENT_RESPONSE", out);
 	case message_type::REMOVE_AGENT_RESPONSE:     return core::print("REMOVE_AGENT_RESPONSE", out);
+	case message_type::ADD_SEMAPHORE_RESPONSE:    return core::print("ADD_SEMAPHORE_RESPONSE", out);
+	case message_type::REMOVE_SEMAPHORE_RESPONSE: return core::print("REMOVE_SEMAPHORE_RESPONSE", out);
+	case message_type::SIGNAL_SEMAPHORE_RESPONSE: return core::print("SIGNAL_SEMAPHORE_RESPONSE", out);
 	case message_type::MOVE_RESPONSE:             return core::print("MOVE_RESPONSE", out);
 	case message_type::TURN_RESPONSE:             return core::print("TURN_RESPONSE", out);
 	case message_type::DO_NOTHING_RESPONSE:       return core::print("DO_NOTHING_RESPONSE", out);
@@ -124,12 +136,13 @@ struct permissions {
 	bool get_map;
 	bool get_agent_ids;
 	bool get_agent_states;
+	bool semaphores;
 
 	permissions() { }
 	constexpr permissions(bool value) :
 		add_agent(value), remove_agent(value), remove_client(value),
 		set_active(value), get_map(value), get_agent_ids(value),
-		get_agent_states(value)
+		get_agent_states(value), semaphores(value)
 	{ }
 
 	static inline void swap(permissions& first, permissions& second) {
@@ -140,6 +153,7 @@ struct permissions {
 		core::swap(first.get_map, second.get_map);
 		core::swap(first.get_agent_ids, second.get_agent_ids);
 		core::swap(first.get_agent_states, second.get_agent_states);
+		core::swap(first.semaphores, second.semaphores);
 	}
 
 	static constexpr permissions grant_all() { return permissions(true); }
@@ -154,7 +168,8 @@ bool read(permissions& perms, Stream& in) {
 		&& read(perms.set_active, in)
 		&& read(perms.get_map, in)
 		&& read(perms.get_agent_ids, in)
-		&& read(perms.get_agent_states, in);
+		&& read(perms.get_agent_states, in)
+		&& read(perms.semaphores, in);
 }
 
 template<typename Stream>
@@ -165,23 +180,31 @@ bool write(const permissions& perms, Stream& out) {
 		&& write(perms.set_active, out)
 		&& write(perms.get_map, out)
 		&& write(perms.get_agent_ids, out)
-		&& write(perms.get_agent_states, out);
+		&& write(perms.get_agent_states, out)
+		&& write(perms.semaphores, out);
 }
 
 struct client_state {
 	std::mutex lock;
 	array<uint64_t> agent_ids;
+	array<uint64_t> semaphore_ids;
 	permissions perms;
 
 	static inline void free(client_state& cstate) {
 		cstate.lock.~mutex();
 		core::free(cstate.agent_ids);
+		core::free(cstate.semaphore_ids);
 	}
 };
 
 inline bool init(client_state& cstate, const permissions& perms) {
 	cstate.perms = perms;
-	if (!array_init(cstate.agent_ids, 8)) return false;
+	if (!array_init(cstate.agent_ids, 8)) {
+		return false;
+	} else if (!array_init(cstate.semaphore_ids, 4)) {
+		free(cstate.agent_ids);
+		return false;
+	}
 	new (&cstate.lock) std::mutex();
 	return true;
 }
@@ -189,7 +212,8 @@ inline bool init(client_state& cstate, const permissions& perms) {
 template<typename Stream>
 bool read(client_state& cstate, Stream& in) {
 	if (!read(cstate.perms, in)
-	 || !read(cstate.agent_ids, in)) return false;
+	 || !read(cstate.agent_ids, in)
+	 || !read(cstate.semaphore_ids, in)) return false;
 	new (&cstate.lock) std::mutex();
 	return true;
 }
@@ -197,7 +221,8 @@ bool read(client_state& cstate, Stream& in) {
 template<typename Stream>
 bool write(const client_state& cstate, Stream& out) {
 	return write(cstate.perms, out)
-		&& write(cstate.agent_ids, out);
+		&& write(cstate.agent_ids, out)
+		&& write(cstate.semaphore_ids, out);
 }
 
 /**
@@ -377,20 +402,27 @@ template<typename ServerType>
 inline void set_permissions(ServerType& server,
 		uint64_t client_id, const permissions& perms)
 {
+	bool contains;
 	std::unique_lock<std::mutex> lock(server.state.client_states_lock);
-	client_state& cstate = *server.state.client_states.get(client_id);
-	std::unique_lock<std::mutex> cstate_lock(cstate.lock);
-	cstate.perms = perms;
+	client_state* cstate = server.state.client_states.get(client_id, contains);
+	if (!contains) return; /* the client was already destroyed */
+	std::unique_lock<std::mutex> cstate_lock(cstate->lock);
+	cstate->perms = perms;
 }
 
 template<typename ServerType>
 inline permissions get_permissions(
 		ServerType& server, uint64_t client_id)
 {
+	bool contains;
 	std::unique_lock<std::mutex> lock(server.state.client_states_lock);
-	client_state& cstate = *server.state.client_states.get(client_id);
-	std::unique_lock<std::mutex> cstate_lock(cstate.lock);
-	return cstate.perms;
+	client_state* cstate = server.state.client_states.get(client_id, contains);
+	if (!contains) {
+		fprintf(stderr, "get_permissions ERROR: The client with the given ID was already removed.\n");
+		return server.state.default_client_permissions;
+	}
+	std::unique_lock<std::mutex> cstate_lock(cstate->lock);
+	return cstate->perms;
 }
 
 /**
@@ -400,6 +432,22 @@ inline bool send_message(socket_type& socket, const void* data, unsigned int len
 	return send(socket.handle, (const char*) data, length, 0) != 0;
 }
 
+inline client_state* acquire_client_lock(
+		server_state& state, uint64_t client_id)
+{
+	bool contains;
+	state.client_states_lock.lock();
+	client_state* cstate = state.client_states.get(client_id, contains);
+	if (!contains) {
+		/* the client was destroyed so return `nullptr` */
+		state.client_states_lock.unlock();
+		return nullptr;
+	}
+	cstate->lock.lock();
+	state.client_states_lock.unlock();
+	return cstate;
+}
+
 /* Precondition: `state.client_states_lock` must be held by the calling thread. */
 template<typename Stream, typename SimulatorData>
 inline bool receive_add_agent(
@@ -407,39 +455,37 @@ inline bool receive_add_agent(
 		server_state& state, uint64_t client_id,
 		simulator<SimulatorData>& sim)
 {
-	client_state& cstate = *state.client_states.get(client_id);
-	cstate.lock.lock();
+	bool contains;
+	client_state* cstate = state.client_states.get(client_id, contains);
+	if (!contains) {
+		state.client_states_lock.unlock();
+		return true; /* the client was already destroyed */
+	}
+	cstate->lock.lock();
 	state.client_states_lock.unlock();
 
 	status response;
-	client_state* cstate_ptr;
 	uint64_t new_agent_id = 0; agent_state* new_agent = nullptr;
-	if (!cstate.perms.add_agent) {
+	if (!cstate->perms.add_agent) {
 		/* the client has no permission for this operation */
-		cstate.lock.unlock();
 		response = status::PERMISSION_ERROR;
 	} else {
 		/* We have to unlock this to avoid deadlock since other simulator
 		   functions (i.e. `move`, `turn`, `do_nothing`) can cause the
 		   simulator to step. This calls `send_step_response` which needs the
 		   client_state locks. */
-		cstate.lock.unlock();
+		cstate->lock.unlock();
 		response = sim.add_agent(new_agent_id, new_agent);
 
-		bool contains;
-		state.client_states_lock.lock();
-		cstate_ptr = state.client_states.get(client_id, contains);
-		if (!contains) {
-			/* the client was destroyed while we were adding the agent */
-			state.client_states_lock.unlock();
+		cstate = acquire_client_lock(state, client_id);
+		if (cstate == nullptr) {
+			/* the client was destroyed while we didn't have the client lock */
 			if (response == status::OK)
 				sim.remove_agent(new_agent_id);
 			return true;
 		}
-		cstate_ptr->lock.lock();
-		state.client_states_lock.unlock();
 		if (response == status::OK) {
-			if (!cstate_ptr->agent_ids.add(new_agent_id)) {
+			if (!cstate->agent_ids.add(new_agent_id)) {
 				sim.remove_agent(new_agent_id);
 				response = status::SERVER_OUT_OF_MEMORY;
 			}
@@ -447,6 +493,7 @@ inline bool receive_add_agent(
 			response = status::SERVER_OUT_OF_MEMORY;
 		}
 	}
+
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(response) + sizeof(new_agent_id) + sizeof(*new_agent));
 	fixed_width_stream<memory_stream> out(mem_stream);
 	if (response == status::OK) {
@@ -455,13 +502,13 @@ inline bool receive_add_agent(
 				   && write(new_agent_id, out)
 				   && write(*new_agent, out, sim.get_config())
 				   && send_message(connection, mem_stream.buffer, mem_stream.position);
-		cstate_ptr->lock.unlock();
+		cstate->lock.unlock();
 		return result;
 	} else {
 		bool result = write(message_type::ADD_AGENT_RESPONSE, out)
 				   && write(response, out)
 				   && send_message(connection, mem_stream.buffer, mem_stream.position);
-		cstate_ptr->lock.unlock();
+		cstate->lock.unlock();
 		return result;
 	}
 }
@@ -473,60 +520,55 @@ inline bool receive_remove_agent(
 		server_state& state, uint64_t client_id,
 		simulator<SimulatorData>& sim)
 {
-	client_state& cstate = *state.client_states.get(client_id);
-	cstate.lock.lock();
+	bool contains;
+	client_state* cstate = state.client_states.get(client_id, contains);
+	if (!contains) {
+		state.client_states_lock.unlock();
+		return true; /* the client was already destroyed */
+	}
+	cstate->lock.lock();
 	state.client_states_lock.unlock();
 
 	uint64_t agent_id = UINT64_MAX;
 	status response;
 	bool success = true;
-	client_state* cstate_ptr = nullptr;
 	if (!read(agent_id, in)) {
-		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		unsigned int index = cstate.agent_ids.index_of(agent_id);
-		if (!cstate.perms.remove_agent) {
+		unsigned int index = cstate->agent_ids.index_of(agent_id);
+		if (!cstate->perms.remove_agent) {
 			/* the client has no permission for this operation */
-			cstate.lock.unlock();
 			response = status::PERMISSION_ERROR;
-		} else if (index == cstate.agent_ids.length) {
-			cstate.lock.unlock();
+		} else if (index == cstate->agent_ids.length) {
 			response = status::INVALID_AGENT_ID;
 		} else {
 			/* We have to unlock this to avoid deadlock since other simulator
 			   functions (i.e. `move`, `turn`, `do_nothing`) can cause the
 			   simulator to step. This calls `send_step_response` which needs the
 			   client_state locks. */
-			cstate.lock.unlock();
+			cstate->lock.unlock();
 
 			response = sim.remove_agent(agent_id);
 
-			bool contains;
-			state.client_states_lock.lock();
-			cstate_ptr = state.client_states.get(client_id, contains);
-			if (!contains) {
-				/* the client was destroyed while we were removing the agent */
-				state.client_states_lock.unlock();
+			cstate = acquire_client_lock(state, client_id);
+			if (cstate == nullptr)
+				/* the client was destroyed while we didn't have the client lock */
 				return true;
-			}
-			cstate_ptr->lock.lock();
-			state.client_states_lock.unlock();
 			if (response == status::OK) {
-				cstate.agent_ids.remove(index);
+				cstate->agent_ids.remove(index);
 			} else if (response == status::OUT_OF_MEMORY) {
 				response = status::SERVER_OUT_OF_MEMORY;
 			}
 		}
 	}
+
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(response));
 	fixed_width_stream<memory_stream> out(mem_stream);
-
 	success &= write(message_type::REMOVE_AGENT_RESPONSE, out)
 			&& write(agent_id, out) && write(response, out)
 			&& send_message(connection, mem_stream.buffer, mem_stream.position);
-	cstate_ptr->lock.unlock();
+	cstate->lock.unlock();
 	return success;
 }
 
@@ -538,22 +580,219 @@ bool receive_remove_client(
 		simulator<SimulatorData>& sim)
 {
 	bool contains; unsigned int bucket;
-	client_state& cstate = *state.client_states.get(client_id, contains, bucket);
-	cstate.lock.lock();
-	if (!cstate.perms.remove_client) {
+	client_state* cstate = state.client_states.get(client_id, contains, bucket);
+	if (!contains) {
+		state.client_states_lock.unlock();
+		return true; /* the client was already destroyed */
+	}
+	cstate->lock.lock();
+	if (!cstate->perms.remove_client) {
 		/* the client has no permission for this operation */
 		return false;
 	}
 
-	while (cstate.agent_ids.length > 0)
-		sim.remove_agent(cstate.agent_ids[--cstate.agent_ids.length]);
-	cstate.lock.unlock();
-	free(cstate);
-	state.client_states.remove_at(bucket);
+	array<uint64_t> agent_ids(1), semaphore_ids(1);
+	core::swap(cstate->agent_ids, agent_ids);
+	core::swap(cstate->semaphore_ids, semaphore_ids);
 
+	/* We have to unlock this to avoid deadlock removing agents and semaphores
+	   can cause the simulator to step, which would call `send_step_response`
+	   which needs these locks. */
+	state.client_states.remove_at(bucket);
+	cstate->lock.unlock();
+	free(*cstate); free(cstate);
 	shutdown(connection.handle, 2);
 	state.client_states_lock.unlock();
+
+	while (agent_ids.length > 0)
+		sim.remove_agent(agent_ids[--agent_ids.length]);
+	while (semaphore_ids.length > 0)
+		sim.remove_semaphore(semaphore_ids[--semaphore_ids.length]);
 	return true;
+}
+
+/* Precondition: `state.client_states_lock` must be held by the calling thread. */
+template<typename Stream, typename SimulatorData>
+inline bool receive_add_semaphore(
+		Stream& in, socket_type& connection,
+		server_state& state, uint64_t client_id,
+		simulator<SimulatorData>& sim)
+{
+	bool contains;
+	client_state* cstate = state.client_states.get(client_id, contains);
+	if (!contains) {
+		state.client_states_lock.unlock();
+		return true; /* the client was already destroyed */
+	}
+	cstate->lock.lock();
+	state.client_states_lock.unlock();
+
+	status response;
+	uint64_t new_semaphore_id = 0;
+	if (!cstate->perms.semaphores) {
+		/* the client has no permission for this operation */
+		response = status::PERMISSION_ERROR;
+	} else {
+		/* We have to unlock this to avoid deadlock since other simulator
+		   functions (i.e. `move`, `turn`, `do_nothing`) can cause the
+		   simulator to step. This calls `send_step_response` which needs the
+		   client_state locks. */
+		cstate->lock.unlock();
+		response = sim.add_semaphore(new_semaphore_id);
+
+		cstate = acquire_client_lock(state, client_id);
+		if (cstate == nullptr) {
+			/* the client was destroyed while we didn't have the client lock */
+			if (response == status::OK)
+				sim.remove_semaphore(new_semaphore_id);
+			return true;
+		}
+		if (response == status::OK) {
+			if (!cstate->semaphore_ids.add(new_semaphore_id)) {
+				sim.remove_semaphore(new_semaphore_id);
+				response = status::SERVER_OUT_OF_MEMORY;
+			}
+		} else if (response == status::OUT_OF_MEMORY) {
+			response = status::SERVER_OUT_OF_MEMORY;
+		}
+	}
+
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(response) + sizeof(new_semaphore_id));
+	fixed_width_stream<memory_stream> out(mem_stream);
+	if (response == status::OK) {
+		bool result = write(message_type::ADD_SEMAPHORE_RESPONSE, out)
+				   && write(response, out)
+				   && write(new_semaphore_id, out)
+				   && send_message(connection, mem_stream.buffer, mem_stream.position);
+		cstate->lock.unlock();
+		return result;
+	} else {
+		bool result = write(message_type::ADD_SEMAPHORE_RESPONSE, out)
+				   && write(response, out)
+				   && send_message(connection, mem_stream.buffer, mem_stream.position);
+		cstate->lock.unlock();
+		return result;
+	}
+}
+
+/* Precondition: `state.client_states_lock` must be held by the calling thread. */
+template<typename Stream, typename SimulatorData>
+inline bool receive_remove_semaphore(
+		Stream& in, socket_type& connection,
+		server_state& state, uint64_t client_id,
+		simulator<SimulatorData>& sim)
+{
+	bool contains;
+	client_state* cstate = state.client_states.get(client_id, contains);
+	if (!contains) {
+		state.client_states_lock.unlock();
+		return true; /* the client was already destroyed */
+	}
+	cstate->lock.lock();
+	state.client_states_lock.unlock();
+
+	uint64_t semaphore_id = UINT64_MAX;
+	status response;
+	bool success = true;
+	if (!read(semaphore_id, in)) {
+		response = status::SERVER_PARSE_MESSAGE_ERROR;
+		success = false;
+	} else {
+		unsigned int index = cstate->semaphore_ids.index_of(semaphore_id);
+		if (!cstate->perms.semaphores) {
+			/* the client has no permission for this operation */
+			response = status::PERMISSION_ERROR;
+		} else if (index == cstate->semaphore_ids.length) {
+			response = status::INVALID_SEMAPHORE_ID;
+		} else {
+			/* We have to unlock this to avoid deadlock since other simulator
+			   functions (i.e. `move`, `turn`, `do_nothing`) can cause the
+			   simulator to step. This calls `send_step_response` which needs the
+			   client_state locks. */
+			cstate->lock.unlock();
+
+			response = sim.remove_semaphore(semaphore_id);
+
+			cstate = acquire_client_lock(state, client_id);
+			if (cstate == nullptr)
+				/* the client was destroyed while we didn't have the client lock */
+				return true;
+			if (response == status::OK) {
+				cstate->semaphore_ids.remove(index);
+			} else if (response == status::OUT_OF_MEMORY) {
+				response = status::SERVER_OUT_OF_MEMORY;
+			}
+		}
+	}
+
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(response));
+	fixed_width_stream<memory_stream> out(mem_stream);
+	success &= write(message_type::REMOVE_SEMAPHORE_RESPONSE, out)
+			&& write(semaphore_id, out) && write(response, out)
+			&& send_message(connection, mem_stream.buffer, mem_stream.position);
+	cstate->lock.unlock();
+	return success;
+}
+
+/* Precondition: `state.client_states_lock` must be held by the calling thread. */
+template<typename Stream, typename SimulatorData>
+inline bool receive_signal_semaphore(
+		Stream& in, socket_type& connection,
+		server_state& state, uint64_t client_id,
+		simulator<SimulatorData>& sim)
+{
+	bool contains;
+	client_state* cstate = state.client_states.get(client_id, contains);
+	if (!contains) {
+		state.client_states_lock.unlock();
+		return true; /* the client was already destroyed */
+	}
+	cstate->lock.lock();
+	state.client_states_lock.unlock();
+
+	uint64_t semaphore_id = UINT64_MAX;
+	status response;
+	bool success = true;
+	if (!read(semaphore_id, in)) {
+		response = status::SERVER_PARSE_MESSAGE_ERROR;
+		success = false;
+	} else {
+		if (semaphore_id == 0 || !cstate->semaphore_ids.contains(semaphore_id)) {
+			response = status::INVALID_SEMAPHORE_ID;
+		} else {
+			/* We have to unlock this to avoid deadlock since other simulator
+			   functions (i.e. `move`, `turn`, `do_nothing`) can cause the
+			   simulator to step. This calls `send_step_response` which needs the
+			   client_state locks. */
+			cstate->lock.unlock();
+			cstate = nullptr;
+
+			response = sim.signal_semaphore(semaphore_id);
+			if (response == status::OUT_OF_MEMORY)
+				response = status::SERVER_OUT_OF_MEMORY;
+		}
+	}
+
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(semaphore_id) + sizeof(response));
+	fixed_width_stream<memory_stream> out(mem_stream);
+
+	success &= write(message_type::SIGNAL_SEMAPHORE_RESPONSE, out)
+			&& write(semaphore_id, out) && write(response, out);
+	if (!success) {
+		if (cstate != nullptr)
+			cstate->lock.unlock();
+		return false;
+	}
+
+	if (cstate == nullptr) {
+		cstate = acquire_client_lock(state, client_id);
+		if (cstate == nullptr)
+			/* the client was destroyed while we didn't have the client lock */
+			return true;
+	}
+	success = send_message(connection, mem_stream.buffer, mem_stream.position);
+	cstate->lock.unlock();
+	return success;
 }
 
 /* Precondition: `state.client_states_lock` must be held by the calling thread. */
@@ -563,8 +802,13 @@ inline bool receive_move(
 		server_state& state, uint64_t client_id,
 		simulator<SimulatorData>& sim)
 {
-	client_state& cstate = *state.client_states.get(client_id);
-	cstate.lock.lock();
+	bool contains;
+	client_state* cstate = state.client_states.get(client_id, contains);
+	if (!contains) {
+		state.client_states_lock.unlock();
+		return true; /* the client was already destroyed */
+	}
+	cstate->lock.lock();
 	state.client_states_lock.unlock();
 
 	uint64_t agent_id = UINT64_MAX;
@@ -573,19 +817,18 @@ inline bool receive_move(
 	status response;
 	bool success = true;
 	if (!read(agent_id, in) || !read(dir, in) || !read(num_steps, in)) {
-		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		if (agent_id == 0 || !cstate.agent_ids.contains(agent_id)) {
-			cstate.lock.unlock();
+		if (agent_id == 0 || !cstate->agent_ids.contains(agent_id)) {
 			response = status::INVALID_AGENT_ID;
 		} else {
 			/* We have to unlock this to avoid deadlock since other simulator
 			   functions (i.e. `move`, `turn`, `do_nothing`) can cause the
 			   simulator to step. This calls `send_step_response` which needs the
 			   client_state locks. */
-			cstate.lock.unlock();
+			cstate->lock.unlock();
+			cstate = nullptr;
 
 			response = sim.move(agent_id, dir, num_steps);
 			if (response == status::OUT_OF_MEMORY)
@@ -598,19 +841,21 @@ inline bool receive_move(
 
 	success &= write(message_type::MOVE_RESPONSE, out)
 			&& write(agent_id, out) && write(response, out);
-	if (!success) return false;
-
-	bool contains;
-	state.client_states_lock.lock();
-	client_state* cstate_ptr = state.client_states.get(client_id, contains);
-	if (!contains) {
-		/* the client was destroyed while we were moving the agent */
-		state.client_states_lock.unlock();
-		return true;
+	if (!success) {
+		if (cstate != nullptr)
+			cstate->lock.unlock();
+		return false;
 	}
-	std::unique_lock<std::mutex> lck(cstate_ptr->lock);
-	state.client_states_lock.unlock();
-	return send_message(connection, mem_stream.buffer, mem_stream.position);
+
+	if (cstate == nullptr) {
+		cstate = acquire_client_lock(state, client_id);
+		if (cstate == nullptr)
+			/* the client was destroyed while we didn't have the client lock */
+			return true;
+	}
+	success = send_message(connection, mem_stream.buffer, mem_stream.position);
+	cstate->lock.unlock();
+	return success;
 }
 
 /* Precondition: `state.client_states_lock` must be held by the calling thread. */
@@ -620,8 +865,13 @@ inline bool receive_turn(
 		server_state& state, uint64_t client_id,
 		simulator<SimulatorData>& sim)
 {
-	client_state& cstate = *state.client_states.get(client_id);
-	cstate.lock.lock();
+	bool contains;
+	client_state* cstate = state.client_states.get(client_id, contains);
+	if (!contains) {
+		state.client_states_lock.unlock();
+		return true; /* the client was already destroyed */
+	}
+	cstate->lock.lock();
 	state.client_states_lock.unlock();
 
 	uint64_t agent_id = UINT64_MAX;
@@ -629,19 +879,18 @@ inline bool receive_turn(
 	status response;
 	bool success = true;
 	if (!read(agent_id, in) || !read(dir, in)) {
-		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		if (agent_id == 0 || !cstate.agent_ids.contains(agent_id)) {
-			cstate.lock.unlock();
+		if (agent_id == 0 || !cstate->agent_ids.contains(agent_id)) {
 			response = status::INVALID_AGENT_ID;
 		} else {
 			/* We have to unlock this to avoid deadlock since other simulator
 			   functions (i.e. `move`, `turn`, `do_nothing`) can cause the
 			   simulator to step. This calls `send_step_response` which needs the
 			   client_state locks. */
-			cstate.lock.unlock();
+			cstate->lock.unlock();
+			cstate = nullptr;
 
 			response = sim.turn(agent_id, dir);
 			if (response == status::OUT_OF_MEMORY)
@@ -654,19 +903,21 @@ inline bool receive_turn(
 
 	success &= write(message_type::TURN_RESPONSE, out)
 			&& write(agent_id, out) && write(response, out);
-	if (!success) return false;
-
-	bool contains;
-	state.client_states_lock.lock();
-	client_state* cstate_ptr = state.client_states.get(client_id, contains);
-	if (!contains) {
-		/* the client was destroyed while we were turning the agent */
-		state.client_states_lock.unlock();
-		return true;
+	if (!success) {
+		if (cstate != nullptr)
+			cstate->lock.unlock();
+		return false;
 	}
-	std::unique_lock<std::mutex> lck(cstate_ptr->lock);
-	state.client_states_lock.unlock();
-	return send_message(connection, mem_stream.buffer, mem_stream.position);
+
+	if (cstate == nullptr) {
+		cstate = acquire_client_lock(state, client_id);
+		if (cstate == nullptr)
+			/* the client was destroyed while we didn't have the client lock */
+			return true;
+	}
+	success = send_message(connection, mem_stream.buffer, mem_stream.position);
+	cstate->lock.unlock();
+	return success;
 }
 
 /* Precondition: `state.client_states_lock` must be held by the calling thread. */
@@ -676,27 +927,31 @@ inline bool receive_do_nothing(
 		server_state& state, uint64_t client_id,
 		simulator<SimulatorData>& sim)
 {
-	client_state& cstate = *state.client_states.get(client_id);
-	cstate.lock.lock();
+	bool contains;
+	client_state* cstate = state.client_states.get(client_id, contains);
+	if (!contains) {
+		state.client_states_lock.unlock();
+		return true; /* the client was already destroyed */
+	}
+	cstate->lock.lock();
 	state.client_states_lock.unlock();
 
 	uint64_t agent_id = UINT64_MAX;
 	status response;
 	bool success = true;
 	if (!read(agent_id, in)) {
-		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		if (agent_id == 0 || !cstate.agent_ids.contains(agent_id)) {
-			cstate.lock.unlock();
+		if (agent_id == 0 || !cstate->agent_ids.contains(agent_id)) {
 			response = status::INVALID_AGENT_ID;
 		} else {
 			/* We have to unlock this to avoid deadlock since other simulator
 			   functions (i.e. `move`, `turn`, `do_nothing`) can cause the
 			   simulator to step. This calls `send_step_response` which needs the
 			   client_state locks. */
-			cstate.lock.unlock();
+			cstate->lock.unlock();
+			cstate = nullptr;
 
 			response = sim.do_nothing(agent_id);
 			if (response == status::OUT_OF_MEMORY)
@@ -708,19 +963,21 @@ inline bool receive_do_nothing(
 
 	success &= write(message_type::DO_NOTHING_RESPONSE, out)
 			&& write(agent_id, out) && write(response, out);
-	if (!success) return false;
-
-	bool contains;
-	state.client_states_lock.lock();
-	client_state* cstate_ptr = state.client_states.get(client_id, contains);
-	if (!contains) {
-		/* the client was destroyed while we were issuing a no-op for the agent */
-		state.client_states_lock.unlock();
-		return true;
+	if (!success) {
+		if (cstate != nullptr)
+			cstate->lock.unlock();
+		return false;
 	}
-	std::unique_lock<std::mutex> lck(cstate_ptr->lock);
-	state.client_states_lock.unlock();
-	return send_message(connection, mem_stream.buffer, mem_stream.position);
+
+	if (cstate == nullptr) {
+		cstate = acquire_client_lock(state, client_id);
+		if (cstate == nullptr)
+			/* the client was destroyed while we didn't have the client lock */
+			return true;
+	}
+	success = send_message(connection, mem_stream.buffer, mem_stream.position);
+	cstate->lock.unlock();
+	return success;
 }
 
 /* Precondition: `state.client_states_lock` must be held by the calling thread. */
@@ -730,8 +987,13 @@ inline bool receive_get_map(
 		server_state& state, uint64_t client_id,
 		simulator<SimulatorData>& sim)
 {
-	client_state& cstate = *state.client_states.get(client_id);
-	cstate.lock.lock();
+	bool contains;
+	client_state* cstate = state.client_states.get(client_id, contains);
+	if (!contains) {
+		state.client_states_lock.unlock();
+		return true; /* the client was already destroyed */
+	}
+	cstate->lock.lock();
 	state.client_states_lock.unlock();
 
 	position bottom_left, top_right;
@@ -740,15 +1002,19 @@ inline bool receive_get_map(
 	array<array<patch_state>> patches(32);
 	bool success = true;
 	if (!read(bottom_left, in) || !read(top_right, in) || !read(get_scent_map, in)) {
-		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
-	} else if (!cstate.perms.get_map) {
+	} else if (!cstate->perms.get_map) {
 		/* the client has no permission for this operation */
-		cstate.lock.unlock();
 		response = status::PERMISSION_ERROR;
 	} else {
-		cstate.lock.unlock();
+		/* We have to unlock this to avoid deadlock since other simulator
+			functions (i.e. `move`, `turn`, `do_nothing`) can cause the
+			simulator to step. This calls `send_step_response` which needs the
+			client_state locks. */
+		cstate->lock.unlock();
+		cstate = nullptr;
+
 		if (get_scent_map) {
 			response = sim.template get_map<true>(bottom_left, top_right, patches);
 		} else {
@@ -770,6 +1036,8 @@ inline bool receive_get_map(
 	success &= write(message_type::GET_MAP_RESPONSE, out) && write(response, out)
 			&& (response != status::OK || write(patches, out, sim.get_config()));
 	if (!success) {
+		if (cstate != nullptr)
+			cstate->lock.unlock();
 		for (array<patch_state>& row : patches) {
 			for (patch_state& patch : row) free(patch);
 			free(row);
@@ -777,18 +1045,14 @@ inline bool receive_get_map(
 		return false;
 	}
 
-	bool contains;
-	state.client_states_lock.lock();
-	client_state* cstate_ptr = state.client_states.get(client_id, contains);
-	if (!contains) {
-		/* the client was destroyed while we were getting the map */
-		state.client_states_lock.unlock();
-		return true;
+	if (cstate == nullptr) {
+		cstate = acquire_client_lock(state, client_id);
+		if (cstate == nullptr)
+			/* the client was destroyed while we didn't have the client lock */
+			return true;
 	}
-	cstate_ptr->lock.lock();
-	state.client_states_lock.unlock();
 	success = send_message(connection, mem_stream.buffer, mem_stream.position);
-	cstate_ptr->lock.unlock();
+	cstate->lock.unlock();
 	for (array<patch_state>& row : patches) {
 		for (patch_state& patch : row) free(patch);
 		free(row);
@@ -803,19 +1067,29 @@ inline bool receive_get_agent_ids(
 		server_state& state, uint64_t client_id,
 		simulator<SimulatorData>& sim)
 {
-	client_state& cstate = *state.client_states.get(client_id);
-	cstate.lock.lock();
+	bool contains;
+	client_state* cstate = state.client_states.get(client_id, contains);
+	if (!contains) {
+		state.client_states_lock.unlock();
+		return true; /* the client was already destroyed */
+	}
+	cstate->lock.lock();
 	state.client_states_lock.unlock();
 
 	status response;
 	array<uint64_t> agent_ids(32);
 	bool success = true;
-	if (!cstate.perms.get_agent_ids) {
+	if (!cstate->perms.get_agent_ids) {
 		/* the client has no permission for this operation */
-		cstate.lock.unlock();
 		response = status::PERMISSION_ERROR;
 	} else {
-		cstate.lock.unlock();
+		/* We have to unlock this to avoid deadlock since other simulator
+			functions (i.e. `move`, `turn`, `do_nothing`) can cause the
+			simulator to step. This calls `send_step_response` which needs the
+			client_state locks. */
+		cstate->lock.unlock();
+		cstate = nullptr;
+
 		response = sim.get_agent_ids(agent_ids);
 		if (response != status::OK) {
 			agent_ids.clear();
@@ -828,19 +1102,21 @@ inline bool receive_get_agent_ids(
 	fixed_width_stream<memory_stream> out(mem_stream);
 	success &= write(message_type::GET_AGENT_IDS_RESPONSE, out) && write(response, out)
 			&& write(agent_ids.length, out) && write(agent_ids.data, out, agent_ids.length);
-	if (!success) return false;
-
-	bool contains;
-	state.client_states_lock.lock();
-	client_state* cstate_ptr = state.client_states.get(client_id, contains);
-	if (!contains) {
-		/* the client was destroyed while we were getting the agent IDs */
-		state.client_states_lock.unlock();
-		return true;
+	if (!success) {
+		if (cstate != nullptr)
+			cstate->lock.unlock();
+		return false;
 	}
-	cstate_ptr->lock.lock();
-	state.client_states_lock.unlock();
-	return send_message(connection, mem_stream.buffer, mem_stream.position);
+
+	if (cstate == nullptr) {
+		cstate = acquire_client_lock(state, client_id);
+		if (cstate == nullptr)
+			/* the client was destroyed while we didn't have the client lock */
+			return true;
+	}
+	success = send_message(connection, mem_stream.buffer, mem_stream.position);
+	cstate->lock.unlock();
+	return success;
 }
 
 template<typename Stream>
@@ -887,8 +1163,13 @@ inline bool receive_get_agent_states(
 		server_state& state, uint64_t client_id,
 		simulator<SimulatorData>& sim)
 {
-	client_state& cstate = *state.client_states.get(client_id);
-	cstate.lock.lock();
+	bool contains;
+	client_state* cstate = state.client_states.get(client_id, contains);
+	if (!contains) {
+		state.client_states_lock.unlock();
+		return true; /* the client was already destroyed */
+	}
+	cstate->lock.lock();
 	state.client_states_lock.unlock();
 
 	status response;
@@ -897,29 +1178,30 @@ inline bool receive_get_agent_states(
 	size_t agent_state_count;
 	bool success = true;
 	if (!read(agent_state_count, in)) {
-		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
 		agent_ids = (uint64_t*) malloc(max((size_t) 1, sizeof(uint64_t) * agent_state_count));
 		agent_states = (agent_state**) malloc(max((size_t) 1, sizeof(agent_state*) * agent_state_count));
 		if (agent_ids == nullptr || agent_states == nullptr) {
-			cstate.lock.unlock();
 			if (agent_ids != nullptr) free(agent_ids);
 			response = status::SERVER_OUT_OF_MEMORY;
 			success = false;
 		} else if (!read(agent_ids, in, agent_state_count)) {
-			cstate.lock.unlock();
 			free(agent_ids);
 			free(agent_states);
 			response = status::SERVER_PARSE_MESSAGE_ERROR;
 			success = false;
-		} else if (!cstate.perms.get_agent_states) {
+		} else if (!cstate->perms.get_agent_states) {
 			/* the client has no permission for this operation */
-			cstate.lock.unlock();
 			response = status::PERMISSION_ERROR;
 		} else {
-			cstate.lock.unlock();
+			/* We have to unlock this to avoid deadlock since other simulator
+				functions (i.e. `move`, `turn`, `do_nothing`) can cause the
+				simulator to step. This calls `send_step_response` which needs the
+				client_state locks. */
+			cstate->lock.unlock();
+			cstate = nullptr;
 
 			/* make sure the agent IDs are valid */
 			response = status::OK;
@@ -945,19 +1227,21 @@ inline bool receive_get_agent_states(
 		free(agent_ids);
 		free(agent_states);
 	}
-	if (!success) return false;
-
-	bool contains;
-	state.client_states_lock.lock();
-	client_state* cstate_ptr = state.client_states.get(client_id, contains);
-	if (!contains) {
-		/* the client was destroyed while we were getting the agent states */
-		state.client_states_lock.unlock();
-		return true;
+	if (!success) {
+		if (cstate != nullptr)
+			cstate->lock.unlock();
+		return false;
 	}
-	std::unique_lock<std::mutex> lck(cstate_ptr->lock);
-	state.client_states_lock.unlock();
-	return send_message(connection, mem_stream.buffer, mem_stream.position);
+
+	if (cstate == nullptr) {
+		cstate = acquire_client_lock(state, client_id);
+		if (cstate == nullptr)
+			/* the client was destroyed while we didn't have the client lock */
+			return true;
+	}
+	success = send_message(connection, mem_stream.buffer, mem_stream.position);
+	cstate->lock.unlock();
+	return success;
 }
 
 /* Precondition: `state.client_states_lock` must be held by the calling thread. */
@@ -967,53 +1251,58 @@ inline bool receive_set_active(
 		server_state& state, uint64_t client_id,
 		simulator<SimulatorData>& sim)
 {
-	client_state& cstate = *state.client_states.get(client_id);
-	cstate.lock.lock();
+	bool contains;
+	client_state* cstate = state.client_states.get(client_id, contains);
+	if (!contains) {
+		state.client_states_lock.unlock();
+		return true; /* the client was already destroyed */
+	}
+	cstate->lock.lock();
 	state.client_states_lock.unlock();
 
 	uint64_t agent_id = UINT64_MAX;
-	bool active, success = true;
+	bool active = false, success = true;
 	status response;
 	if (!read(agent_id, in) || !read(active, in)) {
-		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
-	} else if (!cstate.perms.set_active) {
+	} else if (!cstate->perms.set_active) {
 		/* the client has no permission for this operation */
-		cstate.lock.unlock();
 		response = status::PERMISSION_ERROR;
 	} else {
-		if (agent_id == 0 || !cstate.agent_ids.contains(agent_id)) {
-			cstate.lock.unlock();
+		if (agent_id == 0 || !cstate->agent_ids.contains(agent_id)) {
 			response = status::INVALID_AGENT_ID;
 		} else {
 			/* We have to unlock this to avoid deadlock since other simulator
 			   functions (i.e. `move`, `turn`, `do_nothing`) can cause the
 			   simulator to step. This calls `send_step_response` which needs the
 			   client_state locks. */
-			cstate.lock.unlock();
+			cstate->lock.unlock();
+			cstate = nullptr;
 
 			response = sim.set_agent_active(agent_id, active);
 		}
 	}
+
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(response));
 	fixed_width_stream<memory_stream> out(mem_stream);
-
 	success &= write(message_type::SET_ACTIVE_RESPONSE, out)
 			&& write(agent_id, out) && write(response, out);
-	if (!success) return false;
-
-	bool contains;
-	state.client_states_lock.lock();
-	client_state* cstate_ptr = state.client_states.get(client_id, contains);
-	if (!contains) {
-		/* the client was destroyed while we were setting the active status of the agent */
-		state.client_states_lock.unlock();
-		return true;
+	if (!success) {
+		if (cstate != nullptr)
+			cstate->lock.unlock();
+		return false;
 	}
-	std::unique_lock<std::mutex> lck(cstate_ptr->lock);
-	state.client_states_lock.unlock();
-	return send_message(connection, mem_stream.buffer, mem_stream.position);
+
+	if (cstate == nullptr) {
+		cstate = acquire_client_lock(state, client_id);
+		if (cstate == nullptr)
+			/* the client was destroyed while we didn't have the client lock */
+			return true;
+	}
+	success = send_message(connection, mem_stream.buffer, mem_stream.position);
+	cstate->lock.unlock();
+	return success;
 }
 
 /* Precondition: `state.client_states_lock` must be held by the calling thread. */
@@ -1023,8 +1312,13 @@ inline bool receive_is_active(
 		server_state& state, uint64_t client_id,
 		simulator<SimulatorData>& sim)
 {
-	client_state& cstate = *state.client_states.get(client_id);
-	cstate.lock.lock();
+	bool contains;
+	client_state* cstate = state.client_states.get(client_id, contains);
+	if (!contains) {
+		state.client_states_lock.unlock();
+		return true; /* the client was already destroyed */
+	}
+	cstate->lock.lock();
 	state.client_states_lock.unlock();
 
 	bool active = false;
@@ -1032,42 +1326,43 @@ inline bool receive_is_active(
 	bool success = true;
 	status response;
 	if (!read(agent_id, in)) {
-		cstate.lock.unlock();
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		if (agent_id == 0 || !cstate.agent_ids.contains(agent_id)) {
-			cstate.lock.unlock();
+		if (agent_id == 0 || !cstate->agent_ids.contains(agent_id)) {
 			response = status::INVALID_AGENT_ID;
 		} else {
 			/* We have to unlock this to avoid deadlock since other simulator
 			   functions (i.e. `move`, `turn`, `do_nothing`) can cause the
 			   simulator to step. This calls `send_step_response` which needs the
 			   client_state locks. */
-			cstate.lock.unlock();
+			cstate->lock.unlock();
+			cstate = nullptr;
 
 			response = sim.is_agent_active(agent_id, active);
 		}
 	}
+
 	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(agent_id) + sizeof(response) + sizeof(active));
 	fixed_width_stream<memory_stream> out(mem_stream);
-
 	success &= write(message_type::IS_ACTIVE_RESPONSE, out)
 			&& write(agent_id, out) && write(response, out)
 			&& (response != status::OK || write(active, out));
-	if (!success) return false;
-
-	bool contains;
-	state.client_states_lock.lock();
-	client_state* cstate_ptr = state.client_states.get(client_id, contains);
-	if (!contains) {
-		/* the client was destroyed while we were getting the active status of the agent */
-		state.client_states_lock.unlock();
-		return true;
+	if (!success) {
+		if (cstate != nullptr)
+			cstate->lock.unlock();
+		return false;
 	}
-	std::unique_lock<std::mutex> lck(cstate_ptr->lock);
-	state.client_states_lock.unlock();
-	return send_message(connection, mem_stream.buffer, mem_stream.position);
+
+	if (cstate == nullptr) {
+		cstate = acquire_client_lock(state, client_id);
+		if (cstate == nullptr)
+			/* the client was destroyed while we didn't have the client lock */
+			return true;
+	}
+	success = send_message(connection, mem_stream.buffer, mem_stream.position);
+	cstate->lock.unlock();
+	return success;
 }
 
 template<typename SimulatorData>
@@ -1093,6 +1388,12 @@ void server_process_message(socket_type& connection,
 			receive_remove_agent(in, connection, state, client_id, sim); return;
 		case message_type::REMOVE_CLIENT:
 			receive_remove_client(in, connection, state, client_id, sim); return;
+		case message_type::ADD_SEMAPHORE:
+			receive_add_semaphore(in, connection, state, client_id, sim); return;
+		case message_type::REMOVE_SEMAPHORE:
+			receive_remove_semaphore(in, connection, state, client_id, sim); return;
+		case message_type::SIGNAL_SEMAPHORE:
+			receive_signal_semaphore(in, connection, state, client_id, sim); return;
 		case message_type::MOVE:
 			receive_move(in, connection, state, client_id, sim); return;
 		case message_type::TURN:
@@ -1112,6 +1413,9 @@ void server_process_message(socket_type& connection,
 
 		case message_type::ADD_AGENT_RESPONSE:
 		case message_type::REMOVE_AGENT_RESPONSE:
+		case message_type::ADD_SEMAPHORE_RESPONSE:
+		case message_type::REMOVE_SEMAPHORE_RESPONSE:
+		case message_type::SIGNAL_SEMAPHORE_RESPONSE:
 		case message_type::MOVE_RESPONSE:
 		case message_type::TURN_RESPONSE:
 		case message_type::DO_NOTHING_RESPONSE:
@@ -1205,7 +1509,9 @@ inline bool process_new_connection(
 		fixed_width_stream<memory_stream> out(mem_stream);
 		const simulator_config& config = sim.get_config();
 		if (!write(status::OK, out)
-		 || !write(sim.time, out) || !write(config, out))
+		 || !write(sim.time, out) || !write(config, out)
+		 || !write(cstate.semaphore_ids.length, out)
+		 || !write(cstate.semaphore_ids.data, out, cstate.semaphore_ids.length))
 		{
 			cstate.lock.unlock();
 			fprintf(stderr, "process_new_connection ERROR: Error sending simulation time and configuration.\n");
@@ -1259,16 +1565,21 @@ inline bool send_step_response(
 	std::unique_lock<std::mutex> lock(server.connection_set_lock);
 	bool success = true;
 	for (const auto& client_connection : server.client_connections) {
+		bool contains;
 		server.state.client_states_lock.lock();
-		client_state& cstate = *server.state.client_states.get(client_connection.value.id);
-		cstate.lock.lock();
+		client_state* cstate = server.state.client_states.get(client_connection.value.id, contains);
+		if (!contains) {
+			server.state.client_states_lock.unlock();
+			continue; /* this client was already destroyed */
+		}
+		cstate->lock.lock();
 		server.state.client_states_lock.unlock();
-		const array<uint64_t>& agent_ids = cstate.agent_ids;
+		const array<uint64_t>& agent_ids = cstate->agent_ids;
 		memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(unsigned int) +
 				(unsigned int) agent_ids.length * (sizeof(uint64_t) + sizeof(agent_state)));
 		fixed_width_stream<memory_stream> out(mem_stream);
 		if (!write(message_type::STEP_RESPONSE, out)) {
-			cstate.lock.unlock();
+			cstate->lock.unlock();
 			success = false;
 			continue;
 		}
@@ -1295,7 +1606,7 @@ inline bool send_step_response(
 				}
 			}
 		}
-		cstate.lock.unlock();
+		cstate->lock.unlock();
 		if (!client_success || !write_extra_data(out, std::forward<ExtraData>(extra_data)...)) {
 			success = false;
 			continue;
@@ -1436,11 +1747,10 @@ inline bool init(client<ClientData>& new_client) {
  * Sends an `add_agent` message to the server from the client `c`. Once the
  * server responds, the function
  * `on_add_agent(ClientType&, uint64_t, status, agent_state&)` will be invoked,
- * where the first argument is `c`, the second is the ID of the new agent
- * (which will be UINT64_MAX upon error), and the third is the response (OK if
- * successful, and a different value if an error occurred), and  the fourth is
- * the state of the new agent. Note the fourth argument is uninitialized if an
- * error occurred.
+ * where the first argument is `c`, the second is the ID of the new agent, and
+ * the third is the response (OK if successful, and a different value if an
+ * error occurred), and the fourth is the state of the new agent. Note the
+ * fourth argument is uninitialized if an error occurred.
  *
  * \returns `true` if the sending is successful; `false` otherwise.
  */
@@ -1465,6 +1775,59 @@ bool send_remove_agent(ClientType& c, uint64_t agent_id) {
 	fixed_width_stream<memory_stream> out(mem_stream);
 	return write(message_type::REMOVE_AGENT, out)
 		&& write(agent_id, out)
+		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
+}
+
+/**
+ * Sends an `add_semaphore` message to the server from the client `c`. Once the
+ * server responds, the function
+ * `on_add_semaphore(ClientType&, uint64_t, status)` will be invoked, where the
+ * first argument is `c`, the second is the ID of the new semaphore, and the
+ * third is the response (OK if successful, and a different value if an error
+ * occurred).
+ *
+ * \returns `true` if the sending is successful; `false` otherwise.
+ */
+template<typename ClientType>
+bool send_add_semaphore(ClientType& c) {
+	message_type message = message_type::ADD_SEMAPHORE;
+	return send_message(c.connection, &message, sizeof(message));
+}
+
+/**
+ * Sends a `remove_semaphore` message to the server from the client `c`. Once
+ * the server responds, the function
+ * `on_remove_semaphore(ClientType&, uint64_t, status)` will be invoked, where
+ * the first argument is `c`, the second is the ID of the semaphore, and the
+ * third is the response (OK if successful, and a different value if an error
+ * occurred).
+ *
+ * \returns `true` if the sending is successful; `false` otherwise.
+ */
+template<typename ClientType>
+bool send_remove_semaphore(ClientType& c, uint64_t semaphore_id) {
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(semaphore_id));
+	fixed_width_stream<memory_stream> out(mem_stream);
+	return write(message_type::REMOVE_SEMAPHORE, out)
+		&& write(semaphore_id, out)
+		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
+}
+
+/**
+ * Sends a `signal_semaphore` message to the server from the client `c`. Once
+ * the server responds, the function
+ * `on_signal_semaphore(ClientType&, uint64_t, status)` will be invoked, where
+ * the first argument is `c`, the second is `semaphore_id`, and the third is
+ * the response: OK if successful, and a different value if and error occurred.
+ *
+ * \returns `true` if the sending is successful; `false` otherwise.
+ */
+template<typename ClientType>
+bool send_signal_semaphore(ClientType& c, uint64_t semaphore_id) {
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(semaphore_id));
+	fixed_width_stream<memory_stream> out(mem_stream);
+	return write(message_type::SIGNAL_SEMAPHORE, out)
+		&& write(semaphore_id, out)
 		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
 }
 
@@ -1665,6 +2028,51 @@ inline bool receive_remove_agent_response(ClientType& c) {
 		success = false;
 	}
 	on_remove_agent(c, agent_id, response);
+	return success;
+}
+
+template<typename ClientType>
+inline bool receive_add_semaphore_response(ClientType& c) {
+	status response;
+	uint64_t semaphore_id = UINT64_MAX;
+	bool success = true;
+	fixed_width_stream<socket_type> in(c.connection);
+	if (!read(response, in)) {
+		response = status::CLIENT_PARSE_MESSAGE_ERROR;
+		success = false;
+	} else if (response == status::OK && !read(semaphore_id, in)) {
+		response = status::CLIENT_PARSE_MESSAGE_ERROR;
+		success = false;
+	}
+	on_add_semaphore(c, semaphore_id, response);
+	return success;
+}
+
+template<typename ClientType>
+inline bool receive_remove_semaphore_response(ClientType& c) {
+	status response;
+	uint64_t semaphore_id = 0;
+	bool success = true;
+	fixed_width_stream<socket_type> in(c.connection);
+	if (!read(semaphore_id, in) || !read(response, in)) {
+		response = status::CLIENT_PARSE_MESSAGE_ERROR;
+		success = false;
+	}
+	on_remove_semaphore(c, semaphore_id, response);
+	return success;
+}
+
+template<typename ClientType>
+inline bool receive_signal_semaphore_response(ClientType& c) {
+	status response;
+	uint64_t semaphore_id = 0;
+	bool success = true;
+	fixed_width_stream<socket_type> in(c.connection);
+	if (!read(semaphore_id, in) || !read(response, in)) {
+		response = status::CLIENT_PARSE_MESSAGE_ERROR;
+		success = false;
+	}
+	on_signal_semaphore(c, semaphore_id, response);
 	return success;
 }
 
@@ -1921,6 +2329,12 @@ void run_response_listener(ClientType& c) {
 			receive_add_agent_response(c); continue;
 		case message_type::REMOVE_AGENT_RESPONSE:
 			receive_remove_agent_response(c); continue;
+		case message_type::ADD_SEMAPHORE_RESPONSE:
+			receive_add_semaphore_response(c); continue;
+		case message_type::REMOVE_SEMAPHORE_RESPONSE:
+			receive_remove_semaphore_response(c); continue;
+		case message_type::SIGNAL_SEMAPHORE_RESPONSE:
+			receive_signal_semaphore_response(c); continue;
 		case message_type::MOVE_RESPONSE:
 			receive_move_response(c); continue;
 		case message_type::TURN_RESPONSE:
@@ -1943,6 +2357,9 @@ void run_response_listener(ClientType& c) {
 		case message_type::ADD_AGENT:
 		case message_type::REMOVE_AGENT:
 		case message_type::REMOVE_CLIENT:
+		case message_type::ADD_SEMAPHORE:
+		case message_type::REMOVE_SEMAPHORE:
+		case message_type::SIGNAL_SEMAPHORE:
 		case message_type::MOVE:
 		case message_type::TURN:
 		case message_type::DO_NOTHING:
@@ -2045,8 +2462,8 @@ template<typename ClientData>
 uint64_t reconnect_client(
 		client<ClientData>& existing_client, uint64_t client_id,
 		const char* server_address, const char* server_port,
-		uint64_t*& agent_ids, agent_state*& agent_states,
-		unsigned int& agent_count)
+		uint64_t*& agent_ids, agent_state*& agent_states, unsigned int& agent_count,
+		uint64_t*& semaphore_ids, unsigned int& semaphore_count)
 {
 	uint64_t simulator_time;
 	auto process_connection = [&](socket_type& connection)
@@ -2072,20 +2489,32 @@ uint64_t reconnect_client(
 		}
 
 		/* read the simulator time and configuration */
+		size_t s_semaphore_count;
 		simulator_config& config = *((simulator_config*) alloca(sizeof(simulator_config)));
 		if (!read(simulator_time, in)
-		 || !read(config, in))
+		 || !read(config, in)
+		 || !read(s_semaphore_count, in))
 		{
 			fprintf(stderr, "reconnect_client ERROR: Error receiving simulator time and configuration.\n");
 			remove_client(existing_client); return false;
 		}
 		swap(existing_client.config, config);
 		free(config); /* free the old configuration */
+		semaphore_count = (unsigned int) s_semaphore_count;
+
+		semaphore_ids = (uint64_t*) malloc(max((size_t) 1, sizeof(uint64_t) * semaphore_count));
+		if (semaphore_ids == nullptr) {
+			fprintf(stderr, "reconnect_client ERROR: Insufficient memory for `semaphore_ids`.\n");
+			remove_client(existing_client); return false;
+		} else if (!read(semaphore_ids, in, s_semaphore_count)) {
+			fprintf(stderr, "reconnect_client ERROR: Error reading semaphore IDs.\n");
+			remove_client(existing_client); free(semaphore_ids); return false;
+		}
 
 		size_t s_agent_count;
 		if (read_agent_states(in, agent_ids, agent_states, s_agent_count, existing_client.config) != status::OK) {
 			fprintf(stderr, "reconnect_client ERROR: Error reading agent states.\n");
-			remove_client(existing_client); return false;
+			remove_client(existing_client); free(semaphore_ids); return false;
 		}
 		agent_count = (unsigned int) s_agent_count;
 
@@ -2152,15 +2581,16 @@ template<typename ClientData>
 uint64_t reconnect_client(
 		client<ClientData>& existing_client, uint64_t client_id,
 		const char* server_address, uint16_t server_port,
-		uint64_t*& agent_ids, agent_state*& agent_states,
-		unsigned int& agent_count)
+		uint64_t*& agent_ids, agent_state*& agent_states, unsigned int& agent_count,
+		uint64_t*& semaphore_ids, unsigned int& semaphore_count)
 {
 	constexpr static unsigned int BUFFER_SIZE = 8;
 	char port_str[BUFFER_SIZE];
 	if (snprintf(port_str, BUFFER_SIZE, "%u", server_port) > (int) BUFFER_SIZE - 1)
 		return false;
 
-	return reconnect_client(existing_client, client_id, server_address, port_str, agent_ids, agent_states, agent_count);
+	return reconnect_client(existing_client, client_id, server_address, port_str,
+			agent_ids, agent_states, agent_count, semaphore_ids, semaphore_count);
 }
 
 /**

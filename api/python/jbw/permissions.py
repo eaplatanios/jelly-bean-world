@@ -26,6 +26,7 @@ class Permissions:
   get_map = False
   get_agent_ids = False
   get_agent_states = False
+  semaphores = False
 
 GRANT_ALL_PERMISSIONS = Permissions()
 GRANT_ALL_PERMISSIONS.add_agent = True
@@ -35,6 +36,7 @@ GRANT_ALL_PERMISSIONS.set_active = True
 GRANT_ALL_PERMISSIONS.get_map = True
 GRANT_ALL_PERMISSIONS.get_agent_ids = True
 GRANT_ALL_PERMISSIONS.get_agent_states = True
+GRANT_ALL_PERMISSIONS.semaphores = True
 
 DENY_ALL_PERMISSIONS = Permissions()
 DENY_ALL_PERMISSIONS.add_agent = False
@@ -44,3 +46,4 @@ DENY_ALL_PERMISSIONS.set_active = False
 DENY_ALL_PERMISSIONS.get_map = False
 DENY_ALL_PERMISSIONS.get_agent_ids = False
 DENY_ALL_PERMISSIONS.get_agent_states = False
+DENY_ALL_PERMISSIONS.semaphores = False

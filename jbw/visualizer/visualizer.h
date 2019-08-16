@@ -1,3 +1,19 @@
+/**
+ * Copyright 2019, The Jelly Bean World Authors. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not
+ * use this file except in compliance with the License. You may obtain a copy of
+ * the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+ * License for the specific language governing permissions and limitations under
+ * the License.
+ */
+
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include "vulkan_renderer.h"
@@ -88,6 +104,10 @@ inline void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 			v->track_agent_id = 9;
 		} else if (key == GLFW_KEY_B) {
 			v->render_background = !v->render_background;
+		} else if (key == GLFW_KEY_LEFT_BRACKET) {
+			v->semaphore_signal_period *= 2;
+		} else if (key == GLFW_KEY_RIGHT_BRACKET) {
+			v->semaphore_signal_period = max(1ull, v->semaphore_signal_period / 2);
 		}
 	}
 }
@@ -111,6 +131,10 @@ struct visualizer_client_data {
 	status get_agent_states_response = status::OK;
 	const agent_state* agent_states = nullptr;
 	size_t agent_state_count = 0;
+
+	std::atomic_bool waiting_for_semaphore_op;
+	uint64_t semaphore_id;
+	status semaphore_op_response = status::OK;
 
 	visualizer_client_data() {
 		waiting_for_get_map.store(false);
@@ -184,6 +208,10 @@ class visualizer
 	unsigned int current_patch_size_texels;
 
 	SimulatorType& sim;
+	uint64_t semaphore;
+	unsigned long long semaphore_signal_time;
+	unsigned long long semaphore_signal_period;
+	std::thread semaphore_signaler;
 
 	vulkan_renderer renderer;
 	shader background_vertex_shader, background_fragment_shader;
@@ -236,12 +264,17 @@ public:
 
 	visualizer(SimulatorType& sim,
 		uint32_t window_width, uint32_t window_height,
-		uint64_t track_agent_id, float pixels_per_cell) :
+		uint64_t track_agent_id, float pixels_per_cell,
+		bool draw_scent_map, float max_steps_per_second) :
 			width(window_width), height(window_height), sim(sim),
+			semaphore(0), semaphore_signal_time(0),
 			background_binding(0, sizeof(vertex)), item_binding(0, sizeof(item_vertex)),
 			track_agent_id(track_agent_id), tracking_animating(false),
-			scene_ready(false), render_background(true), running(true)
+			scene_ready(false), render_background(draw_scent_map),
+			running(true)
 	{
+		semaphore_signal_period = round(1000.0f / max_steps_per_second);
+
 		camera_position[0] = 0.5f;
 		camera_position[1] = 0.5f;
 		translate_end_position[0] = camera_position[0];
@@ -420,6 +453,21 @@ public:
 			throw new std::runtime_error("visualizer ERROR: Failed to initialize rendering pipeline.");
 		}
 
+		if (!create_semaphore(sim)) {
+			cleanup_renderer();
+			renderer.delete_sampler(tex_sampler);
+			renderer.delete_dynamic_texture_image(scent_map_texture);
+			renderer.delete_descriptor_set_layout(layout);
+			renderer.delete_vertex_buffer(scent_quad_buffer);
+			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
+			renderer.delete_shader(item_vertex_shader);
+			renderer.delete_shader(item_fragment_shader);
+			renderer.delete_shader(background_vertex_shader);
+			renderer.delete_shader(background_fragment_shader);
+			glfwDestroyWindow(window); glfwTerminate();
+			throw new std::runtime_error("visualizer ERROR: Failed to create simulator semaphore.");
+		}
+
 		prepare_scene(sim);
 
 		if (track_agent_id != 0) {
@@ -433,6 +481,20 @@ public:
 		map_retriever = std::thread([&,this]() {
 			run_map_retriever(sim);
 		});
+
+		semaphore_signaler = std::thread([&]() {
+			while (running) {
+				signal_semaphore(sim);
+				semaphore_signal_time = milliseconds();
+				unsigned long long remaining_time = semaphore_signal_period;
+				while (true) {
+					std::this_thread::sleep_for(std::chrono::milliseconds(min(remaining_time, 100ull)));
+					unsigned long long current_time = milliseconds();
+					if (current_time > semaphore_signal_time + semaphore_signal_period) break;
+					remaining_time = semaphore_signal_time + semaphore_signal_period - current_time;
+				}
+			}
+		});
 	}
 
 	~visualizer() {
@@ -443,6 +505,12 @@ public:
 				map_retriever.join();
 			} catch (...) { }
 		}
+		if (semaphore_signaler.joinable()) {
+			try {
+				semaphore_signaler.join();
+			} catch (...) { }
+		}
+		delete_semaphore(sim);
 		renderer.wait_until_idle();
 		renderer.delete_sampler(tex_sampler);
 		renderer.delete_dynamic_texture_image(scent_map_texture);
@@ -487,11 +555,9 @@ public:
 		float right = camera_position[0] + 0.5f * (width / pixel_density);
 		float bottom = camera_position[1] - 0.5f * (height / pixel_density);
 		float top = camera_position[1] + 0.5f * (height / pixel_density);
-		{
-			while (running && (left < left_bound || right > right_bound || bottom < bottom_bound || top > top_bound))
-				scene_ready = false;
-			if (!running) return true;
-		}
+		while (running && (left < left_bound || right > right_bound || bottom < bottom_bound || top > top_bound))
+			scene_ready = false;
+		if (!running) return true;
 
 		/* construct the model view matrix */
 		float up[] = { 0.0f, 1.0f, 0.0f };
@@ -529,11 +595,12 @@ public:
 			height = out_height;
 		};
 
-		std::unique_lock<std::mutex> lck(scene_lock);
+		while (!scene_lock.try_lock()) { }
 		void* pv_uniform_data = (void*) &uniform_data;
 		bool result = renderer.draw_frame(cb, reset_command_buffers, get_window_dimensions, &ub, &pv_uniform_data, 1);
 		scene_ready = false;
 		scene_ready_cv.notify_one();
+		scene_lock.unlock();
 		return result;
 	}
 
@@ -570,7 +637,7 @@ private:
 				size_t new_capacity = 2 * item_quad_buffer_capacity;
 				while (required_item_vertices > new_capacity)
 					new_capacity *= 2;
-				if (!HasLock) scene_lock.lock();
+				if (!HasLock) while (!scene_lock.try_lock()) { }
 				renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
 				if (!renderer.create_dynamic_vertex_buffer(item_quad_buffer, new_capacity * sizeof(item_vertex))) {
 					fprintf(stderr, "visualizer.prepare_scene_helper ERROR: Unable to expand `item_quad_buffer`.\n");
@@ -588,20 +655,18 @@ private:
 			for (int64_t y = bottom_left_corner.y; y <= top_right_corner.y; y++) {
 				if (y_index == patches.length || y != patches[y_index][0].patch_position.y) {
 					/* fill the patches in this row with empty pixels */
-					if (render_background_map) {
-						const int64_t patch_offset_y = y - bottom_left_corner.y;
-						for (unsigned int a = 0; a <= top_right_corner.x - bottom_left_corner.x; a++) {
-							pixel& p = scent_map_texture_data[patch_offset_y * texture_width + a];
-							p.a = 255;
-						}
+					const int64_t patch_offset_y = y - bottom_left_corner.y;
+					for (unsigned int a = 0; a <= top_right_corner.x - bottom_left_corner.x; a++) {
+						pixel& p = scent_map_texture_data[patch_offset_y * texture_width + a];
+						p.a = 255;
+					}
 
-						const int64_t offset_y = patch_offset_y * patch_size_texels;
-						for (unsigned int b = 0; b < patch_size_texels; b++) {
-							for (unsigned int a = 0; a < texture_width_cells; a++) {
-								position texture_position = position(a, b + offset_y);
-								pixel& p = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
-								p.r = 0; p.g = 0; p.b = 0;
-							}
+					const int64_t offset_y = patch_offset_y * patch_size_texels;
+					for (unsigned int b = 0; b < patch_size_texels; b++) {
+						for (unsigned int a = 0; a < texture_width_cells; a++) {
+							position texture_position = position(a, b + offset_y);
+							pixel& p = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
+							p.r = 0; p.g = 0; p.b = 0;
 						}
 					}
 					continue;
@@ -614,26 +679,35 @@ private:
 					const position offset = patch_offset * patch_size_texels;
 					if (x_index == row.length || x != row[x_index].patch_position.x) {
 						/* fill this patch with empty pixels */
-						if (render_background_map) {
-							pixel& p = scent_map_texture_data[patch_offset.y * texture_width + patch_offset.x];
-							p.a = 255;
+						pixel& p = scent_map_texture_data[patch_offset.y * texture_width + patch_offset.x];
+						p.a = 255;
 
-							for (unsigned int b = 0; b < patch_size_texels; b++) {
-								for (unsigned int a = 0; a < patch_size_texels; a++) {
-									position texture_position = position(a, b) + offset;
-									pixel& p = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
-									p.r = 0; p.g = 0; p.b = 0;
-								}
+						for (unsigned int b = 0; b < patch_size_texels; b++) {
+							for (unsigned int a = 0; a < patch_size_texels; a++) {
+								position texture_position = position(a, b) + offset;
+								pixel& p = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
+								p.r = 0; p.g = 0; p.b = 0;
 							}
 						}
 						continue;
 					}
 					const patch_state& patch = row[x_index++];
 
-					if (render_background_map) {
-						pixel& p = scent_map_texture_data[patch_offset.y * texture_width + patch_offset.x];
-						p.a = 229;
+					pixel& p = scent_map_texture_data[patch_offset.y * texture_width + patch_offset.x];
+					p.a = 229;
 
+					if (!render_background_map) {
+						/* fill this patch with blank pixels */
+						uint8_t blank = (patch.fixed ? 255 : 204);
+						for (unsigned int b = 0; b < patch_size_texels; b++) {
+							for (unsigned int a = 0; a < patch_size_texels; a++) {
+								position texture_position = position(a, b) + offset;
+								pixel& p = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
+								p.r = blank; p.g = blank; p.b = blank;
+							}
+						}
+					} else {
+						/* fill this patch with values from the scent map */
 						for (unsigned int b = 0; b < patch_size_texels; b++) {
 							for (unsigned int a = 0; a < patch_size_texels; a++) {
 								/* first average the scent across the cells in this texel */
@@ -774,14 +848,12 @@ private:
 			};
 
 			/* transfer all data to GPU */
-			if (!HasLock) scene_lock.lock();
+			if (!HasLock) while (!scene_lock.try_lock()) { }
 			item_vertex_count = new_item_vertex_count;
 			current_patch_size_texels = patch_size_texels;
 			renderer.transfer_dynamic_vertex_buffer(item_quad_buffer, sizeof(item_vertex) * item_vertex_count);
-			if (render_background_map) {
-				renderer.transfer_dynamic_texture_image(scent_map_texture, image_format::R8G8B8A8_UNORM);
-				renderer.fill_vertex_buffer(scent_quad_buffer, vertices, sizeof(vertex) * 4);
-			}
+			renderer.transfer_dynamic_texture_image(scent_map_texture, image_format::R8G8B8A8_UNORM);
+			renderer.fill_vertex_buffer(scent_quad_buffer, vertices, sizeof(vertex) * 4);
 
 		} else {
 			/* no patches are visible, so move the quad outside the view */
@@ -792,10 +864,9 @@ private:
 				{{top + 10.0f, top + 10.0f}, {0.0f, 0.0f}}
 			};
 
-			if (!HasLock) scene_lock.lock();
+			if (!HasLock) while (!scene_lock.try_lock()) { }
 			item_vertex_count = new_item_vertex_count;
-			if (render_background_map)
-				renderer.fill_vertex_buffer(scent_quad_buffer, vertices, sizeof(vertex) * 4);
+			renderer.fill_vertex_buffer(scent_quad_buffer, vertices, sizeof(vertex) * 4);
 		}
 
 		left_bound = floor(left / patch_size) * patch_size;
@@ -820,18 +891,10 @@ private:
 		draw_items.descriptor_sets[0] = set;
 
 		float clear_color[] = { 0.0f, 0.0f, 0.0f, 1.0f };
-		if (render_background_map) {
-			if (!renderer.record_command_buffer(cb, fb, clear_color, pass, draw_scent_map, draw_items)) {
-				cleanup_renderer();
-				if (!HasLock) scene_lock.unlock();
-				return false;
-			}
-		} else {
-			if (!renderer.record_command_buffer(cb, fb, clear_color, pass, draw_items)) {
-				cleanup_renderer();
-				if (!HasLock) scene_lock.unlock();
-				return false;
-			}
+		if (!renderer.record_command_buffer(cb, fb, clear_color, pass, draw_scent_map, draw_items)) {
+			cleanup_renderer();
+			if (!HasLock) scene_lock.unlock();
+			return false;
 		}
 		if (!HasLock) {
 			scene_ready_cv.notify_one();
@@ -1063,6 +1126,79 @@ private:
 		return send_mpi_requests(sim);
 	}
 
+	template<typename SimulatorData>
+	bool create_semaphore(simulator<SimulatorData>& sim) {
+		if (sim.add_semaphore(semaphore) != status::OK) {
+			fprintf(stderr, "visualizer.create_semaphore ERROR: Unable to add simulator semaphore.\n");
+			return false;
+		} else if (sim.signal_semaphore(semaphore) != status::OK) {
+			fprintf(stderr, "visualizer.create_semaphore ERROR: Unable to signal simulator semaphore.\n");
+			return false;
+		}
+		return true;
+	}
+
+	template<typename SimulatorData>
+	void delete_semaphore(simulator<SimulatorData>& sim) {
+		if (sim.remove_semaphore(semaphore) != status::OK)
+			fprintf(stderr, "visualizer.delete_semaphore ERROR: Unable to remove simulator semaphore.\n");
+	}
+
+	template<typename SimulatorData>
+	void signal_semaphore(simulator<SimulatorData>& sim) {
+		if (sim.signal_semaphore(semaphore) != status::OK)
+			fprintf(stderr, "visualizer.signal_semaphore ERROR: Unable to signal simulator semaphore.\n");
+	}
+
+	bool create_semaphore(client<visualizer_client_data>& sim)
+	{
+		sim.data.waiting_for_semaphore_op = true;
+		if (!send_add_semaphore(sim)) {
+			fprintf(stderr, "visualizer.create_semaphore ERROR: Unable to send `add_semaphore` to server.\n");
+			return false;
+		}
+
+		/* wait for `add_semaphore` response */
+		while (sim.client_running && sim.data.waiting_for_semaphore_op) { }
+		if (!sim.client_running) return false;
+
+		if (sim.data.semaphore_op_response != status::OK) {
+			fprintf(stderr, "visualizer.create_semaphore ERROR: `add_semaphore` failed.\n");
+			return false;
+		}
+		semaphore = sim.data.semaphore_id;
+		return true;
+	}
+
+	void delete_semaphore(client<visualizer_client_data>& sim) {
+		if (sim.client_running) return;
+		sim.data.waiting_for_semaphore_op = true;
+		if (!send_remove_semaphore(sim, semaphore)) {
+			fprintf(stderr, "visualizer.delete_semaphore ERROR: Unable to send `remove_semaphore` to server.\n");
+			return;
+		}
+
+		/* wait for `add_semaphore` response */
+		while (sim.client_running && sim.data.waiting_for_semaphore_op) { }
+	}
+
+	void signal_semaphore(client<visualizer_client_data>& sim) {
+		while (sim.client_running && sim.data.waiting_for_semaphore_op) { }
+		if (!sim.client_running) return;
+
+		if (sim.data.semaphore_op_response != status::OK) {
+			fprintf(stderr, "visualizer.signal_semaphore ERROR: `signal_semaphore` failed.\n");
+			sim.data.semaphore_op_response = status::OK;
+			return;
+		}
+
+		sim.data.waiting_for_semaphore_op = true;
+		if (!send_signal_semaphore(sim, semaphore)) {
+			fprintf(stderr, "visualizer.signal_semaphore ERROR: Unable to send `signal_semaphore` to server.\n");
+			return;
+		}
+	}
+
 	bool setup_renderer() {
 		dynamic_texture_image dynamic_textures[] = { scent_map_texture };
 		uint32_t texture_bindings[] = { 1 };
@@ -1220,6 +1356,8 @@ private:
 	template<typename A> friend void cursor_position_callback(GLFWwindow*, double, double);
 	template<typename A> friend void key_callback(GLFWwindow*, int, int, int, int);
 	friend void on_lost_connection(client<visualizer_client_data>&);
+	friend void on_step(client<visualizer_client_data>&,
+		status, const array<uint64_t>&, const agent_state*);
 };
 
 void on_add_agent(
@@ -1233,6 +1371,30 @@ void on_remove_agent(client<visualizer_client_data>& c,
 		uint64_t agent_id, status response)
 {
 	fprintf(stderr, "WARNING: `on_remove_agent` should not be called.\n");
+}
+
+void on_add_semaphore(client<visualizer_client_data>& c,
+		uint64_t semaphore_id, status response)
+{
+	c.data.semaphore_op_response = response;
+	c.data.semaphore_id = semaphore_id;
+	c.data.waiting_for_semaphore_op = false;
+}
+
+void on_remove_semaphore(client<visualizer_client_data>& c,
+		uint64_t semaphore_id, status response)
+{
+	c.data.semaphore_op_response = response;
+	c.data.semaphore_id = semaphore_id;
+	c.data.waiting_for_semaphore_op = false;
+}
+
+void on_signal_semaphore(client<visualizer_client_data>& c,
+		uint64_t semaphore_id, status response)
+{
+	c.data.semaphore_op_response = response;
+	c.data.semaphore_id = semaphore_id;
+	c.data.waiting_for_semaphore_op = false;
 }
 
 void on_move(client<visualizer_client_data>& c, uint64_t agent_id, status response)
@@ -1286,11 +1448,15 @@ void on_is_active(client<visualizer_client_data>& c, uint64_t agent_id, status r
 	fprintf(stderr, "WARNING: `on_is_active` should not be called.\n");
 }
 
-inline void on_step(client<visualizer_client_data>& c,
+inline void on_step(
+		client<visualizer_client_data>& c,
 		status response,
 		const array<uint64_t>& agent_ids,
 		const agent_state* agent_state_array)
-{ }
+{
+	/*if (c.data.painter != nullptr)
+		send_signal_semaphore(c, c.data.painter->semaphore);*/
+}
 
 void on_lost_connection(client<visualizer_client_data>& c) {
 	fprintf(stderr, "Lost connection to the server.\n");

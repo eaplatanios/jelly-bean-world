@@ -15,8 +15,8 @@
  */
 
 #define _USE_MATH_DEFINES
-#include "simulator.h"
-#include "mpi.h"
+#include <jbw/simulator.h>
+#include <jbw/mpi.h>
 
 #include <core/timer.h>
 #include <cmath>
@@ -370,6 +370,7 @@ struct client_data {
 	const array<array<patch_state>>* map;
 	fixed_array<uint64_t> agent_ids;
 	agent_state_array agent_states;
+	uint64_t semaphore_id;
 	bool waiting_for_server;
 	std::mutex lock;
 	std::condition_variable condition;
@@ -414,6 +415,33 @@ void on_remove_agent(client<client_data>& c,
 		agent_states.remove_at(bucket);
 		free(*agent); free(agent);
 	}
+	c.data.condition.notify_one();
+}
+
+void on_add_semaphore(client<client_data>& c,
+		uint64_t semaphore_id, status response)
+{
+	std::unique_lock<std::mutex> lck(c.data.lock);
+	c.data.waiting_for_server = false;
+	c.data.semaphore_id = (response == status::OK ? semaphore_id : 0);
+	c.data.condition.notify_one();
+}
+
+void on_remove_semaphore(client<client_data>& c,
+		uint64_t semaphore_id, status response)
+{
+	std::unique_lock<std::mutex> lck(c.data.lock);
+	c.data.waiting_for_server = false;
+	c.data.action_result = (response == status::OK);
+	c.data.condition.notify_one();
+}
+
+void on_signal_semaphore(client<client_data>& c,
+		uint64_t semaphore_id, status response)
+{
+	std::unique_lock<std::mutex> lck(c.data.lock);
+	c.data.waiting_for_server = false;
+	c.data.action_result = (response == status::OK);
 	c.data.condition.notify_one();
 }
 
