@@ -604,6 +604,7 @@ public:
 		renderer.wait_until_idle();
 		renderer.delete_sampler(tex_sampler);
 		renderer.delete_dynamic_texture_image(scent_map_texture);
+		renderer.delete_dynamic_texture_image(visual_field_texture);
 		renderer.delete_descriptor_set_layout(background_layout);
 		renderer.delete_descriptor_set_layout(item_layout);
 		renderer.delete_descriptor_set_layout(visual_field_layout);
@@ -614,6 +615,7 @@ public:
 		renderer.delete_shader(item_fragment_shader);
 		renderer.delete_shader(background_vertex_shader);
 		renderer.delete_shader(background_fragment_shader);
+		renderer.delete_shader(visual_field_fragment_shader);
 		glfwDestroyWindow(window);
 		glfwTerminate();
 	}
@@ -701,7 +703,7 @@ private:
 	bool prepare_scene_helper(
 			const array<array<patch_state>>& patches,
 			position agent_position,
-			float* agent_visual_field,
+			const float* agent_visual_field,
 			bool render_background_map,
 			float left, float right, float bottom, float top)
 	{
@@ -937,28 +939,24 @@ private:
 			const unsigned int vision_range = get_config(sim).vision_range;
 			if (agent_visual_field != nullptr) {
 				const unsigned int color_dimension = get_config(sim).color_dimension;
-				assert(color_dimension == 3);
-				for (int64_t i = 0; i <= (2 * vision_range + 1) * (2 * vision_range + 1); i++) {
-					pixel& p = visual_field_texture_data[i * color_dimension];
-					p.r = (uint8_t) (255 * agent_visual_field[i]);
-					p.g = (uint8_t) (255 * agent_visual_field[i + 1]);
-					p.b = (uint8_t) (255 * agent_visual_field[i + 2]);
-					p.a = 255;
+				for (int64_t i = 0; i < (2 * vision_range + 1) * (2 * vision_range + 1); i++) {
+					pixel& p = visual_field_texture_data[i];
+					vision_to_color(&agent_visual_field[i * color_dimension], p);
 				}
 			}
 
 			/* position the background quad */
-			position visual_field_bottom_left = position { agent_position.x - vision_range, agent_position.y - vision_range };
-			position visual_field_top_right = position { agent_position.x + vision_range + 1, agent_position.y + vision_range + 1 };
+			position visual_field_bottom_left = { agent_position.x - vision_range, agent_position.y - vision_range };
+			position visual_field_top_right = { agent_position.x + vision_range + 1, agent_position.y + vision_range + 1 };
 			vertex vertices[] = {
 				{{(float) bottom_left_corner.x * patch_size, (float) bottom_left_corner.y * patch_size}, {0.0f, 0.0f}},
 				{{(float) bottom_left_corner.x * patch_size, (float) (top_right_corner.y + 1) * patch_size}, {0.0f, (float) texture_height_cells / texture_height}},
 				{{(float) (top_right_corner.x + 1) * patch_size, (float) bottom_left_corner.y * patch_size}, {(float) texture_width_cells / texture_width, 0.0f}},
 				{{(float) (top_right_corner.x + 1) * patch_size, (float) (top_right_corner.y + 1) * patch_size}, {(float) texture_width_cells / texture_width, (float) texture_height_cells / texture_height}},
-				{{(float) visual_field_bottom_left.x * patch_size, (float) visual_field_bottom_left.y * patch_size}, {0.0f, 0.0f}},
-				{{(float) visual_field_bottom_left.x * patch_size, (float) (visual_field_top_right.y + 1) * patch_size}, {0.0f, 1.0f}},
-				{{(float) (visual_field_top_right.x + 1) * patch_size, (float) visual_field_bottom_left.y * patch_size}, {1.0f, 0.0f}},
-				{{(float) (visual_field_top_right.x + 1) * patch_size, (float) (visual_field_top_right.y + 1) * patch_size}, {1.0f, 1.0f}}
+				{{(float) visual_field_bottom_left.x, (float) visual_field_bottom_left.y}, {0.0f, 0.0f}},
+				{{(float) visual_field_bottom_left.x, (float) visual_field_top_right.y}, {0.0f, 1.0f}},
+				{{(float) visual_field_top_right.x, (float) visual_field_bottom_left.y}, {1.0f, 0.0f}},
+				{{(float) visual_field_top_right.x, (float) visual_field_top_right.y}, {1.0f, 1.0f}}
 			};
 
 			/* transfer all data to GPU */
@@ -1011,10 +1009,10 @@ private:
 
 		draw_call<1, 0, 1> draw_visual_field;
 		draw_visual_field.pipeline = visual_field_pipeline;
-		draw_visual_field.first_vertex = 0;
-		draw_visual_field.vertex_count = 4;
+		draw_visual_field.first_vertex = 4;
+		draw_visual_field.vertex_count = (agent_visual_field == nullptr ? 0 : 4);
 		draw_visual_field.vertex_buffers[0] = scent_quad_buffer;
-		draw_visual_field.vertex_buffer_offsets[0] = 4;
+		draw_visual_field.vertex_buffer_offsets[0] = 0;
 		draw_visual_field.descriptor_sets[0] = visual_field_ds;
 
 		float clear_color[] = { 0.0f, 0.0f, 0.0f, 1.0f };
@@ -1055,7 +1053,7 @@ private:
 			}
 		}
 
-		position agent_position;
+		position agent_position = {0, 0};
 		float* agent_visual_field = nullptr;
 		if (track_agent_id != 0) {
 			agent_state* agent;
@@ -1063,9 +1061,10 @@ private:
 			if (agent != nullptr) {
 				agent_position = agent->current_position;
 				unsigned int color_dimension = sim.get_config().color_dimension;
-				unsigned int visual_field_size = (2 * color_dimension + 1) * (2 * color_dimension + 1);
+				unsigned int vision_range = sim.get_config().vision_range;
+				unsigned int visual_field_size = sizeof(float) * (2 * vision_range + 1) * (2 * vision_range + 1) * color_dimension;
 				agent_visual_field = (float*) malloc(visual_field_size);
-				memcpy(agent_visual_field, agent->current_vision, visual_field_size * sizeof(float));
+				memcpy(agent_visual_field, agent->current_vision, visual_field_size);
 				float new_target_position[] = {agent->current_position.x + 0.5f, agent->current_position.y + 0.5f};
 				agent->lock.unlock();
 
@@ -1163,7 +1162,7 @@ private:
 	template<bool HasLock>
 	inline void process_mpi_response(visualizer_client_data& response)
 	{
-		position agent_position;
+		position agent_position = {0, 0};
 		float* agent_visual_field = nullptr;
 		if (response.get_agent_states_response == status::OK && response.track_agent_id != 0) {
 			if (response.agent_state_count > 0) {
@@ -1295,7 +1294,8 @@ private:
 
 	template<typename SimulatorData>
 	void signal_semaphore(simulator<SimulatorData>& sim) {
-		if (sim.signal_semaphore(semaphore) != status::OK)
+		status result = sim.signal_semaphore(semaphore);
+		if (result != status::OK && result != status::SEMAPHORE_ALREADY_SIGNALED)
 			fprintf(stderr, "visualizer.signal_semaphore ERROR: Unable to signal simulator semaphore.\n");
 	}
 
@@ -1311,7 +1311,9 @@ private:
 		while (sim.client_running && sim.data.waiting_for_semaphore_op) { }
 		if (!sim.client_running) return false;
 
-		if (sim.data.semaphore_op_response != status::OK) {
+		if (sim.data.semaphore_op_response != status::OK
+		 && sim.data.semaphore_op_response != status::SEMAPHORE_ALREADY_SIGNALED)
+		{
 			fprintf(stderr, "visualizer.create_semaphore ERROR: `add_semaphore` failed.\n");
 			return false;
 		}
@@ -1502,6 +1504,16 @@ private:
 			out.g = (uint8_t) ((1 - black_alpha) * g);
 			out.b = (uint8_t) ((1 - black_alpha) * b);
 		}
+	}
+
+	static inline void vision_to_color(const float* cell_vision, pixel& out) {
+		float x = cell_vision[0];
+		float y = cell_vision[1];
+		float z = cell_vision[2];
+
+		out.r = 255 * (1 - (y + z) / 2);
+		out.g = 255 * (1 - (x + z) / 2);
+		out.b = 255 * (1 - (x + y) / 2);
 	}
 
 	static inline void cross(float (&out)[3],

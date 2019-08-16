@@ -36,9 +36,9 @@ void main() {
     vec2 grid = abs(fract(uv + 0.1f));
     float line_weight;
     if (min(grid.x, grid.y) < 0.2f) {
-		line_weight = texture(tex_sampler, frag_tex_coord / ubo.patch_size_texels).w;
-	} else {
-		line_weight = 1.0f;
+        line_weight = texture(tex_sampler, frag_tex_coord / ubo.patch_size_texels).w;
+    } else {
+        line_weight = 1.0f;
     }
     out_color = (1.0f - line_weight) * vec4(0.0f, 0.0f, 0.0f, 1.0f) + line_weight * vec4(texture(tex_sampler, frag_tex_coord).xyz, 1.0);
 }
