@@ -53,7 +53,7 @@ public struct Environment: ReinforcementLearning.Environment {
       return Observation(
         vision: Tensor<Float>(agentState.vision),
         scent: Tensor<Float>(agentState.scent),
-        moved: Tensor<Bool>(repeating: false, shape: [batchSize]),
+        moved: Tensor<Float>(zeros: []),
         rewardFunction: rewardFunction)
     })
     self.step =  Step(
@@ -105,7 +105,7 @@ public struct Environment: ReinforcementLearning.Environment {
     let observation = Observation(
       vision: Tensor<Float>(agentState.vision),
       scent: Tensor<Float>(agentState.scent),
-      moved: Tensor<Bool>(agentState.position != previousAgentState.position),
+      moved: Tensor<Float>(agentState.position != previousAgentState.position ? 1 : 0),
       rewardFunction: rewardFunction)
     let reward = Tensor<Float>(rewardFunction(for: AgentTransition(
       previousState: previousAgentState,
@@ -129,7 +129,7 @@ public struct Environment: ReinforcementLearning.Environment {
       return Observation(
         vision: Tensor<Float>(agentState.vision),
         scent: Tensor<Float>(agentState.scent),
-        moved: Tensor<Bool>(repeating: false, shape: [batchSize]),
+        moved: Tensor<Float>(zeros: []),
         rewardFunction: rewardFunction)
     })
     step =  Step(
@@ -163,14 +163,14 @@ extension Environment {
   public struct Observation: Differentiable, KeyPathIterable {
     public var vision: Tensor<Float>
     public var scent: Tensor<Float>
-    @noDerivative public var moved: Tensor<Bool>
+    @noDerivative public var moved: Tensor<Float>
     @noDerivative public var rewardFunction: Reward?
 
     @inlinable
     public init(
       vision: Tensor<Float>,
       scent: Tensor<Float>,
-      moved: Tensor<Bool>,
+      moved: Tensor<Float>,
       rewardFunction: Reward?
     ) {
       self.vision = vision
@@ -266,7 +266,7 @@ extension Environment {
         Observation(
           vision: visionDistribution.mode(),
           scent: scentDistribution.mode(),
-          moved: movedDistribution.mode() .> 0,
+          moved: Tensor<Float>(movedDistribution.mode() .> 0),
           rewardFunction: nil)
       }
 
@@ -275,7 +275,7 @@ extension Environment {
         Observation(
           vision: visionDistribution.sample(),
           scent: scentDistribution.sample(),
-          moved: movedDistribution.sample() .> 0,
+          moved: Tensor<Float>(movedDistribution.sample() .> 0),
           rewardFunction: nil)
       }
     }

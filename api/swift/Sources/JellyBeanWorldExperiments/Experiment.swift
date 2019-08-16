@@ -36,7 +36,8 @@ public struct Experiment {
     batchSize: Int,
     stepCount: Int,
     stepCountPerUpdate: Int,
-    resultsDir: URL
+    resultsDir: URL,
+    minimumRunID: Int
   ) throws {
     self.reward = reward
     self.agent = agent
@@ -63,7 +64,7 @@ public struct Experiment {
     ).filter { $0.pathExtension == "tsv" } .compactMap {
       Int($0.deletingPathExtension().lastPathComponent)
     }
-    var runID = 0
+    var runID = minimumRunID
     while runIDs.contains(runID) { runID += 1 }
     self.runID = runID
     self.resultsFile = resultsDir.appendingPathComponent("\(runID).tsv")
@@ -81,8 +82,8 @@ public struct Experiment {
     var environment = try JellyBeanWorld.Environment(
       configurations: configurations,
       parallelizedBatchProcessing: batchSize > 1)
+    var totalReward = Float(0.0)
     var rewardWriteDeque = Deque<Float>(size: writeFrequency)
-    var rewardLogDeque = Deque<Float>(size: logFrequency)
     try withRandomSeedForTensorFlow((Int32(runID), Int32(runID))) {
       var agent = self.agent.create(
         in: environment,
@@ -99,15 +100,15 @@ public struct Experiment {
           maxSteps: stepCountPerUpdate * batchSize,
           callbacks: [{ (environment, trajectory) in
             let reward = trajectory.reward.mean().scalarized()
+            totalReward += reward
             rewardWriteDeque.push(reward)
-            rewardLogDeque.push(reward)
+            if environmentStep % logFrequency == 0 {
+              let rewardRate = totalReward / Float(environmentStep)
+              logger.info("Step: \(environmentStep) | Reward Rate: \(rewardRate)/s")
+            }
             if environmentStep % writeFrequency == 0 {
               let reward = rewardWriteDeque.sum()
               resultsFileHandle?.write("\(environmentStep)\t\(reward)\n".data(using: .utf8)!)
-            }
-            if environmentStep % logFrequency == 0 {
-              let rewardRate = rewardLogDeque.mean()
-              logger.info("Step: \(environmentStep) | Reward Rate: \(rewardRate)/s")
             }
             environmentStep += 1
           }])
@@ -131,15 +132,15 @@ extension JellyBeanWorldExperiments.Agent {
     network: Network,
     observation: Observation,
     batchSize: Int
-   ) -> AnyAgent<JellyBeanWorld.Environment, LSTMState<Float>> {
-    let learningRate = ExponentiallyDecayedLearningRate(
-      baseLearningRate: FixedLearningRate(Float(1e-4)),
-      decayRate: 0.999,
-      decayStepCount: 1,
-      lowerBound: 1e-6)
+   ) -> AnyAgent<JellyBeanWorld.Environment, LSTMCell<Float>.State> {
+    // let learningRate = ExponentiallyDecayedLearningRate(
+    //   baseLearningRate: FixedLearningRate(Float(1e-4)),
+    //   decayRate: 0.999,
+    //   decayStepCount: 1)
+    let learningRate = FixedLearningRate(Float(1e-4))
     let advantageFunction = GeneralizedAdvantageEstimation(
       discountFactor: 0.99,
-      discountWeight: 0.95)
+      discountWeight: 0.9)
     let ppoClip = PPOClip(epsilon: 0.1)
     let ppoPenalty = PPOPenalty(klCutoffFactor: 0.5)
     let ppoValueEstimationLoss = PPOValueEstimationLoss(weight: 0.5, clipThreshold: 0.1)
@@ -153,8 +154,9 @@ extension JellyBeanWorldExperiments.Agent {
         for: environment,
         network: network,
         initialState: network.initialState(batchSize: batchSize),
-        optimizer: AMSGrad(for: network),
+        optimizer: { AMSGrad(for: $0) },
         learningRate: learningRate,
+        maxGradientNorm: 0.5,
         advantageFunction: advantageFunction,
         advantagesNormalizer: nil,
         useTDLambdaReturn: true,
@@ -162,15 +164,16 @@ extension JellyBeanWorldExperiments.Agent {
         penalty: ppoPenalty,
         valueEstimationLoss: ppoValueEstimationLoss,
         entropyRegularization: ppoEntropyRegularization,
-        iterationCountPerUpdate: 1))
+        iterationCountPerUpdate: 4))
     case (.ppo, .plain, .scent):
       let network = ScentActorCritic()
       return AnyAgent(PPOAgent(
         for: environment,
         network: network,
         initialState: network.initialState(batchSize: batchSize),
-        optimizer: AMSGrad(for: network),
+        optimizer: { AMSGrad(for: $0) },
         learningRate: learningRate,
+        maxGradientNorm: 0.5,
         advantageFunction: advantageFunction,
         advantagesNormalizer: nil,
         useTDLambdaReturn: true,
@@ -178,15 +181,16 @@ extension JellyBeanWorldExperiments.Agent {
         penalty: ppoPenalty,
         valueEstimationLoss: ppoValueEstimationLoss,
         entropyRegularization: ppoEntropyRegularization,
-        iterationCountPerUpdate: 1))
+        iterationCountPerUpdate: 4))
     case (.ppo, .plain, .visionAndScent):
       let network = VisionAndScentActorCritic()
       return AnyAgent(PPOAgent(
         for: environment,
         network: network,
         initialState: network.initialState(batchSize: batchSize),
-        optimizer: AMSGrad(for: network),
+        optimizer: { AMSGrad(for: $0) },
         learningRate: learningRate,
+        maxGradientNorm: 0.5,
         advantageFunction: advantageFunction,
         advantagesNormalizer: nil,
         useTDLambdaReturn: true,
@@ -194,7 +198,7 @@ extension JellyBeanWorldExperiments.Agent {
         penalty: ppoPenalty,
         valueEstimationLoss: ppoValueEstimationLoss,
         entropyRegularization: ppoEntropyRegularization,
-        iterationCountPerUpdate: 1))
+        iterationCountPerUpdate: 4))
     case (.ppo, .contextual, _): fatalError("Not supported yet.")
     case (.dqn, _, _): fatalError("Not supported yet.")
     }

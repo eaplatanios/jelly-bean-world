@@ -164,6 +164,10 @@ let resultsDirArg: OptionArgument<PathArgument> = parser.add(
   option: "--results-dir",
   kind: PathArgument.self,
   usage: "Path to the results directory.")
+let minimumRunIDArg: OptionArgument<Int> = parser.add(
+  option: "--minimum-run-id",
+  kind: Int.self,
+  usage: "Minimum run ID to use.")
 
 // The first argument is always the executable, and so we drop it.
 let arguments = Array(ProcessInfo.processInfo.arguments.dropFirst())
@@ -179,8 +183,9 @@ guard let reward = parsedArguments.get(rewardArg) else { throw Error.invalidArgu
 guard let agent = parsedArguments.get(agentArg) else { throw Error.invalidArgument }
 let batchSize = parsedArguments.get(batchSizeArg) ?? 32
 let stepCount = parsedArguments.get(stepCountArg) ?? 10_000_000
-let stepCountPerUpdate = parsedArguments.get(stepCountPerUpdateArg) ?? 128
+let stepCountPerUpdate = parsedArguments.get(stepCountPerUpdateArg) ?? 512
 let rewardRatePeriod = parsedArguments.get(rewardRatePeriodArg) ?? 100_000
+let minimumRunID = parsedArguments.get(minimumRunIDArg) ?? 0
 
 switch parsedArguments.get(commandArg) {
 case .run:
@@ -194,7 +199,8 @@ case .run:
     batchSize: batchSize,
     stepCount: stepCount,
     stepCountPerUpdate: stepCountPerUpdate,
-    resultsDir: resultsDir)
+    resultsDir: resultsDir,
+    minimumRunID: minimumRunID)
   try! experiment.run(writeFrequency: 100, logFrequency: 1000)
 case .plot:
   let resultsPlotter = ResultsPlot(
