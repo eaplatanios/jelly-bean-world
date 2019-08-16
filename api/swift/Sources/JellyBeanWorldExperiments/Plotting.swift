@@ -20,7 +20,7 @@ fileprivate let plt = Python.import("matplotlib.pyplot")
 fileprivate let sns = Python.import("seaborn")
 
 fileprivate let redPalette = sns.color_palette("Reds", 4)
-fileprivate let bluePalette = sns.color_palette("Blues_d", 4)
+fileprivate let bluePalette = sns.color_palette("Blues_d", 5)
 
 public struct ResultsPlot {
   public let reward: Reward
@@ -66,8 +66,8 @@ public struct ResultsPlot {
       // The following index is used for picking the color for the corresponding lines in the plot.
       let observationIndex: Int = {
         switch observation {
-        case .vision: return 1
-        case .scent: return 2
+        case .vision: return 2
+        case .scent: return 4
         case .visionAndScent: return 0
         }
       }()
@@ -148,12 +148,13 @@ fileprivate struct Line {
 }
 
 extension Line {
-  fileprivate init(fromFile file: URL) throws {
+  fileprivate init?(fromFile file: URL) throws {
     let rows = try String(contentsOf: file, encoding: .utf8)
       .components(separatedBy: .newlines)
       .dropFirst()
       .map { $0.components(separatedBy: "\t") }
       .filter { $0.count == 2 }
+    if rows.isEmpty { return nil }
     self.x = [Float](unsafeUninitializedCapacity: rows.count) { buffer, initializedCount in
       for i in rows.indices { buffer[i] = Float(rows[i][0])! }
       initializedCount = rows.count
@@ -238,8 +239,8 @@ extension Array where Element == Line {
     axes.plot(x, yMean, label: label, color: color, linewidth: 2)
     axes.fill_between(
       x,
-      zip(yMean, yStandardDeviation).map(-),
-      zip(yMean, yStandardDeviation).map(+),
+      zip(yMean, yStandardDeviation).map(-).map { Swift.max($0, 0.0) },
+      zip(yMean, yStandardDeviation).map(+).map { Swift.max($0, 0.0) },
       color: color,
       alpha: 0.1,
       linewidth: 0)
