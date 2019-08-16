@@ -137,18 +137,95 @@ bool write(const patch<Data>& p, Stream& out, DataWriter&&... writer) {
 		&& write(p.data, out, std::forward<DataWriter>(writer)...);
 }
 
-void* alloc_position_keys(size_t n, size_t element_size) {
-	position* keys = (position*) malloc(sizeof(position) * n);
-	if (keys == NULL) return NULL;
-	for (unsigned int i = 0; i < n; i++)
-		position::set_empty(keys[i]);
-	return (void*) keys;
+template<typename K, typename V>
+inline unsigned int binary_search(const array_map<K, V>& a, const K& b) {
+	if (a.size == 0) return 0;
+	return core::binary_search(a.keys, b, 0, a.size - 1);
+}
+
+template<typename T>
+void shift_right(T* list, unsigned int length,
+		unsigned int index, unsigned int shift)
+{
+	for (unsigned int i = length + shift - 1; i > index + shift - 1; i--)
+		move(list[i - shift], list[i]);
+}
+
+template<typename K, typename V, typename ApplyFunction>
+inline bool apply_contiguous(
+		const array_map<K, V>& sorted_map,
+		const K& min, unsigned int count,
+		ApplyFunction apply)
+{
+	unsigned int num_matching_elements = 0;
+	unsigned int i = binary_search(sorted_map, min);
+	for (unsigned int j = 0; j < count; j++) {
+		if (i + num_matching_elements < sorted_map.size && sorted_map.keys[i + num_matching_elements] == min + j) {
+			if (!apply(sorted_map.values[i + num_matching_elements], min + j)) return false;
+			num_matching_elements++;
+		}
+	}
+	return true;
+}
+
+template<typename K, typename V, typename InitFunction>
+inline unsigned int get_or_init_contiguous(
+		array_map<K, V>& sorted_map,
+		unsigned int binary_search_index,
+		const K& min, uint_fast8_t count,
+		InitFunction init)
+{
+	unsigned int num_matching_elements = 0;
+	unsigned int i = binary_search_index;
+	bool* matches = (bool*) alloca(sizeof(bool) * count);
+	for (uint_fast8_t j = 0; j < count; j++) {
+		if (i + num_matching_elements < sorted_map.size && sorted_map.keys[i + num_matching_elements] == min + j) {
+			num_matching_elements++;
+			matches[j] = true;
+		} else {
+			matches[j] = false;
+		}
+	}
+
+	shift_right(sorted_map.keys, sorted_map.size, i + num_matching_elements, count - num_matching_elements);
+	shift_right(sorted_map.values, sorted_map.size, i + num_matching_elements, count - num_matching_elements);
+
+	unsigned int remaining_matching_elements = num_matching_elements;
+	for (uint_fast8_t j = count; j > 0; j--) {
+		if (matches[j - 1]) {
+			move(sorted_map.keys[i + remaining_matching_elements - 1], sorted_map.keys[i + j - 1]);
+			move(sorted_map.values[i + remaining_matching_elements - 1], sorted_map.values[i + j - 1]);
+			remaining_matching_elements--;
+		} else {
+			sorted_map.keys[i + j - 1] = min + j - 1;
+			init(sorted_map.values[i + j - 1], min + j - 1);
+		}
+	}
+	sorted_map.size += count - num_matching_elements;
+	return i;
+}
+
+template<typename K, typename V, typename InitFunction>
+inline unsigned int get_or_init_contiguous(
+		array_map<K, V>& sorted_map,
+		const K& min, uint_fast8_t count,
+		InitFunction init)
+{
+	return get_or_init_contiguous(sorted_map, binary_search(sorted_map, min), min, count, init);
+}
+
+template<typename T>
+bool is_sorted_and_distinct(const T* a, size_t length) {
+	for (size_t i = 1; i < length; i++) {
+		if (a[i] <= a[i - 1]) return false;
+	}
+	return true;
 }
 
 template<typename PerPatchData, typename ItemType>
-struct map {
-	hash_map<position, patch<PerPatchData>> patches;
-	array<position> patch_positions;
+struct map
+{
+	array_map<int64_t, array_map<int64_t, patch<PerPatchData>>> patches;
 
 	unsigned int n;
 	unsigned int mcmc_iterations;
@@ -162,7 +239,7 @@ struct map {
 
 public:
 	map(unsigned int n, unsigned int mcmc_iterations, const ItemType* item_types, unsigned int item_type_count, uint_fast32_t seed) :
-		patches(1024, alloc_position_keys), patch_positions(512), n(n), mcmc_iterations(mcmc_iterations), initial_seed(seed), cache(item_types, item_type_count, n)
+		patches(32), n(n), mcmc_iterations(mcmc_iterations), initial_seed(seed), cache(item_types, item_type_count, n)
 	{
 		rng.seed(seed);
 #if !defined(NDEBUG)
@@ -182,51 +259,22 @@ public:
 
 	~map() { free_helper(); }
 
-	inline patch_type& get_existing_patch(const position& patch_position) {
+	inline patch_type& get_existing_patch(const position& patch_position)
+	{
+		unsigned int i = binary_search(patches, patch_position.y);
 #if !defined(NDEBUG)
-		bool contains;
-		patch_type& patch = patches.get(patch_position, contains);
-		if (!contains) fprintf(stderr, "map.get_existing_patch WARNING: The requested patch does not exist.\n");
-		return patch;
-#else
-		return patches.get(patch_position);
+		if (i == patches.size || patches.keys[i] > patch_position.y)
+			fprintf(stderr, "map.get_existing_patch WARNING: The requested patch does not exist.\n");
 #endif
-	}
 
-	inline patch_type* get_patch_if_exists(const position& patch_position) const
-	{
-		bool contains;
-		patch_type& p = patches.get(patch_position, contains);
-		if (!contains) return NULL;
-		else return &p;
-	}
+		array_map<int64_t, patch_type>& row = patches.values[i];
+		i = binary_search(row, patch_position.x);
+#if !defined(NDEBUG)
+		if (i == row.size || row.keys[i] > patch_position.x)
+			fprintf(stderr, "map.get_existing_patch WARNING: The requested patch does not exist.\n");
+#endif
 
-	template<bool ResizeMap = true>
-	inline patch_type& get_or_make_patch(const position& patch_position)
-	{
-		bool contains; unsigned int bucket;
-		if (ResizeMap) {
-			patches.check_size(alloc_position_keys);
-			patch_positions.ensure_capacity(patch_positions.length + 1);
-		}
-		patch_type& p = patches.get(patch_position, contains, bucket);
-		if (!contains) {
-			/* uniformly sample an existing patch to initialize the new patch */
-			if (patches.table.size > 0) {
-				/* copy the items from the existing patch into the new patch */
-				position sampled_patch_position = patch_positions[rng() % patch_positions.length];
-				init(p, patches.get(sampled_patch_position).items, (patch_position - sampled_patch_position) * n);
-			} else {
-				/* there are no patches so initialize an empty patch */
-				init(p);
-			}
-
-			/* add a new patch */
-			patches.table.keys[bucket] = patch_position;
-			patches.table.size++;
-			patch_positions[patch_positions.length++] = patch_position;
-		}
-		return p;
+		return row.values[i];
 	}
 
 	/**
@@ -244,12 +292,329 @@ public:
 	{
 		unsigned int index = get_neighborhood_positions(world_position, out_patch_positions);
 
-		patches.check_size(patches.table.size + 16, alloc_position_keys);
-		patch_positions.ensure_capacity(patch_positions.length + 16);
-		for (unsigned int i = 0; i < 4; i++)
-			neighborhood[i] = &get_or_make_patch<false>(out_patch_positions[i]);
+		int64_t min_y = out_patch_positions[2].y;
+		int64_t min_x = out_patch_positions[0].x;
 
-		fix_patches(neighborhood, out_patch_positions, 4);
+		/* first check the four rows exist in `patches`, and if not, create them */
+		patches.ensure_capacity(patches.size + 4);
+
+		bool fixed_bottom_left;
+		bool fixed_bottom_right;
+		bool fixed_top_left;
+		bool fixed_top_right;
+
+		unsigned int i = binary_search(patches, min_y);
+		unsigned int row_index = i;
+		unsigned int column_indices[4];
+		if (i < patches.size && patches.keys[i] == min_y) {
+			array_map<int64_t, patch_type>& bottom_row = patches.values[i];
+			unsigned int j = binary_search(bottom_row, min_x);
+			column_indices[1] = j;
+			if (j < bottom_row.size && bottom_row.keys[j] == min_x) {
+				fixed_bottom_left = bottom_row.values[j].fixed;
+				j++;
+			} else {
+				fixed_bottom_left = false;
+			}
+
+			if (j < bottom_row.size && bottom_row.keys[j] == min_x + 1) {
+				fixed_bottom_right = bottom_row.values[j].fixed;
+			} else {
+				fixed_bottom_right = false;
+			}
+			i++;
+		} else {
+			column_indices[1] = 0;
+			fixed_bottom_left = false;
+			fixed_bottom_right = false;
+		}
+
+		if (i < patches.size && patches.keys[i] == min_y + 1) {
+			array_map<int64_t, patch_type>& top_row = patches.values[i];
+			unsigned int j = binary_search(top_row, min_x);
+			column_indices[2] = j;
+			if (j < top_row.size && top_row.keys[j] == min_x) {
+				fixed_top_left = top_row.values[j].fixed;
+				j++;
+			} else {
+				fixed_top_left = false;
+			}
+
+			if (j < top_row.size && top_row.keys[j] == min_x + 1) {
+				fixed_top_right = top_row.values[j].fixed;
+			} else {
+				fixed_top_right = false;
+			}
+		} else {
+			column_indices[2] = 0;
+			fixed_top_left = false;
+			fixed_top_right = false;
+		}
+
+	int64_t start_x[4];
+	uint_fast8_t column_counts[4];
+	if (fixed_bottom_left) {
+		if (fixed_bottom_right) {
+			if (fixed_top_left) {
+				if (fixed_top_right) {
+					column_counts[0] = 0;
+					column_counts[1] = 0;
+					column_counts[2] = 0;
+					column_counts[3] = 0;
+				} else {
+					column_counts[0] = 0;
+					column_counts[1] = 3;
+					column_counts[2] = 3;
+					column_counts[3] = 3;
+					start_x[1] = min_x;
+					start_x[2] = min_x;
+					start_x[3] = min_x;
+				}
+			} else {
+				if (fixed_top_right) {
+					column_counts[0] = 0;
+					column_counts[1] = 3;
+					column_counts[2] = 3;
+					column_counts[3] = 3;
+					start_x[1] = min_x - 1;
+					start_x[2] = min_x - 1;
+					start_x[3] = min_x - 1;
+				} else {
+					column_counts[0] = 0;
+					column_counts[1] = 4;
+					column_counts[2] = 4;
+					column_counts[3] = 4;
+					start_x[1] = min_x - 1;
+					start_x[2] = min_x - 1;
+					start_x[3] = min_x - 1;
+				}
+			}
+		} else {
+			if (fixed_top_left) {
+				if (fixed_top_right) {
+					column_counts[0] = 3;
+					column_counts[1] = 3;
+					column_counts[2] = 3;
+					column_counts[3] = 0;
+					start_x[0] = min_x;
+					start_x[1] = min_x;
+					start_x[2] = min_x;
+				} else {
+					column_counts[0] = 3;
+					column_counts[1] = 3;
+					column_counts[2] = 3;
+					column_counts[3] = 3;
+					start_x[0] = min_x;
+					start_x[1] = min_x;
+					start_x[2] = min_x;
+					start_x[3] = min_x;
+				}
+			} else {
+				if (fixed_top_right) {
+					column_counts[0] = 3;
+					column_counts[1] = 4;
+					column_counts[2] = 4;
+					column_counts[3] = 3;
+					start_x[0] = min_x;
+					start_x[1] = min_x - 1;
+					start_x[2] = min_x - 1;
+					start_x[3] = min_x - 1;
+				} else {
+					column_counts[0] = 3;
+					column_counts[1] = 4;
+					column_counts[2] = 4;
+					column_counts[3] = 4;
+					start_x[0] = min_x;
+					start_x[1] = min_x - 1;
+					start_x[2] = min_x - 1;
+					start_x[3] = min_x - 1;
+				}
+			}
+		}
+	} else {
+		if (fixed_bottom_right) {
+			if (fixed_top_left) {
+				if (fixed_top_right) {
+					column_counts[0] = 3;
+					column_counts[1] = 3;
+					column_counts[2] = 3;
+					column_counts[3] = 0;
+					start_x[0] = min_x - 1;
+					start_x[1] = min_x - 1;
+					start_x[2] = min_x - 1;
+				} else {
+					column_counts[0] = 3;
+					column_counts[1] = 4;
+					column_counts[2] = 4;
+					column_counts[3] = 3;
+					start_x[0] = min_x - 1;
+					start_x[1] = min_x - 1;
+					start_x[2] = min_x - 1;
+					start_x[3] = min_x;
+				}
+			} else {
+				if (fixed_top_right) {
+					column_counts[0] = 3;
+					column_counts[1] = 3;
+					column_counts[2] = 3;
+					column_counts[3] = 3;
+					start_x[0] = min_x - 1;
+					start_x[1] = min_x - 1;
+					start_x[2] = min_x - 1;
+					start_x[3] = min_x - 1;
+				} else {
+					column_counts[0] = 3;
+					column_counts[1] = 4;
+					column_counts[2] = 4;
+					column_counts[3] = 4;
+					start_x[0] = min_x - 1;
+					start_x[1] = min_x - 1;
+					start_x[2] = min_x - 1;
+					start_x[3] = min_x - 1;
+				}
+			}
+		} else {
+			if (fixed_top_left) {
+				if (fixed_top_right) {
+					column_counts[0] = 4;
+					column_counts[1] = 4;
+					column_counts[2] = 4;
+					column_counts[3] = 0;
+					start_x[0] = min_x - 1;
+					start_x[1] = min_x - 1;
+					start_x[2] = min_x - 1;
+				} else {
+					column_counts[0] = 4;
+					column_counts[1] = 4;
+					column_counts[2] = 4;
+					column_counts[3] = 3;
+					start_x[0] = min_x - 1;
+					start_x[1] = min_x - 1;
+					start_x[2] = min_x - 1;
+					start_x[3] = min_x;
+				}
+			} else {
+				if (fixed_top_right) {
+					column_counts[0] = 4;
+					column_counts[1] = 4;
+					column_counts[2] = 4;
+					column_counts[3] = 3;
+					start_x[0] = min_x - 1;
+					start_x[1] = min_x - 1;
+					start_x[2] = min_x - 1;
+					start_x[3] = min_x - 1;
+				} else {
+					column_counts[0] = 4;
+					column_counts[1] = 4;
+					column_counts[2] = 4;
+					column_counts[3] = 4;
+					start_x[0] = min_x - 1;
+					start_x[1] = min_x - 1;
+					start_x[2] = min_x - 1;
+					start_x[3] = min_x - 1;
+				}
+			}
+		}
+	}
+
+		int64_t start_y;
+		uint_fast8_t row_count;
+		if (column_counts[0] != 0) {
+			start_y = min_y - 1;
+			row_count = (column_counts[3] == 0) ? 3 : 4;
+			if (row_index > 0 && patches.keys[row_index - 1] == min_y - 1) row_index--;
+		} else if (column_counts[1] != 0) {
+			start_y = min_y;
+			row_count = 3;
+		} else {
+			/* set `neighborhood` and return since all patches are fixed and return */
+			neighborhood[0] = &patches.values[row_index + 1].values[column_indices[2]];
+			neighborhood[1] = &patches.values[row_index + 1].values[column_indices[2] + 1];
+			neighborhood[2] = &patches.values[row_index].values[column_indices[1]];
+			neighborhood[3] = &patches.values[row_index].values[column_indices[1] + 1];
+			return index;
+		}
+
+		bool first = (patches.size == 0);
+		row_index = get_or_init_contiguous(patches, row_index, start_y, row_count,
+			[](array_map<int64_t, patch_type>& row, int64_t y) { return array_map_init(row, 4); });
+
+		if (first) {
+			/* our `init_patch` function assumes the map isn't empty, so if it is, create an empty patch */
+			patches.values[row_index].keys[0] = start_x[0];
+			init(patches.values[row_index].values[0]);
+			patches.values[row_index].size++;
+		}
+
+		i = row_index;
+		if (column_counts[0] != 0) {
+			patches.values[i].ensure_capacity(patches.values[i].size + column_counts[0]);
+			column_indices[0] = get_or_init_contiguous(patches.values[i], start_x[0], column_counts[0],
+				[&](patch_type& p, int64_t x) {
+					return init_patch(p, position(x, min_y - 1));
+				});
+			i++;
+		}
+		if (column_indices[1] > 0 && patches.values[i].keys[column_indices[1] - 1] == start_x[1])
+			column_indices[1]--;
+		patches.values[i].ensure_capacity(patches.values[i].size + column_counts[1]);
+		column_indices[1] = get_or_init_contiguous(patches.values[i], column_indices[1], start_x[1], column_counts[1],
+			[&](patch_type& p, int64_t x) {
+				return init_patch(p, position(x, min_y));
+			});
+		i++;
+		if (column_indices[2] > 0 && patches.values[i].keys[column_indices[2] - 1] == start_x[2])
+			column_indices[2]--;
+		patches.values[i].ensure_capacity(patches.values[i].size + column_counts[2]);
+		column_indices[2] = get_or_init_contiguous(patches.values[i], column_indices[2], start_x[2], column_counts[2],
+			[&](patch_type& p, int64_t x) {
+				return init_patch(p, position(x, min_y + 1));
+			});
+		i++;
+		if (column_counts[3] != 0) {
+			patches.values[i].ensure_capacity(patches.values[i].size + column_counts[3]);
+			column_indices[3] = get_or_init_contiguous(patches.values[i], start_x[3], column_counts[3],
+				[&](patch_type& p, int64_t x) {
+					return init_patch(p, position(x, min_y + 2));
+				});
+		}
+
+		/* get the neighborhoods of all the patches */
+		position patch_positions[16];
+		patch_neighborhood<patch_type> neighborhoods[16];
+		unsigned int num_patches_to_sample = 0;
+
+		i = row_index;
+		for (uint_fast8_t u = 0; u < 4; u++) {
+			for (uint_fast8_t v = 0; v < column_counts[u]; v++) {
+				if (patches.values[i].values[column_indices[u] + v].fixed) continue;
+				position patch_position = position(patches.values[i].keys[column_indices[u] + v], patches.keys[i]);
+				patch_positions[num_patches_to_sample] = patch_position;
+				get_neighborhood(patch_position, i, column_indices[u] + v, neighborhoods[num_patches_to_sample++]);
+			}
+			if (column_counts[u] != 0) i++;
+		}
+
+		/* construct the Gibbs field and sample the patches at positions_to_sample */
+		gibbs_field<map<PerPatchData, ItemType>> field(
+				cache, patch_positions, neighborhoods, num_patches_to_sample, n);
+		for (unsigned int i = 0; i < mcmc_iterations; i++)
+			field.sample(rng);
+
+		/* set the core four patches to fixed */
+		i = row_index;
+		if (start_y == min_y - 1) i++;
+		unsigned int j0 = column_indices[1];
+		if (start_x[1] == min_x - 1) j0++;
+		unsigned int j1 = column_indices[2];
+		if (start_x[2] == min_x - 1) j1++;
+		neighborhood[0] = &patches.values[i + 1].values[j1];
+		neighborhood[1] = &patches.values[i + 1].values[j1 + 1];
+		neighborhood[2] = &patches.values[i].values[j0];
+		neighborhood[3] = &patches.values[i].values[j0 + 1];
+		for (unsigned int k = 0; k < 4; k++)
+			neighborhood[k]->fixed = true;
+
 		return index;
 	}
 
@@ -266,57 +631,18 @@ public:
 	{
 		get_neighborhood_positions(world_position, patch_positions);
 
-		unsigned int index = 0;
-		for (unsigned int i = 0; i < 4; i++) {
-			neighborhood[index] = get_patch_if_exists(patch_positions[i]);
-			if (neighborhood[index] != NULL) {
-				index++;
-			}
-		}
-
-		return index;
-	}
-
-	/**
-	 * Returns the patches in the world that intersect with a bounding box of
-	 * size n centered at `world_position`. This function will not create any
-	 * missing patches or fix any patches. The number intersecting patches is
-	 * returned.
-	 */
-	unsigned int get_neighborhood(
-			position world_position,
-			patch_type* neighborhood[4],
-			position patch_positions[4],
-			unsigned int& patch_index)
-	{
-		patch_index = get_neighborhood_positions(world_position, patch_positions);
+		int64_t min_y = patch_positions[2].y;
+		int64_t min_x = patch_positions[0].x;
 
 		unsigned int index = 0;
-		for (unsigned int i = 0; i < 4; i++) {
-			neighborhood[index] = get_patch_if_exists(patch_positions[i]);
-			if (neighborhood[index] != NULL) {
-				if (patch_index == i) patch_index = index;
-				index++;
-			}
-		}
+		apply_contiguous(patches, min_y, 2, [&](const array_map<int64_t, patch_type>& row, int64_t y) {
+			return apply_contiguous(row, min_x, 2, [&](patch_type& p, int64_t x) {
+				neighborhood[index++] = &p;
+				return true;
+			});
+		});
 
 		return index;
-	}
-
-	bool get_items(
-			position bottom_left_corner,
-			position top_right_corner,
-			array<item>& items) const
-	{
-		auto process_patch = [&](const patch_type& p, position patch_position) {
-			for (const item& i : p.items)
-				if (i.location.x >= bottom_left_corner.x && i.location.x <= top_right_corner.x
-				 && i.location.y >= bottom_left_corner.y && i.location.y <= top_right_corner.y
-				 && !items.add(i))
-					return false;
-			return true;
-		};
-		return get_state(bottom_left_corner, top_right_corner, process_patch);
 	}
 
 	inline void world_to_patch_coordinates(
@@ -361,6 +687,83 @@ private:
 			result.rem += b;
 		}
 		return result;
+	}
+
+	inline bool init_patch(patch_type& p, const position& patch_position) {
+		/* uniformly sample an existing patch to initialize the new patch */
+		if (patches.size > 0) {
+			/* copy the items from the existing patch into the new patch */
+			unsigned int i;
+			do {
+				i = rng() % patches.size;
+			} while (patches.values[i].size == 0);
+
+			const array_map<int64_t, patch_type>& sampled_row = patches.values[i];
+			unsigned int j = rng() % sampled_row.size;
+			const patch_type& sampled_patch = sampled_row.values[j];
+			if (!init(p, sampled_patch.items, (patch_position - position(sampled_row.keys[j], patches.keys[i])) * n))
+				return false;
+		} else {
+			/* there are no patches so initialize an empty patch */
+			if (!init(p)) return false;
+		}
+		return true;
+	}
+
+	inline void get_neighborhood(
+			position patch_position, unsigned int row_index,
+			unsigned int column_index, patch_neighborhood<patch_type>& n)
+	{
+		int64_t x = patch_position.x;
+		int64_t y = patch_position.y;
+
+		const array_map<int64_t, patch_type>& current_row = patches.values[row_index];
+		n.bottom_left_neighborhood[0] = &current_row.values[column_index];
+		n.bottom_right_neighborhood[0] = &current_row.values[column_index];
+		n.top_left_neighborhood[0] = &current_row.values[column_index];
+		n.top_right_neighborhood[0] = &current_row.values[column_index];
+		n.bottom_left_neighbor_count = 1;
+		n.bottom_right_neighbor_count = 1;
+		n.top_left_neighbor_count = 1;
+		n.top_right_neighbor_count = 1;
+
+		/* check if this row has patches to the right and left of the current patch */
+		if (column_index > 0 && current_row.keys[column_index - 1] == x - 1) {
+			n.bottom_left_neighborhood[n.bottom_left_neighbor_count++] = &current_row.values[column_index - 1];
+			n.top_left_neighborhood[n.top_left_neighbor_count++] = &current_row.values[column_index - 1];
+		} if (column_index + 1 < current_row.size && current_row.keys[column_index + 1] == x + 1) {
+			n.bottom_right_neighborhood[n.bottom_right_neighbor_count++] = &current_row.values[column_index + 1];
+			n.top_right_neighborhood[n.top_right_neighbor_count++] = &current_row.values[column_index + 1];
+		}
+
+		/* check if there are rows above and below the `current_row` */
+		if (row_index > 0 && patches.keys[row_index - 1] == y - 1) {
+			const array_map<int64_t, patch_type>& row = patches.values[row_index - 1];
+			unsigned int i = binary_search(row, x - 1);
+			if (i < row.size && row.keys[i] == x - 1) {
+				n.bottom_left_neighborhood[n.bottom_left_neighbor_count++] = &row.values[i];
+				i++;
+			} if (i < row.size && row.keys[i] == x) {
+				n.bottom_left_neighborhood[n.bottom_left_neighbor_count++] = &row.values[i];
+				n.bottom_right_neighborhood[n.bottom_right_neighbor_count++] = &row.values[i];
+				i++;
+			} if (i < row.size && row.keys[i] == x + 1) {
+				n.bottom_right_neighborhood[n.bottom_right_neighbor_count++] = &row.values[i];
+			}
+		} if (row_index + 1 < patches.size && patches.keys[row_index + 1] == y + 1) {
+			const array_map<int64_t, patch_type>& row = patches.values[row_index + 1];
+			unsigned int i = binary_search(row, x - 1);
+			if (i < row.size && row.keys[i] == x - 1) {
+				n.top_left_neighborhood[n.top_left_neighbor_count++] = &row.values[i];
+				i++;
+			} if (i < row.size && row.keys[i] == x) {
+				n.top_left_neighborhood[n.top_left_neighbor_count++] = &row.values[i];
+				n.top_right_neighborhood[n.top_right_neighbor_count++] = &row.values[i];
+				i++;
+			} if (i < row.size && row.keys[i] == x + 1) {
+				n.top_right_neighborhood[n.top_right_neighbor_count++] = &row.values[i];
+			}
+		}
 	}
 
 	/**
@@ -408,55 +811,26 @@ private:
 		return patch_index;
 	}
 
-	/**
-	 * This function ensures that the given patches are fixed: they cannot be
-	 * modified in the future by further sampling. New neighboring patches are
-	 * created as needed, and sampling is done accordingly.
-	 *
-	 * NOTE: This function assumes `patches` has sufficient capacity to store
-	 * any new patches that may be initialized.
-	 */
-	void fix_patches(
-			patch_type** patches,
-			const position* patch_positions,
-			unsigned int patch_count)
-	{
-		array<position> positions_to_sample(36);
-		for (unsigned int i = 0; i < patch_count; i++) {
-			if (patches[i]->fixed) continue;
-			positions_to_sample.add(patch_positions[i].up().left());
-			positions_to_sample.add(patch_positions[i].up());
-			positions_to_sample.add(patch_positions[i].up().right());
-			positions_to_sample.add(patch_positions[i].left());
-			positions_to_sample.add(patch_positions[i]);
-			positions_to_sample.add(patch_positions[i].right());
-			positions_to_sample.add(patch_positions[i].down().left());
-			positions_to_sample.add(patch_positions[i].down());
-			positions_to_sample.add(patch_positions[i].down().right());
-			insertion_sort(positions_to_sample);
-			unique(positions_to_sample);
+	inline void free_helper() {
+		for (auto row : patches) {
+			for (auto entry : row.value)
+				core::free(entry.value);
+			core::free(row.value);
 		}
-
-		for (unsigned int i = 0; i < positions_to_sample.length; i++) {
-			if (get_or_make_patch<false>(positions_to_sample[i]).fixed) {
-				positions_to_sample.remove(i);
-				i--;
-			}
-		}
-
-		/* construct the Gibbs field and sample the patches at positions_to_sample */
-		gibbs_field<map<PerPatchData, ItemType>> field(
-				*this, cache, positions_to_sample.data, (unsigned int) positions_to_sample.length, n);
-		for (unsigned int i = 0; i < mcmc_iterations; i++)
-			field.sample(rng);
-
-		for (unsigned int i = 0; i < patch_count; i++)
-			patches[i]->fixed = true;
 	}
 
-	inline void free_helper() {
-		for (auto entry : patches)
-			core::free(entry.value);
+	bool is_valid() {
+		if (!is_sorted_and_distinct(patches.keys, patches.size)) {
+			fprintf(stderr, "map.is_valid WARNING: Patch rows are not sorted or distinct.\n");
+			return false;
+		}
+		for (const auto& row : patches) {
+			if (!is_sorted_and_distinct(row.value.keys, row.value.size)) {
+				fprintf(stderr, "map.is_valid WARNING: Found a row with patches that are not sorted or distinct.\n");
+				return false;
+			}
+		}
+		return true;
 	}
 };
 
@@ -465,18 +839,13 @@ inline bool init(map<PerPatchData, ItemType>& world, unsigned int n,
 		unsigned int mcmc_iterations, const ItemType* item_types,
 		unsigned int item_type_count, uint_fast32_t seed)
 {
-	if (!hash_map_init(world.patches, 1024, alloc_position_keys)) {
+	if (!array_map_init(world.patches, 32))
 		return false;
-	} else if (!array_init(world.patch_positions, 512)) {
-		free(world.patches);
-		return false;
-	}
 	world.n = n;
 	world.mcmc_iterations = mcmc_iterations;
 	world.initial_seed = seed;
 	if (!init(world.cache, item_types, item_type_count, n)) {
 		free(world.patches);
-		free(world.patch_positions);
 		return false;
 	}
 
@@ -512,14 +881,63 @@ bool read(map<PerPatchData, ItemType>& world, Stream& in,
 	std::stringstream buffer(std::string(state, length));
 	buffer >> world.rng;
 
-	default_scribe scribe;
+	size_t row_count;
 	if (!read(world.n, in)
 	 || !read(world.mcmc_iterations, in)
 	 || !read(world.initial_seed, in)
-	 || !read(world.patch_positions, in)
-	 || !read(world.patches, in, alloc_position_keys, scribe, patch_reader))
+	 || !read(row_count, in)
+	 || !array_map_init(world.patches, ((size_t) 1) << (core::log2(row_count == 0 ? 1 : row_count) + 1)))
 		return false;
+
+	if (!read(world.patches.keys, in, row_count)) {
+		free(world.patches);
+		return false;
+	}
+	for (size_t i = 0; i < row_count; i++) {
+		size_t column_count;
+		array_map<int64_t, patch<PerPatchData>>& row = world.patches.values[i];
+		if (!read(column_count, in)
+		 || !array_map_init(row, ((size_t) 1) << (core::log2(column_count == 0 ? 1 : column_count) + 1)))
+		{
+			for (auto row : world.patches) {
+				for (auto entry : row.value)
+					free(entry.value);
+				free(row.value);
+			}
+			free(world.patches);
+			return false;
+		}
+		world.patches.size++;
+
+		if (!read(row.keys, in, column_count)) {
+			for (auto row : world.patches) {
+				for (auto entry : row.value)
+					free(entry.value);
+				free(row.value);
+			}
+			free(world.patches);
+			return false;
+		}
+		for (size_t j = 0; j < column_count; j++) {
+			if (!read(row.values[j], in, patch_reader)) {
+				for (auto row : world.patches) {
+					for (auto entry : row.value)
+						free(entry.value);
+					free(row.value);
+				}
+				free(world.patches);
+				return false;
+			}
+			row.size++;
+		}
+	}
+
 	if (!init(world.cache, item_types, item_type_count, world.n)) {
+		for (auto row : world.patches) {
+			for (auto entry : row.value)
+				free(entry.value);
+			free(row.value);
+		}
 		free(world.patches);
 		return false;
 	}
@@ -539,12 +957,21 @@ bool write(const map<PerPatchData, ItemType>& world, Stream& out,
 	 || !write(data.c_str(), out, (unsigned int) data.length()))
 		return false;
 
-	default_scribe scribe;
-	return write(world.n, out)
-		&& write(world.mcmc_iterations, out)
-		&& write(world.initial_seed, out)
-		&& write(world.patch_positions, out)
-		&& write(world.patches, out, scribe, patch_writer);
+	if (!write(world.n, out)
+	 || !write(world.mcmc_iterations, out)
+	 || !write(world.initial_seed, out)
+	 || !write(world.patches.size, out)
+	 || !write(world.patches.keys, out, world.patches.size))
+		return false;
+
+	for (size_t i = 0; i < world.patches.size; i++) {
+		const array_map<int64_t, patch<PerPatchData>>& row = world.patches.values[i];
+		if (!write(row.size, out)
+		 || !write(row.keys, out, row.size)
+		 || !write(row.values, out, row.size, patch_writer))
+			return false;
+	}
+	return true;
 }
 
 } /* namespace jbw */

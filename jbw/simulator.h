@@ -1149,6 +1149,14 @@ bool write(const patch_state& patch, Stream& out, const simulator_config& config
         && write(patch.agent_directions, out, patch.agent_count);
 }
 
+void* alloc_position_keys(size_t n, size_t element_size) {
+    position* keys = (position*) malloc(sizeof(position) * n);
+    if (keys == NULL) return NULL;
+    for (unsigned int i = 0; i < n; i++)
+        position::set_empty(keys[i]);
+    return (void*) keys;
+}
+
 /**
  * Simulator that forms the core of our experimentation framework.
  *
@@ -1168,12 +1176,14 @@ class simulator {
     /* Agents managed by this simulator. */
     hash_map<uint64_t, agent_state*> agents;
 
-    /* A counter for assigning IDs to new agents. */
-    uint64_t agent_id_counter;
+    /* Semaphores in this simulator. */
+    hash_map<uint64_t, bool> semaphores;
 
-    /* Lock for the agents array and their state (not including their requested
-       actions), used to prevent simultaneous updates. */
-    std::mutex agent_states_lock;
+    /* A counter for assigning IDs to new agents and semaphores. */
+    uint64_t id_counter;
+
+    /* Lock for the agent and semaphore tables, used to prevent simultaneous updates. */
+    std::mutex simulator_lock;
 
     /* A map from positions to a list of agents that request to move there. */
     hash_map<position, array<agent_state*>> requested_moves;
@@ -1182,15 +1192,17 @@ class simulator {
     std::mutex requested_move_lock;
 
     /**
-     * Counter for how many agents have acted during each time step. This
-     * counter is used to force the simulator to wait until all agents have
-     * acted, before advancing the simulation time step.
+     * Counter for how many agents have acted and how many semaphores have
+     * signaled during each time step. This counter is used to force the
+     * simulator to wait until all agents have acted and all semaphores have
+     * signaled, before advancing the simulation time step.
      */
     unsigned int acted_agent_count;
 
     /**
-     * The number of active agents in the simulation. The simulation only waits
-     * for agents with `agent_active` set to `true` before advancing time.
+     * The number of active agents and semaphores in the simulation. The
+     * simulation only waits for agents with `agent_active` set to `true`
+     * before advancing time.
      */
     unsigned int active_agent_count;
 
@@ -1212,7 +1224,7 @@ public:
             config.mcmc_iterations,
             config.item_types.data,
             (unsigned int) config.item_types.length, seed),
-        agents(32), agent_id_counter(1), requested_moves(32, alloc_position_keys),
+        agents(32), semaphores(8), id_counter(1), requested_moves(32, alloc_position_keys),
         acted_agent_count(0), active_agent_count(0), data(data), time(0)
     {
         if (!init(scent_model, (double) config.diffusion_param,
@@ -1245,33 +1257,33 @@ public:
      * to its state.
      */
     inline status add_agent(uint64_t& new_agent_id, agent_state*& new_agent) {
-        agent_states_lock.lock();
+        simulator_lock.lock();
         if (!agents.check_size()) {
-            agent_states_lock.unlock();
+            simulator_lock.unlock();
             fprintf(stderr, "simulator.add_agent ERROR: Failed to expand agent table.\n");
             return status::OUT_OF_MEMORY;
         }
 
-        unsigned int bucket = agents.table.index_to_insert(agent_id_counter);
+        unsigned int bucket = agents.table.index_to_insert(id_counter);
         new_agent = (agent_state*) malloc(sizeof(agent_state));
-        new_agent_id = agent_id_counter;
+        new_agent_id = id_counter;
         if (new_agent == nullptr) {
-            agent_states_lock.unlock();
+            simulator_lock.unlock();
             return status::OUT_OF_MEMORY;
         }
 
         status init_status = init(*new_agent, world, scent_model, config, time);
         if (init_status != status::OK) {
             core::free(new_agent);
-            agent_states_lock.unlock();
+            simulator_lock.unlock();
             return init_status;
         }
-        agents.table.keys[bucket] = agent_id_counter;
+        agents.table.keys[bucket] = id_counter;
         agents.values[bucket] = new_agent;
         agents.table.size++;
         active_agent_count++;
-        agent_id_counter++;
-        agent_states_lock.unlock();
+        id_counter++;
+        simulator_lock.unlock();
         return status::OK;
     }
 
@@ -1281,11 +1293,11 @@ public:
      * \param   agent_id  ID of the agent to remove.
      */
     inline status remove_agent(uint64_t agent_id) {
-        agent_states_lock.lock();
+        simulator_lock.lock();
         bool contains; unsigned int bucket;
         agent_state* agent = agents.get(agent_id, contains, bucket);
         if (!contains) {
-            agent_states_lock.unlock();
+            simulator_lock.unlock();
             return status::INVALID_AGENT_ID;
         }
         agents.remove_at(bucket);
@@ -1302,8 +1314,78 @@ public:
 
         if (acted_agent_count == active_agent_count)
             step(); /* advance the simulation by one time step */
-        agent_states_lock.unlock();
+        simulator_lock.unlock();
 
+        return status::OK;
+    }
+
+    /**
+     * Adds a new semaphore for this simulator. Upon success,
+     * `new_semaphore_id` will contain the ID of the new semaphore.
+     */
+    inline status add_semaphore(uint64_t& new_semaphore_id) {
+        simulator_lock.lock();
+        if (!semaphores.check_size()) {
+            simulator_lock.unlock();
+            fprintf(stderr, "simulator.create_semaphore ERROR: Failed to expand semaphore table.\n");
+            return status::OUT_OF_MEMORY;
+        }
+
+        unsigned int bucket = semaphores.table.index_to_insert(id_counter);
+        new_semaphore_id = id_counter;
+        semaphores.table.keys[bucket] = id_counter;
+        semaphores.values[bucket] = false;
+        semaphores.table.size++;
+        active_agent_count++;
+        id_counter++;
+        simulator_lock.unlock();
+        return status::OK;
+    }
+
+    /**
+     * Removes the given semaphore from this simulator.
+     *
+     * \param   semaphore_id  ID of the semaphore to remove.
+     */
+    inline status remove_semaphore(uint64_t semaphore_id) {
+        simulator_lock.lock();
+        bool contains; unsigned int bucket;
+        bool signaled = semaphores.get(semaphore_id, contains, bucket);
+        if (!contains) {
+            simulator_lock.unlock();
+            return status::INVALID_SEMAPHORE_ID;
+        }
+        semaphores.remove_at(bucket);
+        if (signaled)
+            --acted_agent_count;
+
+        if (acted_agent_count == active_agent_count)
+            step(); /* advance the simulation by one time step */
+        simulator_lock.unlock();
+
+        return status::OK;
+    }
+
+    /**
+     * Signals a semaphore in the simulation.
+     *
+     * \param   semaphore_id  ID of the semaphore to signal.
+     */
+    inline status signal_semaphore(uint64_t semaphore_id) {
+        bool contains;
+        simulator_lock.lock();
+        bool& signaled = semaphores.get(semaphore_id, contains);
+        if (!contains) {
+            simulator_lock.unlock();
+            return status::INVALID_SEMAPHORE_ID;
+        } else if (signaled) {
+            simulator_lock.unlock();
+            return status::SEMAPHORE_ALREADY_SIGNALED;
+        }
+        signaled = true;
+        if (++acted_agent_count == active_agent_count)
+            step(); /* advance the simulation by one time step */
+        simulator_lock.unlock();
         return status::OK;
     }
 
@@ -1312,31 +1394,31 @@ public:
      */
     inline status set_agent_active(uint64_t agent_id, bool active) {
         bool contains;
-        agent_states_lock.lock();
+        simulator_lock.lock();
         agent_state* agent_ptr = agents.get(agent_id, contains);
         if (!contains) {
-            agent_states_lock.unlock();
+            simulator_lock.unlock();
             return status::INVALID_AGENT_ID;
         }
         agent_state& agent = *agent_ptr;
         agent.lock.lock();
-        agent_states_lock.unlock();
+        simulator_lock.unlock();
 
         if (agent.agent_active && !active) {
             agent.agent_active = false;
             agent.lock.unlock();
 
-            agent_states_lock.lock();
+            simulator_lock.lock();
             if (acted_agent_count == --active_agent_count)
                 step(); /* advance the simulation by one time step */
-            agent_states_lock.unlock();
+            simulator_lock.unlock();
         } else if (!agent.agent_active && active) {
             agent.agent_active = true;
             agent.lock.unlock();
 
-            agent_states_lock.lock();
+            simulator_lock.lock();
             active_agent_count++;
-            agent_states_lock.unlock();
+            simulator_lock.unlock();
         } else {
             agent.lock.unlock();
         }
@@ -1348,7 +1430,7 @@ public:
      */
     inline status is_agent_active(uint64_t agent_id, bool& active) {
         bool contains;
-        std::unique_lock<std::mutex> lock(agent_states_lock);
+        std::unique_lock<std::mutex> lock(simulator_lock);
         agent_state* agent_ptr = agents.get(agent_id, contains);
         if (!contains)
             return status::INVALID_AGENT_ID;
@@ -1375,14 +1457,14 @@ public:
             return status::PERMISSION_ERROR;
 
         bool contains;
-        agent_states_lock.lock();
+        simulator_lock.lock();
         agent_state& agent = *agents.get(agent_id, contains);
         if (!contains) {
-            agent_states_lock.unlock();
+            simulator_lock.unlock();
             return status::INVALID_AGENT_ID;
         }
         agent.lock.lock();
-        agent_states_lock.unlock();
+        simulator_lock.unlock();
 
         if (agent.agent_acted) {
             agent.lock.unlock();
@@ -1422,10 +1504,10 @@ public:
 
         if (agent.agent_active) {
             agent.lock.unlock();
-            agent_states_lock.lock();
+            simulator_lock.lock();
             if (++acted_agent_count == active_agent_count)
                 step(); /* advance the simulation by one time step */
-            agent_states_lock.unlock();
+            simulator_lock.unlock();
         } else {
             agent.lock.unlock();
         }
@@ -1449,14 +1531,14 @@ public:
             return status::PERMISSION_ERROR;
 
         bool contains;
-        agent_states_lock.lock();
+        simulator_lock.lock();
         agent_state& agent = *agents.get(agent_id, contains);
         if (!contains) {
-            agent_states_lock.unlock();
+            simulator_lock.unlock();
             return status::INVALID_AGENT_ID;
         }
         agent.lock.lock();
-        agent_states_lock.unlock();
+        simulator_lock.unlock();
 
         if (agent.agent_acted) {
             agent.lock.unlock();
@@ -1497,10 +1579,10 @@ public:
 
         if (agent.agent_active) {
             agent.lock.unlock();
-            agent_states_lock.lock();
+            simulator_lock.lock();
             if (++acted_agent_count == active_agent_count)
                 step(); /* advance the simulation by one time step */
-            agent_states_lock.unlock();
+            simulator_lock.unlock();
         } else {
             agent.lock.unlock();
         }
@@ -1517,14 +1599,14 @@ public:
         if (!config.no_op_allowed) return status::PERMISSION_ERROR;
 
         bool contains;
-        agent_states_lock.lock();
+        simulator_lock.lock();
         agent_state& agent = *agents.get(agent_id, contains);
         if (!contains) {
-            agent_states_lock.unlock();
+            simulator_lock.unlock();
             return status::INVALID_AGENT_ID;
         }
         agent.lock.lock();
-        agent_states_lock.unlock();
+        simulator_lock.unlock();
 
         if (agent.agent_acted) {
             agent.lock.unlock();
@@ -1540,10 +1622,10 @@ public:
 
         if (agent.agent_active) {
             agent.lock.unlock();
-            agent_states_lock.lock();
+            simulator_lock.lock();
             if (++acted_agent_count == active_agent_count)
                 step(); /* advance the simulation by one time step */
-            agent_states_lock.unlock();
+            simulator_lock.unlock();
         } else {
             agent.lock.unlock();
         }
@@ -1566,7 +1648,7 @@ public:
     inline void get_agent_states(agent_state** states,
             uint64_t* agent_ids, unsigned int agent_count)
     {
-        std::unique_lock<std::mutex> lock(agent_states_lock);
+        std::unique_lock<std::mutex> lock(simulator_lock);
         for (unsigned int i = 0; i < agent_count; i++) {
             bool contains;
             states[i] = agents.get(agent_ids[i], contains);
@@ -1582,9 +1664,9 @@ public:
      */
     inline status get_agent_ids(array<uint64_t>& agent_ids)
     {
-        std::unique_lock<std::mutex> lock(agent_states_lock);
+        std::unique_lock<std::mutex> lock(simulator_lock);
         if (!agent_ids.ensure_capacity(agent_ids.length + agents.table.size)) {
-            agent_states_lock.unlock();
+            simulator_lock.unlock();
             return status::OUT_OF_MEMORY;
         }
         for (const auto& entry : agents)
@@ -1616,53 +1698,56 @@ public:
         world.world_to_patch_coordinates(bottom_left_corner, bottom_left_patch_position);
         world.world_to_patch_coordinates(top_right_corner, top_right_patch_position);
 
-        while (!agent_states_lock.try_lock()) { }
-        for (int64_t y = bottom_left_patch_position.y - 1; y < top_right_patch_position.y + 1; y++)
+        while (!simulator_lock.try_lock()) { }
+
+        status result = status::OK;
+        apply_contiguous(world.patches, bottom_left_patch_position.y - 1,
+            top_right_patch_position.y - bottom_left_patch_position.y + 2,
+            [&](const array_map<int64_t, patch_type>& row, int64_t y)
         {
             if (!patches.ensure_capacity(patches.length + 1)) {
-                agent_states_lock.unlock();
-                return status::OUT_OF_MEMORY;
+                result = status::OUT_OF_MEMORY;
+                return false;
             }
             array<patch_state>& current_row = patches[patches.length];
             if (!array_init(current_row, 16)) {
-                agent_states_lock.unlock();
-                return status::OUT_OF_MEMORY;
+                result = status::OUT_OF_MEMORY;
+                return false;
             }
             patches.length++;
 
-            for (int64_t x = bottom_left_patch_position.x - 1; x < top_right_patch_position.x + 1; x++)
+            apply_contiguous(row, bottom_left_patch_position.x - 1,
+                top_right_patch_position.x - bottom_left_patch_position.x + 2,
+                [&](const patch_type& patch, int64_t x)
             {
-                const patch_type* patch = world.get_patch_if_exists({x, y});
-                if (patch == NULL) continue;
-
                 if (!current_row.ensure_capacity(current_row.length + 1)) {
-                    agent_states_lock.unlock();
-                    return status::OUT_OF_MEMORY;
+                    result = status::OUT_OF_MEMORY;
+                    return false;
                 }
                 patch_state& state = current_row[current_row.length];
                 if (!init<GetScentMap>(state, config.patch_size,
                     config.scent_dimension, config.color_dimension,
-                    (unsigned int) patch->items.length,
-                    (unsigned int) patch->data.agents.length))
+                    (unsigned int) patch.items.length,
+                    (unsigned int) patch.data.agents.length))
                 {
-                    agent_states_lock.unlock();
-                    return status::OUT_OF_MEMORY;
+                    result = status::OUT_OF_MEMORY;
+                    return false;
                 }
                 current_row.length++;
 
                 state.patch_position = position(x, y);
                 state.item_count = 0;
-                state.fixed = patch->fixed;
-                for (unsigned int i = 0; i < patch->items.length; i++) {
-                    if (patch->items[i].deletion_time == 0) {
-                        state.items[state.item_count] = patch->items[i];
+                state.fixed = patch.fixed;
+                for (unsigned int i = 0; i < patch.items.length; i++) {
+                    if (patch.items[i].deletion_time == 0) {
+                        state.items[state.item_count] = patch.items[i];
                         state.item_count++;
                     }
                 }
 
-                for (unsigned int i = 0; i < patch->data.agents.length; i++) {
-                    state.agent_positions[i] = patch->data.agents[i]->current_position;
-                    state.agent_directions[i] = patch->data.agents[i]->current_direction;
+                for (unsigned int i = 0; i < patch.data.agents.length; i++) {
+                    state.agent_positions[i] = patch.data.agents[i]->current_position;
+                    state.agent_directions[i] = patch.data.agents[i]->current_direction;
                 }
 
                 /* consider all patches in the neighborhood of 'patch' */
@@ -1690,7 +1775,7 @@ public:
                     }
                 }
 
-                for (const item& item : patch->items) {
+                for (const item& item : patch.items) {
                     if (item.deletion_time != 0) continue;
                     position relative_position = item.location - patch_world_position;
                     float* pixel = state.vision + ((relative_position.x*config.patch_size + relative_position.y)*config.color_dimension);
@@ -1698,22 +1783,25 @@ public:
                         pixel[i] += config.item_types[item.item_type].color[i];
                 }
 
-                for (const agent_state* agent : patch->data.agents) {
+                for (const agent_state* agent : patch.data.agents) {
                     position relative_position = agent->current_position - patch_world_position;
                     float* pixel = state.vision + ((relative_position.x*config.patch_size + relative_position.y)*config.color_dimension);
                     for (unsigned int i = 0; i < config.color_dimension; i++)
                         pixel[i] += config.agent_color[i];
                 }
-            }
+
+                return true;
+            });
 
             if (current_row.length == 0) {
                 core::free(current_row);
                 patches.length--;
             }
-        }
+            return true;
+        });
 
-        agent_states_lock.unlock();
-        return status::OK;
+        simulator_lock.unlock();
+        return result;
     }
 
     /**
@@ -1744,12 +1832,13 @@ public:
     static inline void free(simulator& s) {
         s.free_helper();
         core::free(s.agents);
+        core::free(s.semaphores);
         core::free(s.requested_moves);
         core::free(s.config);
         core::free(s.scent_model);
         core::free(s.world);
         core::free(s.data);
-        s.agent_states_lock.~mutex();
+        s.simulator_lock.~mutex();
         s.requested_move_lock.~mutex();
     }
 
@@ -1865,6 +1954,10 @@ private:
             agent->agent_acted = false;
         }
 
+        /* reset all semaphores to their non-signaled state */
+        for (auto entry : semaphores)
+            entry.value = false;
+
 #if !defined(NDEBUG)
         /* check for collisions, if there aren't supposed to be any */
         if (config.collision_policy != movement_conflict_policy::NO_COLLISIONS) {
@@ -1965,29 +2058,34 @@ status init(simulator<SimulatorData>& sim,
     sim.time = 0;
     sim.acted_agent_count = 0;
     sim.active_agent_count = 0;
-    sim.agent_id_counter = 1;
+    sim.id_counter = 1;
     if (!init(sim.data, data)) {
         return status::OUT_OF_MEMORY;
     } else if (!hash_map_init(sim.agents, 32)) {
         free(sim.data); return status::OUT_OF_MEMORY;
-    } else if (!hash_map_init(sim.requested_moves, 32, alloc_position_keys)) {
+    } else if (!hash_map_init(sim.semaphores, 8)) {
         free(sim.data); free(sim.agents); return status::OUT_OF_MEMORY;
-    } else if (!init(sim.config, config)) {
+    } else if (!hash_map_init(sim.requested_moves, 32, alloc_position_keys)) {
         free(sim.data); free(sim.agents);
+        free(sim.semaphores); return status::OUT_OF_MEMORY;
+    } else if (!init(sim.config, config)) {
+        free(sim.data); free(sim.agents); free(sim.semaphores);
         free(sim.requested_moves); return status::OUT_OF_MEMORY;
     } else if (!init(sim.scent_model, (double) sim.config.diffusion_param,
             (double) sim.config.decay_param, sim.config.patch_size, sim.config.deleted_item_lifetime)) {
-        free(sim.data); free(sim.config); free(sim.agents);
+        free(sim.data); free(sim.config);
+        free(sim.agents); free(sim.semaphores);
         free(sim.requested_moves); return status::OUT_OF_MEMORY;
     } else if (!init(sim.world, sim.config.patch_size,
             sim.config.mcmc_iterations,
             sim.config.item_types.data,
             (unsigned int) sim.config.item_types.length, seed)) {
         free(sim.config); free(sim.data);
-        free(sim.agents); free(sim.requested_moves);
-        free(sim.scent_model); return status::OUT_OF_MEMORY;
+        free(sim.agents); free(sim.semaphores);
+        free(sim.requested_moves); free(sim.scent_model);
+        return status::OUT_OF_MEMORY;
     }
-    new (&sim.agent_states_lock) std::mutex();
+    new (&sim.simulator_lock) std::mutex();
     new (&sim.requested_move_lock) std::mutex();
     return status::OK;
 }
@@ -2066,10 +2164,19 @@ bool read(simulator<SimulatorData>& sim, Stream& in, const SimulatorData& data)
         sim.agents.put(id, agent);
     }
 
+    if (!read(sim.semaphores, in)) {
+        for (auto entry : sim.agents) {
+            free(*entry.value); free(entry.value);
+        }
+        free(sim.data); free(sim.agents);
+        free(sim.config); return false;
+    }
+
     if (!read(sim.world, in, sim.config.item_types.data, (unsigned int) sim.config.item_types.length, sim.agents)) {
         for (auto entry : sim.agents) {
             free(*entry.value); free(entry.value);
         }
+        free(sim.semaphores);
         free(sim.data); free(sim.agents);
         free(sim.config); return false;
     }
@@ -2079,12 +2186,17 @@ bool read(simulator<SimulatorData>& sim, Stream& in, const SimulatorData& data)
         for (auto entry : sim.agents) {
             free(*entry.value); free(entry.value);
         }
+        free(sim.semaphores);
         free(sim.data); free(sim.agents);
-        free(sim.config); free(sim.world); return false;
+        free(sim.config); free(sim.world);
+        return false;
     }
 
     /* reinitialize the scent model */
-    if (!read(sim.time, in) || !read(sim.acted_agent_count, in) || !read(sim.active_agent_count, in)
+    if (!read(sim.time, in)
+     || !read(sim.acted_agent_count, in)
+     || !read(sim.active_agent_count, in)
+     || !read(sim.id_counter, in)
      || !init(sim.scent_model, (double) sim.config.diffusion_param,
             (double) sim.config.decay_param, sim.config.patch_size,
             sim.config.deleted_item_lifetime))
@@ -2094,11 +2206,12 @@ bool read(simulator<SimulatorData>& sim, Stream& in, const SimulatorData& data)
         }
         for (auto entry : sim.requested_moves)
             free(entry.value);
+        free(sim.semaphores);
         free(sim.data); free(sim.world); free(sim.agents);
         free(sim.requested_moves); free(sim.config);
         return false;
     }
-    new (&sim.agent_states_lock) std::mutex();
+    new (&sim.simulator_lock) std::mutex();
     new (&sim.requested_move_lock) std::mutex();
     return true;
 }
@@ -2128,11 +2241,13 @@ bool write(const simulator<SimulatorData>& sim, Stream& out)
     }
 
     default_scribe scribe;
-    return write(sim.world, out, agent_ids)
+    return write(sim.semaphores, out)
+        && write(sim.world, out, agent_ids)
         && write(sim.requested_moves, out, scribe, agent_ids)
         && write(sim.time, out)
         && write(sim.acted_agent_count, out)
-        && write(sim.active_agent_count, out);
+        && write(sim.active_agent_count, out)
+        && write(sim.id_counter, out);
 }
 
 } /* namespace jbw */

@@ -212,18 +212,30 @@ void shuffle(T* array, unsigned int length, RNGType& rng) {
 	}
 }
 
+template<typename PatchType>
+struct patch_neighborhood {
+	PatchType* bottom_left_neighborhood[4];
+	PatchType* top_left_neighborhood[4];
+	PatchType* bottom_right_neighborhood[4];
+	PatchType* top_right_neighborhood[4];
+	uint_fast8_t bottom_left_neighbor_count;
+	uint_fast8_t top_left_neighbor_count;
+	uint_fast8_t bottom_right_neighbor_count;
+	uint_fast8_t top_right_neighbor_count;
+};
+
 template<typename Map>
 class gibbs_field
 {
 	typedef typename Map::patch_type patch_type;
 	typedef typename Map::item_type item_type;
 
-	Map& map;
 	gibbs_field_cache<item_type>& cache;
-	position* patch_positions;
-	unsigned int patch_count;
+	const position* patch_positions;
+	const patch_neighborhood<patch_type>* neighborhoods;
+	const unsigned int patch_count;
 
-	unsigned int n;
+	const unsigned int n;
 
 #if SAMPLING_METHOD == MH_SAMPLING
 	float LOG_ITEM_TYPE_COUNT;
@@ -231,10 +243,14 @@ class gibbs_field
 #endif
 
 public:
-	/* NOTE: `patch_positions` is used directly, and not copied, so the caller maintains ownership */
-	gibbs_field(Map& map, gibbs_field_cache<item_type>& cache, position* patch_positions,
+	/* NOTE: `patch_positions` and `neighborhoods` is used directly, and not copied, so the caller maintains ownership */
+	gibbs_field(
+			gibbs_field_cache<item_type>& cache,
+			const position* patch_positions,
+			const patch_neighborhood<patch_type>* neighborhoods,
 			unsigned int patch_count, unsigned int n) :
-		map(map), cache(cache), patch_positions(patch_positions), patch_count(patch_count), n(n)
+		cache(cache), patch_positions(patch_positions),
+		neighborhoods(neighborhoods), patch_count(patch_count), n(n)
 	{
 #if SAMPLING_METHOD == MH_SAMPLING
 		LOG_ITEM_TYPE_COUNT = (float) log(cache.item_type_count);
@@ -250,53 +266,11 @@ public:
 		log_cache<float>& logarithm = log_cache<float>::instance();
 #endif
 		for (unsigned int i = 0; i < patch_count; i++) {
-			position patch_position_offset = patch_positions[i] * n;
-			patch_type* current = map.get_patch_if_exists(patch_positions[i]);
-			patch_type* top = map.get_patch_if_exists(patch_positions[i].up());
-			patch_type* bottom = map.get_patch_if_exists(patch_positions[i].down());
-			patch_type* left = map.get_patch_if_exists(patch_positions[i].left());
-			patch_type* right = map.get_patch_if_exists(patch_positions[i].right());
-			patch_type* top_left = map.get_patch_if_exists(patch_positions[i].up().left());
-			patch_type* top_right = map.get_patch_if_exists(patch_positions[i].up().right());
-			patch_type* bottom_left = map.get_patch_if_exists(patch_positions[i].down().left());
-			patch_type* bottom_right = map.get_patch_if_exists(patch_positions[i].down().right());
-
-			patch_type* bottom_left_neighborhood[4];
-			patch_type* top_left_neighborhood[4];
-			patch_type* bottom_right_neighborhood[4];
-			patch_type* top_right_neighborhood[4];
-			unsigned int bottom_left_neighbor_count = 1;
-			unsigned int top_left_neighbor_count = 1;
-			unsigned int bottom_right_neighbor_count = 1;
-			unsigned int top_right_neighbor_count = 1;
-			bottom_left_neighborhood[0] = current;
-			top_left_neighborhood[0] = current;
-			bottom_right_neighborhood[0] = current;
-			top_right_neighborhood[0] = current;
-			if (left != NULL) {
-				bottom_left_neighborhood[bottom_left_neighbor_count++] = left;
-				top_left_neighborhood[top_left_neighbor_count++] = left;
-			} if (right != NULL) {
-				bottom_right_neighborhood[bottom_right_neighbor_count++] = right;
-				top_right_neighborhood[top_right_neighbor_count++] = right;
-			} if (top != NULL) {
-				top_left_neighborhood[top_left_neighbor_count++] = top;
-				top_right_neighborhood[top_right_neighbor_count++] = top;
-			} if (bottom != NULL) {
-				bottom_left_neighborhood[bottom_left_neighbor_count++] = bottom;
-				bottom_right_neighborhood[bottom_right_neighbor_count++] = bottom;
-			} if (bottom_left != NULL) {
-				bottom_left_neighborhood[bottom_left_neighbor_count++] = bottom_left;
-			} if (top_left != NULL) {
-				top_left_neighborhood[top_left_neighbor_count++] = top_left;
-			} if (bottom_right != NULL) {
-				bottom_right_neighborhood[bottom_right_neighbor_count++] = bottom_right;
-			} if (top_right != NULL) {
-				top_right_neighborhood[top_right_neighbor_count++] = top_right;
-			}
+			const position patch_position_offset = patch_positions[i] * n;
+			const patch_neighborhood<patch_type>& neighborhood = neighborhoods[i];
+			patch_type& current = *neighborhood.top_left_neighborhood[0];
 
 #if SAMPLING_METHOD == GIBBS_SAMPLING
-
 			unsigned int half_n_squared = (n / 2) * (n / 2);
 			shuffle(cache.bottom_left_positions, half_n_squared, rng);
 			shuffle(cache.top_left_positions, half_n_squared, rng);
@@ -304,131 +278,44 @@ public:
 			shuffle(cache.top_right_positions, half_n_squared, rng);
 
 			for (unsigned int j = 0; j < half_n_squared; j++)
-				gibbs_sample_cell(rng, bottom_left_neighborhood, bottom_left_neighbor_count, patch_positions[i], patch_position_offset + cache.bottom_left_positions[j]);
+				gibbs_sample_cell(rng, neighborhood.bottom_left_neighborhood, neighborhood.bottom_left_neighbor_count, patch_position_offset + cache.bottom_left_positions[j]);
 			for (unsigned int j = 0; j < half_n_squared; j++)
-				gibbs_sample_cell(rng, top_right_neighborhood, top_right_neighbor_count, patch_positions[i], patch_position_offset + cache.top_right_positions[j]);
+				gibbs_sample_cell(rng, neighborhood.top_right_neighborhood, neighborhood.top_right_neighbor_count,  patch_position_offset + cache.top_right_positions[j]);
 			for (unsigned int j = 0; j < half_n_squared; j++)
-				gibbs_sample_cell(rng, top_left_neighborhood, top_left_neighbor_count, patch_positions[i], patch_position_offset + cache.top_left_positions[j]);
+				gibbs_sample_cell(rng, neighborhood.top_left_neighborhood, neighborhood.top_left_neighbor_count, patch_position_offset + cache.top_left_positions[j]);
 			for (unsigned int j = 0; j < half_n_squared; j++)
-				gibbs_sample_cell(rng, bottom_right_neighborhood, bottom_right_neighbor_count, patch_positions[i], patch_position_offset + cache.bottom_right_positions[j]);
+				gibbs_sample_cell(rng, neighborhood.bottom_right_neighborhood, neighborhood.bottom_right_neighbor_count, patch_position_offset + cache.bottom_right_positions[j]);
 
 #elif SAMPLING_METHOD == MH_SAMPLING
-
-			// The following step just slows things down a lot without offering much gain since adding
-			// and removing items alone should handle moving items.
-			// /* propose moving each item */
-			// for (unsigned int i = 0; i < current->items.length; i++) {
-			// 	/* propose a new position for this item */
-			// 	const unsigned int item_type = current->items[i].item_type;
-			// 	const position old_position = current->items[i].location;
-			// 	position new_position = patch_position_offset + position(rng() % n, rng() % n);
-			//
-			// 	const patch_type** old_neighborhood;
-			// 	unsigned int old_neighborhood_size;
-			// 	if (old_position.x - patch_position_offset.x < n / 2) {
-			// 		if (old_position.y - patch_position_offset.y < n / 2) {
-			// 			old_neighborhood = bottom_left_neighborhood;
-			// 			old_neighborhood_size = bottom_left_neighbor_count;
-			// 		} else {
-			// 			old_neighborhood = top_left_neighborhood;
-			// 			old_neighborhood_size = top_left_neighbor_count;
-			// 		}
-			// 	} else {
-			// 		if (old_position.y - patch_position_offset.y < n / 2) {
-			// 			old_neighborhood = bottom_right_neighborhood;
-			// 			old_neighborhood_size = bottom_right_neighbor_count;
-			// 		} else {
-			// 			old_neighborhood = top_right_neighborhood;
-			// 			old_neighborhood_size = top_right_neighbor_count;
-			// 		}
-			// 	}
-			//
-			// 	const patch_type** new_neighborhood;
-			// 	unsigned int new_neighborhood_size;
-			// 	if (new_position.x - patch_position_offset.x < n / 2) {
-			// 		if (new_position.y - patch_position_offset.y < n / 2) {
-			// 			new_neighborhood = bottom_left_neighborhood;
-			// 			new_neighborhood_size = bottom_left_neighbor_count;
-			// 		} else {
-			// 			new_neighborhood = top_left_neighborhood;
-			// 			new_neighborhood_size = top_left_neighbor_count;
-			// 		}
-			// 	} else {
-			// 		if (new_position.y - patch_position_offset.y < n / 2) {
-			// 			new_neighborhood = bottom_right_neighborhood;
-			// 			new_neighborhood_size = bottom_right_neighbor_count;
-			// 		} else {
-			// 			new_neighborhood = top_right_neighborhood;
-			// 			new_neighborhood_size = top_right_neighbor_count;
-			// 		}
-			// 	}
-			//
-			// 	/* compute the log acceptance probability */
-			// 	float log_acceptance_probability = 0.0f;
-			// 	bool new_position_occupied = false;
-			// 	for (unsigned int j = 0; j < new_neighborhood_size; j++) {
-			// 		const auto& items = new_neighborhood[j]->items;
-			// 		for (unsigned int m = 0; m < items.length; m++) {
-			// 			if (items[m].location == new_position) {
-			// 				/* an item already exists at this proposed location */
-			// 				new_position_occupied = true; break;
-			// 			}
-			// 			log_acceptance_probability += cache.interaction(new_position, items[m].location, item_type, items[m].item_type);
-			// 			log_acceptance_probability += cache.interaction(items[m].location, new_position, items[m].item_type, item_type);
-			// 		}
-			// 		if (new_position_occupied) break;
-			// 		log_acceptance_probability -= cache.interaction(new_position, new_position, item_type, item_type);
-			// 	}
-			// 	if (new_position_occupied) continue;
-			//
-			// 	for (unsigned int j = 0; j < old_neighborhood_size; j++) {
-			// 		const auto& items = old_neighborhood[j]->items;
-			// 		for (unsigned int m = 0; m < items.length; m++) {
-			// 			log_acceptance_probability -= cache.interaction(old_position, items[m].location, item_type, items[m].item_type);
-			// 			log_acceptance_probability -= cache.interaction(items[m].location, old_position, items[m].item_type, item_type);
-			// 		}
-			// 		log_acceptance_probability += cache.interaction(old_position, old_position, item_type, item_type);
-			// 	}
-			//
-			// 	log_acceptance_probability += cache.intensity(new_position, item_type) - cache.intensity(old_position, item_type);
-			//
-			// 	/* accept or reject the proposal depending on the computed probability */
-			// 	float random = (float) rng() / rng.max();
-			// 	if (log(random) < log_acceptance_probability) {
-			// 		/* accept the proposal */
-			// 		current->items.remove(i);
-			// 		current->items.add({item_type, new_position, 0, 0});
-			// 	}
-			// }
 
 			if (rng() % 2 == 0) {
 				/* propose creating a new item */
 				const unsigned int item_type = rng() % cache.item_type_count;
 				position new_position = patch_position_offset + position(rng() % n, rng() % n);
 
-				patch_type** new_neighborhood;
-				unsigned int new_neighborhood_size;
+				patch_type* const* new_neighborhood;
+				uint_fast8_t new_neighborhood_size;
 				if (new_position.x - patch_position_offset.x < n / 2) {
 					if (new_position.y - patch_position_offset.y < n / 2) {
-						new_neighborhood = bottom_left_neighborhood;
-						new_neighborhood_size = bottom_left_neighbor_count;
+						new_neighborhood = neighborhood.bottom_left_neighborhood;
+						new_neighborhood_size = neighborhood.bottom_left_neighbor_count;
 					} else {
-						new_neighborhood = top_left_neighborhood;
-						new_neighborhood_size = top_left_neighbor_count;
+						new_neighborhood = neighborhood.top_left_neighborhood;
+						new_neighborhood_size = neighborhood.top_left_neighbor_count;
 					}
 				} else {
 					if (new_position.y - patch_position_offset.y < n / 2) {
-						new_neighborhood = bottom_right_neighborhood;
-						new_neighborhood_size = bottom_right_neighbor_count;
+						new_neighborhood = neighborhood.bottom_right_neighborhood;
+						new_neighborhood_size = neighborhood.bottom_right_neighbor_count;
 					} else {
-						new_neighborhood = top_right_neighborhood;
-						new_neighborhood_size = top_right_neighbor_count;
+						new_neighborhood = neighborhood.top_right_neighborhood;
+						new_neighborhood_size = neighborhood.top_right_neighbor_count;
 					}
 				}
 
 				float log_acceptance_probability = 0.0f;
 				bool new_position_occupied = false;
-				for (unsigned int j = 0; j < new_neighborhood_size; j++) {
+				for (uint_fast8_t j = 0; j < new_neighborhood_size; j++) {
 					const auto& items = new_neighborhood[j]->items;
 					for (unsigned int m = 0; m < items.length; m++) {
 						if (items[m].location == new_position) {
@@ -444,8 +331,8 @@ public:
 					log_acceptance_probability += cache.intensity(new_position, item_type);
 
 					/* add log probability of inverse proposal */
-					logarithm.ensure_size((unsigned int) current->items.length + 2);
-					log_acceptance_probability += (float) -logarithm.get((unsigned int) current->items.length + 1);
+					logarithm.ensure_size((unsigned int) current.items.length + 2);
+					log_acceptance_probability += (float) -logarithm.get((unsigned int) current.items.length + 1);
 
 					/* subtract log probability of forward proposal */
 					log_acceptance_probability -= -LOG_ITEM_TYPE_COUNT - LOG_N_SQUARED;
@@ -454,38 +341,38 @@ public:
 					float random = (float) rng() / rng.max();
 					if (log(random) < log_acceptance_probability) {
 						/* accept the proposal */
-						current->items.add({ item_type, new_position, 0, 0 });
+						current.items.add({ item_type, new_position, 0, 0 });
 					}
 				}
 
-			} else if (current->items.length > 0) {
+			} else if (current.items.length > 0) {
 				/* propose deleting an item */
-				unsigned int item_index = rng() % current->items.length;
-				const unsigned int old_item_type = current->items[item_index].item_type;
-				const position old_position = current->items[item_index].location;
+				unsigned int item_index = rng() % current.items.length;
+				const unsigned int old_item_type = current.items[item_index].item_type;
+				const position old_position = current.items[item_index].location;
 
-				patch_type** old_neighborhood;
-				unsigned int old_neighborhood_size;
+				patch_type* const* old_neighborhood;
+				uint_fast8_t old_neighborhood_size;
 				if (old_position.x - patch_position_offset.x < n / 2) {
 					if (old_position.y - patch_position_offset.y < n / 2) {
-						old_neighborhood = bottom_left_neighborhood;
-						old_neighborhood_size = bottom_left_neighbor_count;
+						old_neighborhood = neighborhood.bottom_left_neighborhood;
+						old_neighborhood_size = neighborhood.bottom_left_neighbor_count;
 					} else {
-						old_neighborhood = top_left_neighborhood;
-						old_neighborhood_size = top_left_neighbor_count;
+						old_neighborhood = neighborhood.top_left_neighborhood;
+						old_neighborhood_size = neighborhood.top_left_neighbor_count;
 					}
 				} else {
 					if (old_position.y - patch_position_offset.y < n / 2) {
-						old_neighborhood = bottom_right_neighborhood;
-						old_neighborhood_size = bottom_right_neighbor_count;
+						old_neighborhood = neighborhood.bottom_right_neighborhood;
+						old_neighborhood_size = neighborhood.bottom_right_neighbor_count;
 					} else {
-						old_neighborhood = top_right_neighborhood;
-						old_neighborhood_size = top_right_neighbor_count;
+						old_neighborhood = neighborhood.top_right_neighborhood;
+						old_neighborhood_size = neighborhood.top_right_neighbor_count;
 					}
 				}
 
 				float log_acceptance_probability = 0.0f;
-				for (unsigned int j = 0; j < old_neighborhood_size; j++) {
+				for (uint_fast8_t j = 0; j < old_neighborhood_size; j++) {
 					const auto& items = old_neighborhood[j]->items;
 					for (unsigned int m = 0; m < items.length; m++) {
 						log_acceptance_probability -= cache.interaction(old_position, items[m].location, old_item_type, items[m].item_type);
@@ -498,14 +385,14 @@ public:
 				log_acceptance_probability += -LOG_ITEM_TYPE_COUNT - LOG_N_SQUARED;
 
 				/* subtract log probability of forward proposal */
-				logarithm.ensure_size((unsigned int) current->items.length + 1);
-				log_acceptance_probability -= (float) -logarithm.get((unsigned int) current->items.length);
+				logarithm.ensure_size((unsigned int) current.items.length + 1);
+				log_acceptance_probability -= (float) -logarithm.get((unsigned int) current.items.length);
 
 				/* accept or reject the proposal depending on the computed probability */
 				float random = (float) rng() / rng.max();
 				if (log(random) < log_acceptance_probability) {
 					/* accept the proposal */
-					current->items.remove(item_index);
+					current.items.remove(item_index);
 				}
 			}
 #endif /* SAMPLING_METHOD == MH_SAMPLING */
@@ -513,12 +400,11 @@ public:
 	}
 
 private:
-	/* NOTE: we assume `neighborhood[0]` refers to the patch at the given `patch_position` */
+	/* NOTE: we assume `neighborhood[0]` is the patch we're sampling */
 	template<typename RNGType>
 	inline void gibbs_sample_cell(RNGType& rng,
 			patch_type* neighborhood[4],
 			unsigned int neighbor_count,
-			const position& patch_position,
 			const position& world_position)
 	{
 		/* compute the old item type and index */

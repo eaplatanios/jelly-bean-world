@@ -3,11 +3,11 @@
 temp/
 
 # Compiled Executables
-jbw/diffusion_test
-jbw/map_test
-jbw/network_test
-jbw/simulator_test
-jbw/visualizer/renderer_test
+jbw/tests/diffusion_test
+jbw/tests/map_test
+jbw/tests/network_test
+jbw/tests/simulator_test
+jbw/tests/renderer_test
 jbw/visualizer/jbw_visualizer
 
 # IntelliJ
