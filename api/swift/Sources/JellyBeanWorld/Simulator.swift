@@ -30,6 +30,8 @@ public enum JellyBeanWorldError: Error {
   case LostConnection
   case InvalidSimulatorConfiguration
   case MPIError
+  case InvalidSemaphoreID
+  case SemaphoreAlreadySignaled
   case UnknownNativeError
 }
 
@@ -51,6 +53,8 @@ internal func checkStatus(_ status: UnsafeMutablePointer<JBW_Status>?) throws {
   case JBW_LOST_CONNECTION: throw JellyBeanWorldError.LostConnection
   case JBW_INVALID_SIMULATOR_CONFIGURATION: throw JellyBeanWorldError.InvalidSimulatorConfiguration
   case JBW_MPI_ERROR: throw JellyBeanWorldError.MPIError
+  case JBW_INVALID_SEMAPHORE_ID: throw JellyBeanWorldError.InvalidSemaphoreID
+  case JBW_SEMAPHORE_ALREADY_SIGNALED: throw JellyBeanWorldError.SemaphoreAlreadySignaled
   case _: throw JellyBeanWorldError.UnknownNativeError
   }
 }
@@ -168,7 +172,8 @@ public final class Simulator {
           setActive: true,
           getMap: true,
           getAgentIds: true,
-          getAgentStates: true),
+          getAgentStates: true,
+          semaphores: true),
         &status)
       try checkStatus(&status)
     }
@@ -224,7 +229,8 @@ public final class Simulator {
           setActive: true,
           getMap: true,
           getAgentIds: true,
-          getAgentStates: true),
+          getAgentStates: true,
+          semaphores: true),
         &status)
       try checkStatus(&status)
     }

@@ -42,6 +42,8 @@ void JBW_SetJBWStatusFromStatus(JBW_Status* jbw_s, status s) {
     case status::CLIENT_PARSE_MESSAGE_ERROR: jbw_s->code = JBW_CLIENT_PARSE_MESSAGE_ERROR;
     case status::SERVER_OUT_OF_MEMORY: jbw_s->code = JBW_SERVER_OUT_OF_MEMORY;
     case status::CLIENT_OUT_OF_MEMORY: jbw_s->code = JBW_CLIENT_OUT_OF_MEMORY;
+    case status::INVALID_SEMAPHORE_ID: jbw_s->code = JBW_INVALID_SEMAPHORE_ID;
+    case status::SEMAPHORE_ALREADY_SIGNALED: jbw_s->code = JBW_SEMAPHORE_ALREADY_SIGNALED;
   }
 }
 
@@ -876,7 +878,7 @@ void on_add_agent(
   c.data.cv.notify_one();
 }
 
-
+// TODO: Update for Swift.
 /**
  * The callback invoked when the client receives a remove_agent response from
  * the server. This function wakes up the parent thread (which should be
@@ -889,6 +891,66 @@ void on_add_agent(
  *                    about any errors.
  */
 void on_remove_agent(client<client_data>& c, uint64_t agent_id, status response) {
+  std::unique_lock<std::mutex> lck(c.data.lock);
+  c.data.waiting_for_server = false;
+  c.data.server_response = response;
+  c.data.cv.notify_one();
+}
+
+// TODO: Update for Swift.
+/**
+ * The callback invoked when the client receives an add_semaphore response from
+ * the server. This function stores the new semaphore ID in
+ * `c.data.response_data.semaphore_id`, and wakes up the Python thread (which
+ * should be waiting in the `simulator_add_semaphore` function) so that it can
+ * return the response back to Python.
+ *
+ * \param   c             The client that received the response.
+ * \param   semaphore_id  The ID of the new semaphore.
+ * \param   response      The response from the server, containing information
+ *                        about any errors.
+ */
+void on_add_semaphore(client<client_data>& c, uint64_t semaphore_id, status response) {
+  std::unique_lock<std::mutex> lck(c.data.lock);
+  c.data.waiting_for_server = false;
+  c.data.response_data.semaphore_id = semaphore_id;
+  c.data.server_response = response;
+  c.data.cv.notify_one();
+}
+
+// TODO: Update for Swift.
+/**
+ * The callback invoked when the client receives a remove_semaphore response from
+ * the server. This function wakes up the Python thread (which should be
+ * waiting in the `simulator_remove_semaphore` function) so that it can return the
+ * response back to Python.
+ *
+ * \param   c             The client that received the response.
+ * \param   semaphore_id  The ID of the removed semaphore.
+ * \param   response      The response from the server, containing information
+ *                        about any errors.
+ */
+void on_remove_semaphore(client<client_data>& c, uint64_t semaphore_id, status response) {
+  std::unique_lock<std::mutex> lck(c.data.lock);
+  c.data.waiting_for_server = false;
+  c.data.server_response = response;
+  c.data.cv.notify_one();
+}
+
+// TODO: Update for Swift.
+/**
+ * The callback invoked when the client receives a signal_semaphore response
+ * from the server. This function copies the result into
+ * `c.data.server_response` and wakes up the Python thread (which should be
+ * waiting in the `simulator_signal_semaphore` function) so that it can return
+ * the response back to Python.
+ *
+ * \param   c               The client that received the response.
+ * \param   semaphore_id    The ID of the semaphore that requested to signal.
+ * \param   response        The response from the server, containing
+ *                          information about any errors.
+ */
+void on_signal_semaphore(client<client_data>& c, uint64_t semaphore_id, status response) {
   std::unique_lock<std::mutex> lck(c.data.lock);
   c.data.waiting_for_server = false;
   c.data.server_response = response;

@@ -38,7 +38,7 @@ public func runBeamSearch(forMapIn file: URL, stepCount: Int, beamWidth: Int = 1
     items: items,
     blockedCells: blockedCells)
   let position = Position(x: (topRight.x + bottomLeft.x) / 2, y: (topRight.y + bottomLeft.y) / 2)
-  let direction = .up
+  let direction = Direction.up
   var heap = Heap<State>(elements: [], priorityFunction: { $0.items.count < $1.items.count })
   heap.enqueue(State(position: position, direction: direction, items: []))
   for step in 0..<stepCount {
