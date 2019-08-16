@@ -19,9 +19,32 @@ inline void set_interaction_args(
 		item_types[first_item_type].interaction_fns[second_item_type].args[counter++] = *i;
 }
 
-inline void on_step(const simulator<empty_data>* sim,
+struct server_data {
+	async_server* server;
+	std::mutex lock;
+	std::condition_variable cv;
+	bool waiting;
+
+	static inline void free(const server_data& data) { }
+};
+
+inline bool init(server_data& data, const server_data& src) {
+	data.server = src.server;
+	data.waiting = false;
+	new (&data.lock) std::mutex();
+	new (&data.cv) std::condition_variable();
+	return true;
+}
+
+inline void on_step(simulator<server_data>* sim,
 		const hash_map<uint64_t, agent_state*>& agents, uint64_t time)
-{ }
+{
+	server_data& data = sim->get_data();
+    if (data.server->status != server_status::STOPPING)
+		send_step_response(*data.server, agents, sim->get_config());
+	data.waiting = false;
+	data.cv.notify_one();
+}
 
 struct shortest_path_state
 {
@@ -336,14 +359,16 @@ int main(int argc, const char** argv)
 			wall_color[i] = config.item_types[wall_index].color[i];
 	}
 
-	simulator<empty_data>& sim = *((simulator<empty_data>*) alloca(sizeof(simulator<empty_data>)));
-	if (init(sim, config, empty_data(), get_seed()) != status::OK) {
+	simulator<server_data>& sim = *((simulator<server_data>*) alloca(sizeof(simulator<server_data>)));
+	if (init(sim, config, server_data(), get_seed()) != status::OK) {
 		fprintf(stderr, "ERROR: Unable to initialize simulator.\n");
 		return false;
 	}
 
 	async_server server;
 	bool server_started = true;
+	server_data& sim_data = sim.get_data();
+	sim_data.server = &server;
 	if (!init_server(server, sim, 54353, 256, 8, permissions::grant_all())) {
 		fprintf(stderr, "WARNING: Unable to start server.\n");
 		server_started = false;
@@ -360,6 +385,7 @@ int main(int argc, const char** argv)
 		shortest_path_state* new_path = shortest_path(
 				agent->current_vision, config.vision_range,
 				jellybean_color, wall_color, config.color_dimension);
+		bool wall_in_front = item_exists(agent->current_vision, config.vision_range, config.color_dimension, wall_color, 0, 1);
 
 		if (best_path == nullptr || (new_path != nullptr && new_path->cost < best_path->cost - current_path_position))
 		{
@@ -386,13 +412,15 @@ int main(int argc, const char** argv)
 				free(new_path);
 		}
 
+		status action_status;
+		sim_data.waiting = true;
 		if (best_path == nullptr) {
-			if (!item_exists(agent->current_vision, config.vision_range, config.color_dimension, wall_color, 0, 1)) {
-				sim.move(agent_id, direction::UP, 1);
+			if (!wall_in_front) {
+				action_status = sim.move(agent_id, direction::UP, 1);
 			} else if (rand() % 2 == 0) {
-				sim.turn(agent_id, direction::LEFT);
+				action_status = sim.turn(agent_id, direction::LEFT);
 			} else {
-				sim.turn(agent_id, direction::RIGHT);
+				action_status = sim.turn(agent_id, direction::RIGHT);
 			}
 		} else {
 			shortest_path_state* curr = best_path;
@@ -405,29 +433,41 @@ int main(int argc, const char** argv)
 			int new_x, new_y;
 			move_forward(curr->x, curr->y, curr->dir, new_x, new_y);
 			if (new_x == next->x && new_y == next->y) {
-				sim.move(agent_id, direction::UP, 1);
+				action_status = sim.move(agent_id, direction::UP, 1);
 			} else if (next->dir == turn_left(curr->dir)) {
-				sim.turn(agent_id, direction::LEFT);
+				action_status = sim.turn(agent_id, direction::LEFT);
 			} else if (next->dir == turn_right(curr->dir)) {
-				sim.turn(agent_id, direction::RIGHT);
+				action_status = sim.turn(agent_id, direction::RIGHT);
 			} else {
 				fprintf(stderr, "ERROR: `shortest_path` returned an invalid path.\n");
+				action_status = status::AGENT_ALREADY_ACTED;
+				sim_data.waiting = false;
 			}
-			current_path_position++;
 
-			if (current_path_position + 1 >= current_path_length) {
-				free(*best_path);
-				if (best_path->reference_count == 0)
-					free(best_path);
-				best_path = nullptr;
+			if (action_status == status::OK) {
+				current_path_position++;
+				if (current_path_position + 1 >= current_path_length) {
+					free(*best_path);
+					if (best_path->reference_count == 0)
+						free(best_path);
+					best_path = nullptr;
+				}
 			}
 		}
 
+		if (action_status != status::OK) t--;
+
+		std::unique_lock<std::mutex> lock(sim_data.lock);
+		while (sim_data.waiting) sim_data.cv.wait(lock);
+		lock.unlock();
+
 		if (t % 1000 == 0) {
-			fprintf(stderr, "[iteration %u] Current agent state: ", t);
-			print(agent->current_position, stderr); fprintf(stderr, ", %u, %lf\n",
+			printf("[iteration %u]\n"
+				"  Agent position: ", t);
+			print(agent->current_position, stdout); printf("\n  Jellybeans collected: %u\n  Reward rate: %lf\n",
 					agent->collected_items[jellybean_index],
 					(double) agent->collected_items[jellybean_index] / (t + 1));
+			fflush(stdout);
 		}
 	}
 

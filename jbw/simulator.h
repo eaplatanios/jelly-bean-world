@@ -1358,6 +1358,7 @@ public:
         semaphores.remove_at(bucket);
         if (signaled)
             --acted_agent_count;
+        --active_agent_count;
 
         if (acted_agent_count == active_agent_count)
             step(); /* advance the simulation by one time step */
@@ -1698,7 +1699,7 @@ public:
         world.world_to_patch_coordinates(bottom_left_corner, bottom_left_patch_position);
         world.world_to_patch_coordinates(top_right_corner, top_right_patch_position);
 
-        while (!simulator_lock.try_lock()) { }
+        simulator_lock.lock();
 
         status result = status::OK;
         apply_contiguous(world.patches, bottom_left_patch_position.y - 1,

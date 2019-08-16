@@ -14,8 +14,7 @@
  * the License.
  */
 
-#include "mpi.h"
-
+#include <jbw/mpi.h>
 #include <inttypes.h>
 
 using namespace jbw;

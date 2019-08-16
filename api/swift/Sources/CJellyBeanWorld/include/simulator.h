@@ -87,6 +87,7 @@ typedef struct Permissions {
   bool getMap;
   bool getAgentIds;
   bool getAgentStates;
+  bool semaphores;
 } Permissions;
 
 typedef struct Position {
@@ -169,6 +170,11 @@ typedef struct SimulatorInfo {
   uint64_t time;
   AgentSimulationState* agents;
   unsigned int numAgents;
+
+  /* this is a pointer to the internal array in
+     `simulator_data`, so we don't need to free it */
+  uint64_t* semaphoreIds;
+  unsigned int numSemaphores;
 } SimulatorInfo;
 
 typedef struct ItemInfo {
@@ -209,6 +215,8 @@ typedef struct SimulationClientInfo {
   uint64_t* agentIds;
   AgentSimulationState* agentStates;
   unsigned int numAgents;
+  uint64_t* semaphoreIds;
+  unsigned int numSemaphores;
 } SimulationClientInfo;
 
 typedef struct AgentIDList {
@@ -247,6 +255,23 @@ void simulatorRemoveAgent(
   void* simulatorHandle,
   void* clientHandle,
   uint64_t agentId,
+  JBW_Status* status);
+
+uint64_t simulatorAddSemaphore(
+  void* simulatorHandle,
+  void* clientHandle,
+  JBW_Status* status);
+
+void simulatorRemoveSemaphore(
+  void* simulatorHandle,
+  void* clientHandle,
+  uint64_t semaphoreId,
+  JBW_Status* status);
+
+void simulatorSignalSemaphore(
+  void* simulatorHandle,
+  void* clientHandle,
+  uint64_t semaphoreId,
   JBW_Status* status);
 
 void simulatorMoveAgent(

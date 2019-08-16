@@ -14,8 +14,7 @@
  * the License.
  */
 
-#include "diffusion.h"
-
+#include <jbw/diffusion.h>
 #include <core/io.h>
 
 using namespace core;

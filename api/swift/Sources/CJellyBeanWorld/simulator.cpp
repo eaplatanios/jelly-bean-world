@@ -155,6 +155,7 @@ inline Permissions to_Permissions(const permissions& src) {
   perms.getMap = src.get_map;
   perms.getAgentIds = src.get_agent_ids;
   perms.getAgentStates = src.get_agent_states;
+  perms.semaphores = src.semaphores;
   return perms;
 }
 
@@ -168,6 +169,7 @@ inline permissions to_permissions(const Permissions& src) {
   perms.get_map = src.getMap;
   perms.get_agent_ids = src.getAgentIds;
   perms.get_agent_states = src.getAgentStates;
+  perms.semaphores = src.semaphores;
   return perms;
 }
 
@@ -676,14 +678,16 @@ struct simulator_data {
   OnStepCallback callback;
   const void* callback_data;
   array<uint64_t> agent_ids;
+  array<uint64_t> semaphore_ids;
 
   simulator_data(
     OnStepCallback callback,
     const void* callback_data
-  ) : callback(callback), callback_data(callback_data), agent_ids(16) { }
+  ) : callback(callback), callback_data(callback_data), agent_ids(16), semaphore_ids(4) { }
 
   static inline void free(simulator_data& data) {
     core::free(data.agent_ids);
+    core::free(data.semaphore_ids);
     core::free(data.server);
   }
 };
@@ -700,10 +704,15 @@ struct simulator_data {
 inline bool init(simulator_data& data, const simulator_data& src) {
   if (!array_init(data.agent_ids, src.agent_ids.capacity)) {
     return false;
+  } else if (!array_init(data.semaphore_ids, src.semaphore_ids.capacity)) {
+    free(data.agent_ids);
+    return false;
   }
   data.agent_ids.append(src.agent_ids.data, src.agent_ids.length);
+  data.semaphore_ids.append(src.semaphore_ids.data, src.semaphore_ids.length);
   if (!init(data.server)) { /* async_server is not copyable */
     free(data.agent_ids);
+    free(data.semaphore_ids);
     return false;
   }
   data.callback = src.callback;
@@ -733,6 +742,7 @@ struct client_data {
     array<array<patch_state>>* map;
     pair<uint64_t*, size_t> agent_ids;
     agent_state_array agent_states;
+    uint64_t semaphore_id;
   } response_data;
 
   /* for synchronization */
@@ -1158,6 +1168,8 @@ void simulatorSave(void* simulatorHandle, const char* filePath, JBW_Status* stat
   bool result = write(*sim, out)
     && write(data.agent_ids.length, out)
     && write(data.agent_ids.data, out, data.agent_ids.length)
+    && write(data.semaphore_ids.length, out)
+    && write(data.semaphore_ids.data, out, data.semaphore_ids.length)
     && write(data.server.state, out);
   fclose(file);
   if (!result) {
@@ -1187,7 +1199,7 @@ SimulatorInfo simulatorLoad(
     return EMPTY_SIM_INFO;
   }
 
-  size_t agent_id_count;
+  size_t agent_id_count, semaphore_id_count;
   fixed_width_stream<FILE*> in(file);
   if (!read(*sim, in, data)) {
     free(sim);
@@ -1199,6 +1211,9 @@ SimulatorInfo simulatorLoad(
   if (!read(agent_id_count, in)
    || !sim_data.agent_ids.ensure_capacity(agent_id_count)
    || !read(sim_data.agent_ids.data, in, agent_id_count)
+   || !read(semaphore_id_count, in)
+   || !sim_data.semaphore_ids.ensure_capacity(semaphore_id_count)
+   || !read(sim_data.semaphore_ids.data, in, semaphore_id_count)
    || !read(sim_data.server.state, in))
   {
     free(*sim);
@@ -1208,6 +1223,7 @@ SimulatorInfo simulatorLoad(
     return EMPTY_SIM_INFO;
   }
   sim_data.agent_ids.length = agent_id_count;
+  sim_data.semaphore_ids.length = semaphore_id_count;
   fclose(file);
 
   agent_state** agent_states = (agent_state**) malloc(sizeof(agent_state*) * agent_id_count);
@@ -1248,6 +1264,8 @@ SimulatorInfo simulatorLoad(
   sim_info.time = sim->time;
   sim_info.agents = agents;
   sim_info.numAgents = (unsigned int) agent_id_count;
+  sim_info.semaphoreIds = sim_data.semaphore_ids.data;
+  sim_info.numSemaphores = sim_data.semaphore_ids.length;
   init(sim_info.config, sim_config, sim->get_world().initial_seed, status);
   if (status->code != JBW_OK) {
     for (size_t j = 0; j < agent_id_count; j++)
@@ -1352,6 +1370,134 @@ void simulatorRemoveAgent(
 
     client_handle->data.waiting_for_server = true;
     if (!send_remove_agent(*client_handle, agentId)) {
+      status->code = JBW_MPI_ERROR;
+      return;
+    }
+
+    /* wait for response from server */
+    wait_for_server(*client_handle);
+
+    if (client_handle->data.server_response != status::OK) {
+      JBW_SetJBWStatusFromStatus(status, client_handle->data.server_response);
+      return;
+    }
+  }
+}
+
+
+uint64_t simulatorAddSemaphore(
+  void* simulatorHandle,
+  void* clientHandle,
+  JBW_Status* status
+) {
+  if (clientHandle == nullptr) {
+    /* the simulation is local, so call add_semaphore directly */
+    simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
+    uint64_t new_semaphore_id;
+    auto result = sim_handle->add_semaphore(new_semaphore_id);
+    if (result != status::OK) {
+      JBW_SetJBWStatusFromStatus(status, result);
+      return 0;
+    }
+
+    sim_handle->get_data().semaphore_ids.add(new_semaphore_id);
+    return new_semaphore_id;
+  } else {
+    /* this is a client, so send an add_semaphore message to the server */
+    client<client_data>* client_handle = (client<client_data>*) clientHandle;
+    if (!client_handle->client_running) {
+      status->code = JBW_LOST_CONNECTION;
+      return 0;
+    }
+
+    client_handle->data.waiting_for_server = true;
+    if (!send_add_semaphore(*client_handle)) {
+      status->code = JBW_MPI_ERROR;
+      return 0;
+    }
+
+    /* wait for response from server */
+    wait_for_server(*client_handle);
+
+    if (client_handle->data.server_response != status::OK) {
+      JBW_SetJBWStatusFromStatus(status, client_handle->data.server_response);
+      return 0;
+    }
+
+    return client_handle->data.response_data.semaphore_id;
+  }
+}
+
+
+void simulatorRemoveSemaphore(
+  void* simulatorHandle,
+  void* clientHandle,
+  uint64_t semaphoreId,
+  JBW_Status* status
+) {
+  if (clientHandle == nullptr) {
+    /* the simulation is local, so call add_semaphore directly */
+    simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
+
+    auto result = sim_handle->remove_semaphore(semaphoreId);
+    if (result != status::OK) {
+      JBW_SetJBWStatusFromStatus(status, result);
+      return;
+    }
+
+    array<uint64_t>& semaphore_ids = sim_handle->get_data().semaphore_ids;
+    unsigned int index = semaphore_ids.index_of(semaphoreId);
+    if (index != semaphore_ids.length)
+      semaphore_ids.remove(index);
+  } else {
+    /* this is a client, so send an add_semaphore message to the server */
+    client<client_data>* client_handle = (client<client_data>*) clientHandle;
+    if (!client_handle->client_running) {
+      status->code = JBW_LOST_CONNECTION;
+      return;
+    }
+
+    client_handle->data.waiting_for_server = true;
+    if (!send_remove_semaphore(*client_handle, semaphoreId)) {
+      status->code = JBW_MPI_ERROR;
+      return;
+    }
+
+    /* wait for response from server */
+    wait_for_server(*client_handle);
+
+    if (client_handle->data.server_response != status::OK) {
+      JBW_SetJBWStatusFromStatus(status, client_handle->data.server_response);
+      return;
+    }
+  }
+}
+
+
+void simulatorSignalSemaphore(
+  void* simulatorHandle,
+  void* clientHandle,
+  uint64_t semaphoreId,
+  JBW_Status* status
+) {
+  if (clientHandle == nullptr) {
+    /* the simulation is local, so call signal_semaphore directly */
+    simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
+    auto result = sim_handle->signal_semaphore(semaphoreId);
+    if (result != status::OK) {
+      JBW_SetJBWStatusFromStatus(status, result);
+      return;
+    }
+  } else {
+    /* this is a client, so send a signal_semaphore message to the server */
+    client<client_data>* client_handle = (client<client_data>*) clientHandle;
+    if (!client_handle->client_running) {
+      status->code = JBW_LOST_CONNECTION;
+      return;
+    }
+
+    client_handle->data.waiting_for_server = true;
+    if (!send_signal_semaphore(*client_handle, semaphoreId)) {
       status->code = JBW_MPI_ERROR;
       return;
     }
@@ -1889,11 +2035,12 @@ SimulationClientInfo simulationClientReconnect(
     return EMPTY_CLIENT_INFO;
   }
 
-  uint64_t* agent_ids; agent_state* agent_states;
-  unsigned int agent_count;
+  uint64_t* agent_ids; unsigned int agent_count;
+  uint64_t* semaphore_ids; unsigned int semaphore_count;
+  agent_state* agent_states;
   uint64_t simulator_time = reconnect_client(
     *new_client, clientId, serverAddress, (uint16_t) serverPort,
-    agent_ids, agent_states, agent_count);
+    agent_ids, agent_states, agent_count, semaphore_ids, semaphore_count);
   if (simulator_time == UINT64_MAX) {
     free(*new_client);
     free(new_client);
@@ -1907,6 +2054,7 @@ SimulationClientInfo simulationClientReconnect(
       free(agent_states[i]);
     free(agent_states);
     free(agent_ids);
+    free(semaphore_ids);
     stop_client(*new_client);
     free(*new_client);
     free(new_client);
@@ -1923,6 +2071,7 @@ SimulationClientInfo simulationClientReconnect(
       free(agentStates);
       free(agent_states);
       free(agent_ids);
+      free(semaphore_ids);
       stop_client(*new_client);
       free(*new_client);
       free(new_client);
@@ -1942,6 +2091,8 @@ SimulationClientInfo simulationClientReconnect(
   client_info.agentIds = agent_ids;
   client_info.agentStates = agentStates;
   client_info.numAgents = agent_count;
+  client_info.semaphoreIds = semaphore_ids;
+  client_info.numSemaphores = semaphore_count;
   return client_info;
 }
 
@@ -1975,6 +2126,7 @@ void simulatorDeleteSimulationClientInfo(SimulationClientInfo clientInfo, unsign
   for (unsigned int i = 0; i < numAgents; i++)
     free(clientInfo.agentStates[i]);
   free(clientInfo.agentStates);
+  free(clientInfo.semaphoreIds);
 }
 
 

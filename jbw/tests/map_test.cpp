@@ -81,7 +81,6 @@ void generate_map(
 }
 
 int main(int argc, const char** argv) {
-
 	static constexpr int n = 32;
 	static constexpr unsigned int item_type_count = 4;
 	static constexpr unsigned int mcmc_iterations = 4000;
