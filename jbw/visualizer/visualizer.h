@@ -194,16 +194,17 @@ class visualizer
 		uint8_t a;
 	};
 
-	struct model_view_matrix {
-		float model[16];
-		float view[16];
-		float projection[16];
+	struct alignas(16) vec3 {
+		float x, y, z;
 	};
 
 	struct uniform_buffer_data {
-		model_view_matrix mvp;
+		float model[16];
+		float view[16];
+		float projection[16];
 		float pixel_density;
 		uint32_t patch_size_texels;
+		vec3 agent_color;
 	};
 
 	GLFWwindow* window;
@@ -295,8 +296,8 @@ public:
 		target_pixel_density = pixel_density;
 		zoom_start_pixel_density = pixel_density;
 		zoom_animation_start_time = milliseconds();
-		uniform_data = {{{0},{0},{0}}, 0};
-		make_identity(uniform_data.mvp.model);
+		uniform_data = {{0}, {0}, {0}, 0, 0, {0}};
+		make_identity(uniform_data.model);
 
 		size_t vertex_shader_size = 0;
 		char* vertex_shader_src = read_file<true>("background_vertex_shader.spv", vertex_shader_size);
@@ -629,9 +630,9 @@ public:
 		float up[] = { 0.0f, 1.0f, 0.0f };
 		float forward[] = { 0.0f, 0.0f, -1.0f };
 		float camera_pos[] = { camera_position[0], camera_position[1], 2.0f };
-		make_identity(uniform_data.mvp.model);
-		make_view_matrix(uniform_data.mvp.view, forward, up, camera_pos);
-		make_orthographic_projection(uniform_data.mvp.projection,
+		make_identity(uniform_data.model);
+		make_view_matrix(uniform_data.view, forward, up, camera_pos);
+		make_orthographic_projection(uniform_data.projection,
 				-0.5f * (width / pixel_density), 0.5f * (width / pixel_density),
 				-0.5f * (height / pixel_density), 0.5f * (height / pixel_density), -100.0f, 100.0f);
 		uniform_data.pixel_density = pixel_density;
@@ -946,6 +947,13 @@ private:
 
 			/* transfer all data to GPU */
 			if (!HasLock) while (!scene_lock.try_lock()) { }
+
+			if (agent_visual_field != nullptr) {
+				uniform_data.agent_color.x = agent_color[0];
+				uniform_data.agent_color.y = agent_color[1];
+				uniform_data.agent_color.z = agent_color[2];
+			}
+
 			item_vertex_count = new_item_vertex_count;
 			current_patch_size_texels = patch_size_texels;
 			renderer.transfer_dynamic_vertex_buffer(item_quad_buffer, sizeof(item_vertex) * item_vertex_count);

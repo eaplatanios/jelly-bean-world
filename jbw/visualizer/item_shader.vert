@@ -23,6 +23,7 @@ layout(binding = 0) uniform UniformBufferObject {
     mat4 proj;
     float pixel_density;
     uint patch_size_texels;
+    vec3 agent_color;
 } ubo;
 
 layout(location = 0) in vec2 in_position;
