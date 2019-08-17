@@ -884,7 +884,7 @@ struct agent_state {
                 for (item& item : visual_field_items) {
                     const position relative_location = item.location - current_position;
                     float item_distance = (float) relative_location.squared_length();
-                    if (item_distance > distance + 1.0f) continue;
+                    if (item_distance + 1.0f > distance) continue;
 
                     // Find the tangent points.
                     const float radius = 0.5f;
@@ -901,16 +901,14 @@ struct agent_state {
                     const float right_y = dy + radius * cos(b_plus_a);
 
                     // Check if we are within the region occluded by the item.
-                    // if (((left_x * (cell_y - 0.5f) - left_y * (cell_x - 0.5f) > 0.0f) &&
-                    //      (right_x * (cell_y - 0.5f) - right_y * (cell_x - 0.5f) < 0.0f)) ||
-                    //     ((left_x * (cell_y - 0.5f) - left_y * (cell_x + 0.5f) > 0.0f) &&
-                    //      (right_x * (cell_y - 0.5f) - right_y * (cell_x + 0.5f) < 0.0f)) ||
-                    //     ((left_x * (cell_y + 0.5f) - left_y * (cell_x - 0.5f) > 0.0f) &&
-                    //      (right_x * (cell_y + 0.5f) - right_y * (cell_x - 0.5f) < 0.0f)) ||
-                    //     ((left_x * (cell_y + 0.5f) - left_y * (cell_x + 0.5f) > 0.0f) &&
-                    //      (right_x * (cell_y + 0.5f) - right_y * (cell_x + 0.5f) < 0.0f))
-                    if ((left_x * cell_y - left_y * cell_x > 0.0f) &&
-                        (right_x * cell_y - right_y * cell_x < 0.0f)
+                    if (((left_x * (cell_y - 0.5f) - left_y * (cell_x - 0.5f) > 0.0f) &&
+                         (right_x * (cell_y - 0.5f) - right_y * (cell_x - 0.5f) < 0.0f)) ||
+                        ((left_x * (cell_y - 0.5f) - left_y * (cell_x + 0.5f) > 0.0f) &&
+                         (right_x * (cell_y - 0.5f) - right_y * (cell_x + 0.5f) < 0.0f)) ||
+                        ((left_x * (cell_y + 0.5f) - left_y * (cell_x - 0.5f) > 0.0f) &&
+                         (right_x * (cell_y + 0.5f) - right_y * (cell_x - 0.5f) < 0.0f)) ||
+                        ((left_x * (cell_y + 0.5f) - left_y * (cell_x + 0.5f) > 0.0f) &&
+                         (right_x * (cell_y + 0.5f) - right_y * (cell_x + 0.5f) < 0.0f))
                     ) {
                         float occlusion = config.item_types[item.item_type].visual_occlusion;
                         occlude_color(
