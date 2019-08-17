@@ -23,6 +23,7 @@ layout(binding = 0) uniform UniformBufferObject {
     mat4 proj;
     float pixel_density;
     uint patch_size_texels;
+    vec3 agent_color;
 } ubo;
 
 layout(binding = 1) uniform sampler2D tex_sampler[2];
