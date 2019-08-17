@@ -688,6 +688,8 @@ private:
 		pixel* visual_field_texture_data = (pixel*) visual_field_texture.mapped_memory;
 		const unsigned int patch_size = get_config(sim).patch_size;
 		const unsigned int patch_size_texels = (unsigned int) ceil((float) patch_size / texel_cell_length);
+		const unsigned int vision_range = get_config(sim).vision_range;
+		const unsigned int color_dimension = get_config(sim).color_dimension;
 		const unsigned int scent_dimension = get_config(sim).scent_dimension;
 		const array<item_properties>& item_types = get_config(sim).item_types;
 		const float* agent_color = get_config(sim).agent_color;
@@ -820,6 +822,12 @@ private:
 					   for each (we use a triangle list so we need two triangles) */
 					for (unsigned int i = 0; i < patch.item_count; i++) {
 						const item& it = patch.items[i];
+						if (agent_visual_field != nullptr) {
+							const position relative_position = it.location - agent_position;
+							if (abs(relative_position.x) <= vision_range && abs(relative_position.y) <= vision_range) {
+								continue;
+							}
+						}
 						const item_properties& item_props = item_types[it.item_type];
 						item_vertices[new_item_vertex_count].position[0] = it.location.x + 0.5f - 0.4f;
 						item_vertices[new_item_vertex_count].position[1] = it.location.y + 0.5f - 0.4f;
@@ -910,9 +918,7 @@ private:
 				}
 			}
 
-			const unsigned int vision_range = get_config(sim).vision_range;
 			if (agent_visual_field != nullptr) {
-				const unsigned int color_dimension = get_config(sim).color_dimension;
 				const unsigned int V = 2 * vision_range + 1;
 				for (unsigned int i = 0; i < V; i++) {
 					for (unsigned int j = 0; j < V; j++) {
@@ -1012,7 +1018,7 @@ private:
 			float clear_color[] = { 0.0f, 0.0f, 0.0f, 1.0f };
 			if (!renderer.record_command_buffer(
 				cb, fb, clear_color, pass,
-				draw_scent_map, draw_items, draw_visual_field)
+				draw_scent_map, draw_visual_field, draw_items)
 			) {
 				cleanup_renderer();
 				if (!HasLock) scene_lock.unlock();
