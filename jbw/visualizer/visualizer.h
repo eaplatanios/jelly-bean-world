@@ -1434,10 +1434,19 @@ private:
 		renderer.delete_render_pass(pass);
 	}
 
+	static inline float gamma_correction(const float channel_value) {
+		float corrected_value;
+		if (channel_value <= 0.0031308) {
+			corrected_value = 12.92 * channel_value;
+		}
+		corrected_value = 1.055f * pow(channel_value, 1.0f / 2.4f) - 0.055f;
+		return max(0.0f, min(1.0f, corrected_value));
+	}
+
 	static inline void scent_to_color(const float* cell_scent, pixel& out, bool is_patch_fixed) {
-		float x = max(0.0f, min(1.0f, log(pow(cell_scent[0], 0.4f) + 1.0f) / 0.9f));
-		float y = max(0.0f, min(1.0f, log(pow(cell_scent[1], 0.4f) + 1.0f) / 0.9f));
-		float z = max(0.0f, min(1.0f, log(pow(cell_scent[2], 0.4f) + 1.0f) / 0.9f));
+		float x = gamma_correction(max(0.0f, min(1.0f, log(pow(cell_scent[0], 0.4f) + 1.0f) / 0.9f)));
+		float y = gamma_correction(max(0.0f, min(1.0f, log(pow(cell_scent[1], 0.4f) + 1.0f) / 0.9f)));
+		float z = gamma_correction(max(0.0f, min(1.0f, log(pow(cell_scent[2], 0.4f) + 1.0f) / 0.9f)));
 
 		float r = 255 * (1 - (y + z) / 2);
 		float g = 255 * (1 - (x + z) / 2);
@@ -1456,9 +1465,9 @@ private:
 	}
 
 	static inline void vision_to_color(const float* cell_vision, pixel& out) {
-		float x = cell_vision[0];
-		float y = cell_vision[1];
-		float z = cell_vision[2];
+		float x = gamma_correction(cell_vision[0]);
+		float y = gamma_correction(cell_vision[1]);
+		float z = gamma_correction(cell_vision[2]);
 
 		out.r = 255 * (1 - (y + z) / 2);
 		out.g = 255 * (1 - (x + z) / 2);

@@ -260,12 +260,12 @@ bool run_locally(
 	config.item_types[3].color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.item_types[3].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
 	config.item_types[3].required_item_costs = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
-	config.item_types[3].color[0] = 0.5f;
-	config.item_types[3].color[1] = 0.5f;
-	config.item_types[3].color[2] = 0.5f;
+	config.item_types[3].color[0] = 0.52f;
+	config.item_types[3].color[1] = 0.22f;
+	config.item_types[3].color[2] = 0.16f;
 	config.item_types[3].required_item_counts[3] = 1;
 	config.item_types[3].blocks_movement = true;
-	config.item_types[3].visual_occlusion = 0.5;
+	config.item_types[3].visual_occlusion = 0.5f;
 	config.item_types.length = item_type_count;
 
 	config.item_types[0].intensity_fn.fn = constant_intensity_fn;

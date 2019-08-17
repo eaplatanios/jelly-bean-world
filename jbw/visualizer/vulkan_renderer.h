@@ -885,8 +885,8 @@ public:
 
 		VkDescriptorBufferInfo* buffer_info_array = (VkDescriptorBufferInfo*) calloc(max((uint32_t) 1, uniform_buffer_count), sizeof(VkDescriptorBufferInfo));
 		VkDescriptorImageInfo* image_info_array = (VkDescriptorImageInfo*) calloc(max((uint32_t) 1, texture_image_count + dyn_texture_image_count), sizeof(VkDescriptorImageInfo));
-		VkWriteDescriptorSet descriptorWrites[2] = { 0 };
-		if (buffer_info_array == nullptr || image_info_array == nullptr || descriptorWrites == nullptr) {
+		VkWriteDescriptorSet descriptorWrites[2] = { { (VkStructureType) 0 } };
+		if (buffer_info_array == nullptr || image_info_array == nullptr) {
 			fprintf(stderr, "vulkan_renderer.create_descriptor_set ERROR: Insufficient memory for `descriptorWrites`.\n");
 			if (buffer_info_array != nullptr) free(buffer_info_array);
 			if (image_info_array != nullptr) free(image_info_array);
