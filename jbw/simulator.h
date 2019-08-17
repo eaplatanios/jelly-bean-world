@@ -1803,7 +1803,7 @@ public:
             patches.length++;
 
             apply_contiguous(row, bottom_left_patch_position.x - 1,
-				(unsigned int) (top_right_patch_position.x - bottom_left_patch_position.x + 2),
+                (unsigned int) (top_right_patch_position.x - bottom_left_patch_position.x + 2),
                 [&](const patch_type& patch, int64_t x)
             {
                 if (!current_row.ensure_capacity(current_row.length + 1)) {
@@ -1986,6 +1986,7 @@ private:
         acted_agent_count = 0;
         for (auto entry : agents) {
             agent_state* agent = entry.value;
+            agent->lock.lock();
             if (!agent->agent_acted) continue;
 
             agent->current_direction = agent->requested_direction;
@@ -2040,10 +2041,6 @@ private:
             agent->agent_acted = false;
         }
 
-        /* reset all semaphores to their non-signaled state */
-        for (auto entry : semaphores)
-            entry.value = false;
-
 #if !defined(NDEBUG)
         /* check for collisions, if there aren't supposed to be any */
         if (config.collision_policy != movement_conflict_policy::NO_COLLISIONS) {
@@ -2058,19 +2055,24 @@ private:
         }
 #endif
 
+        /* compute new scent and vision for each agent */
+        update_agent_scent_and_vision();
+
         /* reset the requested moves */
         for (auto entry : requested_moves)
             core::free(entry.value);
         requested_moves.clear();
         requested_move_lock.unlock();
 
-        /* compute new scent and vision for each agent */
-        update_agent_scent_and_vision();
+        /* reset all semaphores to their non-signaled state */
+        for (auto entry : semaphores)
+            entry.value = false;
 
         /* Invoke the step callback function for each agent. */
         on_step((simulator<SimulatorData>*) this, (const hash_map<uint64_t, agent_state*>&) agents, time);
     }
 
+    /* Precondition: This thread has all agent locks, which it will release. */
     inline void update_agent_scent_and_vision() {
         for (auto entry : agents) {
             agent_state* agent = entry.value;
@@ -2078,6 +2080,7 @@ private:
             world.get_fixed_neighborhood(
                 agent->current_position, neighborhood, patch_positions);
             agent->update_state(neighborhood, scent_model, config, time);
+            agent->lock.unlock();
         }
     }
 
