@@ -91,7 +91,7 @@ inline bool parse_option(
 		const char* arg, bool& fail,
 		const char* to_match, uint64_t& out)
 {
-	unsigned int length = strlen(to_match);
+	size_t length = strlen(to_match);
 	if (strncmp(arg, to_match, length) != 0)
 		return false;
 	const char* option = arg + length;
@@ -109,7 +109,7 @@ inline bool parse_option(
 		const char* arg, bool& fail,
 		const char* to_match, float& out)
 {
-	unsigned int length = strlen(to_match);
+	size_t length = strlen(to_match);
 	if (strncmp(arg, to_match, length) != 0)
 		return false;
 	const char* option = arg + length;
@@ -124,7 +124,7 @@ inline bool parse_option(
 }
 
 template<typename Stream>
-void print_usage(Stream& out) {
+void print_usage(Stream&& out) {
 	fprintf(out, "Usage: jbw_visualizer <address>:<port> [options]\n"
 		"Connects to the JBW server at the given address visualizes the simulated environment.\n"
 		"\n"
@@ -140,7 +140,7 @@ void print_usage(Stream& out) {
 }
 
 template<typename Stream>
-void print_controls(Stream& out) {
+void print_controls(Stream&& out) {
 	fprintf(out, "\nControls:\n"
 		"Click and drag with left mouse button to move camera.\n"
 		"  + key: Zoom in.\n"
@@ -415,7 +415,6 @@ int main(int argc, const char** argv)
 {
 #if defined(WIN32)
 	SetConsoleCtrlHandler(signal_handler, TRUE);
-    signal(SIGPIPE, SIG_IGN);
 #else
 	signal(SIGINT, signal_handler);
 	signal(SIGTERM, signal_handler);

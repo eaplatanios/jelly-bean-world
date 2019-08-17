@@ -14,7 +14,6 @@
 
 import matplotlib
 import jbw
-from random import choice
 from timeit import default_timer
 
 class SimpleAgent(jbw.Agent):
@@ -23,7 +22,7 @@ class SimpleAgent(jbw.Agent):
 		super(SimpleAgent, self).__init__(simulator, load_filepath)
 
 	def do_next_action(self):
-		'''self.counter += 1
+		self.counter += 1
 		if self.counter % 20 == 0:
 			self.turn(jbw.RelativeDirection.LEFT)
 		elif self.counter % 20 == 5:
@@ -33,8 +32,7 @@ class SimpleAgent(jbw.Agent):
 		elif self.counter % 20 == 15:
 			self.turn(jbw.RelativeDirection.RIGHT)
 		else:
-			self.move(jbw.RelativeDirection.FORWARD)'''
-		self.move(choice([jbw.RelativeDirection.FORWARD, jbw.RelativeDirection.RIGHT]))
+			self.move(jbw.RelativeDirection.FORWARD)
 
 	def save(self, filepath):
 		with open(filepath, 'w') as fout:

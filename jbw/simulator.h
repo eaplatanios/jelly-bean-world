@@ -816,7 +816,7 @@ struct agent_state {
         unsigned int y = (unsigned int) (relative_position.y + vision_range);
         unsigned int offset = (x*(2*vision_range + 1) + y) * color_dimension;
         for (unsigned int i = 0; i < color_dimension; i++)
-            current_vision[offset + i] = current_vision[offset + i] * (1.0 - occlusion) + occlusion;
+            current_vision[offset + i] = current_vision[offset + i] * (1.0f - occlusion) + occlusion;
     }
 
     template<typename T>
@@ -1784,7 +1784,7 @@ public:
 
         status result = status::OK;
         apply_contiguous(world.patches, bottom_left_patch_position.y - 1,
-            top_right_patch_position.y - bottom_left_patch_position.y + 2,
+            (unsigned int) (top_right_patch_position.y - bottom_left_patch_position.y + 2),
             [&](const array_map<int64_t, patch_type>& row, int64_t y)
         {
             if (!patches.ensure_capacity(patches.length + 1)) {
@@ -1799,7 +1799,7 @@ public:
             patches.length++;
 
             apply_contiguous(row, bottom_left_patch_position.x - 1,
-                top_right_patch_position.x - bottom_left_patch_position.x + 2,
+				(unsigned int) (top_right_patch_position.x - bottom_left_patch_position.x + 2),
                 [&](const patch_type& patch, int64_t x)
             {
                 if (!current_row.ensure_capacity(current_row.length + 1)) {

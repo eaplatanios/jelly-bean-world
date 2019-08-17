@@ -138,16 +138,16 @@ bool write(const patch<Data>& p, Stream& out, DataWriter&&... writer) {
 }
 
 template<typename K, typename V>
-inline unsigned int binary_search(const array_map<K, V>& a, const K& b) {
+inline size_t binary_search(const array_map<K, V>& a, const K& b) {
 	if (a.size == 0) return 0;
-	return core::binary_search(a.keys, b, 0, a.size - 1);
+	return core::binary_search(a.keys, b, 0, (unsigned int) (a.size - 1));
 }
 
 template<typename T>
-void shift_right(T* list, unsigned int length,
-		unsigned int index, unsigned int shift)
+void shift_right(T* list, size_t length,
+		size_t index, unsigned int shift)
 {
-	for (unsigned int i = length + shift - 1; i > index + shift - 1; i--)
+	for (size_t i = length + shift - 1; i > index + shift - 1; i--)
 		move(list[i - shift], list[i]);
 }
 
@@ -158,7 +158,7 @@ inline bool apply_contiguous(
 		ApplyFunction apply)
 {
 	unsigned int num_matching_elements = 0;
-	unsigned int i = binary_search(sorted_map, min);
+	unsigned int i = (unsigned int) binary_search(sorted_map, min);
 	for (unsigned int j = 0; j < count; j++) {
 		if (i + num_matching_elements < sorted_map.size && sorted_map.keys[i + num_matching_elements] == min + j) {
 			if (!apply(sorted_map.values[i + num_matching_elements], min + j)) return false;
@@ -211,7 +211,7 @@ inline unsigned int get_or_init_contiguous(
 		const K& min, uint_fast8_t count,
 		InitFunction init)
 {
-	return get_or_init_contiguous(sorted_map, binary_search(sorted_map, min), min, count, init);
+	return get_or_init_contiguous(sorted_map, (unsigned int) binary_search(sorted_map, min), min, count, init);
 }
 
 template<typename T>
@@ -261,14 +261,14 @@ public:
 
 	inline patch_type& get_existing_patch(const position& patch_position)
 	{
-		unsigned int i = binary_search(patches, patch_position.y);
+		unsigned int i = (unsigned int) binary_search(patches, patch_position.y);
 #if !defined(NDEBUG)
 		if (i == patches.size || patches.keys[i] > patch_position.y)
 			fprintf(stderr, "map.get_existing_patch WARNING: The requested patch does not exist.\n");
 #endif
 
 		array_map<int64_t, patch_type>& row = patches.values[i];
-		i = binary_search(row, patch_position.x);
+		i = (unsigned int) binary_search(row, patch_position.x);
 #if !defined(NDEBUG)
 		if (i == row.size || row.keys[i] > patch_position.x)
 			fprintf(stderr, "map.get_existing_patch WARNING: The requested patch does not exist.\n");
@@ -303,12 +303,12 @@ public:
 		bool fixed_top_left;
 		bool fixed_top_right;
 
-		unsigned int i = binary_search(patches, min_y);
+		unsigned int i = (unsigned int) binary_search(patches, min_y);
 		unsigned int row_index = i;
 		unsigned int column_indices[4];
 		if (i < patches.size && patches.keys[i] == min_y) {
 			array_map<int64_t, patch_type>& bottom_row = patches.values[i];
-			unsigned int j = binary_search(bottom_row, min_x);
+			unsigned int j = (unsigned int) binary_search(bottom_row, min_x);
 			column_indices[1] = j;
 			if (j < bottom_row.size && bottom_row.keys[j] == min_x) {
 				fixed_bottom_left = bottom_row.values[j].fixed;
@@ -331,7 +331,7 @@ public:
 
 		if (i < patches.size && patches.keys[i] == min_y + 1) {
 			array_map<int64_t, patch_type>& top_row = patches.values[i];
-			unsigned int j = binary_search(top_row, min_x);
+			unsigned int j = (unsigned int) binary_search(top_row, min_x);
 			column_indices[2] = j;
 			if (j < top_row.size && top_row.keys[j] == min_x) {
 				fixed_top_left = top_row.values[j].fixed;
@@ -739,7 +739,7 @@ private:
 		/* check if there are rows above and below the `current_row` */
 		if (row_index > 0 && patches.keys[row_index - 1] == y - 1) {
 			const array_map<int64_t, patch_type>& row = patches.values[row_index - 1];
-			unsigned int i = binary_search(row, x - 1);
+			unsigned int i = (unsigned int) binary_search(row, x - 1);
 			if (i < row.size && row.keys[i] == x - 1) {
 				n.bottom_left_neighborhood[n.bottom_left_neighbor_count++] = &row.values[i];
 				i++;
@@ -752,7 +752,7 @@ private:
 			}
 		} if (row_index + 1 < patches.size && patches.keys[row_index + 1] == y + 1) {
 			const array_map<int64_t, patch_type>& row = patches.values[row_index + 1];
-			unsigned int i = binary_search(row, x - 1);
+			unsigned int i = (unsigned int) binary_search(row, x - 1);
 			if (i < row.size && row.keys[i] == x - 1) {
 				n.top_left_neighborhood[n.top_left_neighbor_count++] = &row.values[i];
 				i++;
