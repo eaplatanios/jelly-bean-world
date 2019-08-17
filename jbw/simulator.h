@@ -901,20 +901,24 @@ struct agent_state {
                     const float right_y = dy + radius * cos(b_plus_a);
 
                     // Check if we are within the region occluded by the item.
-                    if (((left_x * (cell_y - 0.5f) - left_y * (cell_x - 0.5f) > 0.0f) &&
-                         (right_x * (cell_y - 0.5f) - right_y * (cell_x - 0.5f) < 0.0f)) ||
-                        ((left_x * (cell_y - 0.5f) - left_y * (cell_x + 0.5f) > 0.0f) &&
-                         (right_x * (cell_y - 0.5f) - right_y * (cell_x + 0.5f) < 0.0f)) ||
-                        ((left_x * (cell_y + 0.5f) - left_y * (cell_x - 0.5f) > 0.0f) &&
-                         (right_x * (cell_y + 0.5f) - right_y * (cell_x - 0.5f) < 0.0f)) ||
-                        ((left_x * (cell_y + 0.5f) - left_y * (cell_x + 0.5f) > 0.0f) &&
-                         (right_x * (cell_y + 0.5f) - right_y * (cell_x + 0.5f) < 0.0f))
-                    ) {
-                        float occlusion = config.item_types[item.item_type].visual_occlusion;
-                        occlude_color(
-                            relative_position, config.vision_range,
-                            config.color_dimension, occlusion);
+                    const float left_det = left_x * cell_y - left_y * cell_x;
+                    const float right_det = right_x * cell_y - right_y * cell_x;
+                    const float left_size = sqrt(left_y * left_y + left_x * left_x);
+                    const float right_size = sqrt(right_y * right_y + right_x * right_x);
+                    const float smoothing_factor = 0.5f;
+                    float occlusion = 0.0f;
+                    if (left_det > 0.0f && right_det < 0.0f) {
+                        occlusion = config.item_types[item.item_type].visual_occlusion;
+                    } else if (left_det > -smoothing_factor * left_size && right_det < 0.0f) {
+                        const float distance = abs(left_det) / left_size;
+                        occlusion = max(0.0f, config.item_types[item.item_type].visual_occlusion - distance / smoothing_factor);
+                    } else if (left_det > 0.0f && right_det < smoothing_factor  * right_size) {
+                        const float distance = abs(right_det) / right_size;
+                        occlusion = max(0.0f, config.item_types[item.item_type].visual_occlusion - distance / smoothing_factor);
                     }
+                    occlude_color(
+                        relative_position, config.vision_range,
+                        config.color_dimension, occlusion);
                 }
             }
         }
