@@ -912,15 +912,15 @@ struct agent_state {
                     const float left_angle = atan2(left_y, left_x);
                     const float right_angle = atan2(right_y, right_x);
 
-                    float occlusion = 0.0f;
-                    if (cell_left_angle >= right_angle && left_angle >= cell_right_angle) {
-                        const float scaling_factor = min(1.0f, (left_angle - cell_right_angle) / cell_angle);
-                        occlusion = config.item_types[item.item_type].visual_occlusion * scaling_factor;
-                    }
-                    if (occlusion > 0.0f) {
-                        occlude_color(
-                            relative_position, config.vision_range,
-                            config.color_dimension, occlusion);
+                    float overlap = angle_overlap(left_angle, right_angle, cell_left_angle, cell_right_angle);
+                    if (overlap > 0.0f) {
+                        const float scaling_factor = min(1.0f, overlap / cell_angle);
+                        float occlusion = config.item_types[item.item_type].visual_occlusion * scaling_factor;
+                        if (occlusion > 0.0f) {
+                            occlude_color(
+                                relative_position, config.vision_range,
+                                config.color_dimension, occlusion);
+                        }
                     }
                 }
             }
@@ -962,6 +962,25 @@ struct agent_state {
         }
 
         free(agent);
+    }
+
+private:
+    static inline float angle_overlap(float al, float ar, float bl, float br) {
+        if (al < ar) {
+            return angle_overlap(al, -M_PI, bl, br) + angle_overlap(M_PI, ar, bl, br);
+        } else if (bl < br) {
+            return angle_overlap(al, ar, bl, -M_PI) + angle_overlap(al, ar, M_PI, br);       
+        } else {
+            if (al > bl) {
+                if (ar > bl) return 0.0f;
+                else if (ar > br) return bl - ar;
+                else return bl - br;
+            } else {
+                if (br > al) return 0.0f;
+                else if (br > ar) return al - br;
+                else return al - ar;
+            }
+        }
     }
 };
 
