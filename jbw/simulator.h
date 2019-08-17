@@ -874,6 +874,19 @@ struct agent_state {
             }
         }
 
+        const float circle_radius = 0.5f;
+        auto circle_tangents = [circle_radius](float x, float y, float& left_x, float& left_y, float& right_x, float& right_y) {
+            const float dd = sqrt(x * x + y * y);
+            const float a = asin(circle_radius / dd);
+            const float b = atan2(y, x);
+            const float b_minus_a = b - a;
+            const float b_plus_a = b + a;
+            left_x = x - circle_radius * sin(b_plus_a);
+            left_y = y + circle_radius * cos(b_plus_a);
+            right_x = x + circle_radius * sin(b_minus_a);
+            right_y = y - circle_radius * cos(b_minus_a);
+        };
+
         int64_t V = (int64_t) config.vision_range;
         for (int64_t i = -V; i <= V; i++) {
             const float cell_x = (float) i;
@@ -881,44 +894,34 @@ struct agent_state {
                 const float cell_y = (float) j;
                 const position relative_position = { i, j };
                 const float distance = (float) relative_position.squared_length();
+                float cell_left_x, cell_left_y, cell_right_x, cell_right_y;
+                circle_tangents(cell_x, cell_y, cell_left_x, cell_left_y, cell_right_x, cell_right_y);
+                const float cell_left_angle = atan2(cell_left_y, cell_left_x);
+                const float cell_right_angle = atan2(cell_right_y, cell_right_x);
+                const float cell_angle = cell_left_angle - cell_right_angle;
                 for (item& item : visual_field_items) {
                     const position relative_location = item.location - current_position;
                     float item_distance = (float) relative_location.squared_length();
                     if (item_distance + 1.0f > distance) continue;
 
-                    // Find the tangent points.
-                    const float radius = 0.5f;
-                    const float dx = (float) relative_location.x;
-                    const float dy = (float) relative_location.y;
-                    const float dd = sqrt(dx * dx + dy * dy);
-                    const float a = asin(radius / dd);
-                    const float b = atan2(dy, dx);
-                    const float b_minus_a = b - a;
-                    const float b_plus_a = b + a;
-                    const float left_x = dx + radius * sin(b_minus_a);
-                    const float left_y = dy - radius * cos(b_minus_a);
-                    const float right_x = dx - radius * sin(b_plus_a);
-                    const float right_y = dy + radius * cos(b_plus_a);
+                    const float x = (float) relative_location.x;
+                    const float y = (float) relative_location.y;
+                    float left_x, left_y, right_x, right_y;
+                    circle_tangents(x, y, left_x, left_y, right_x, right_y);
 
-                    // Check if we are within the region occluded by the item.
-                    const float left_det = left_x * cell_y - left_y * cell_x;
-                    const float right_det = right_x * cell_y - right_y * cell_x;
-                    const float left_size = sqrt(left_y * left_y + left_x * left_x);
-                    const float right_size = sqrt(right_y * right_y + right_x * right_x);
-                    const float smoothing_factor = 0.5f;
+                    const float left_angle = atan2(left_y, left_x);
+                    const float right_angle = atan2(right_y, right_x);
+
                     float occlusion = 0.0f;
-                    if (left_det > 0.0f && right_det < 0.0f) {
-                        occlusion = config.item_types[item.item_type].visual_occlusion;
-                    } else if (left_det > -smoothing_factor * left_size && right_det < 0.0f) {
-                        const float distance = abs(left_det) / left_size;
-                        occlusion = max(0.0f, config.item_types[item.item_type].visual_occlusion - distance / smoothing_factor);
-                    } else if (left_det > 0.0f && right_det < smoothing_factor  * right_size) {
-                        const float distance = abs(right_det) / right_size;
-                        occlusion = max(0.0f, config.item_types[item.item_type].visual_occlusion - distance / smoothing_factor);
+                    if (cell_left_angle >= right_angle && left_angle >= cell_right_angle) {
+                        const float scaling_factor = min(1.0f, (left_angle - cell_right_angle) / cell_angle);
+                        occlusion = config.item_types[item.item_type].visual_occlusion * scaling_factor;
                     }
-                    occlude_color(
-                        relative_position, config.vision_range,
-                        config.color_dimension, occlusion);
+                    if (occlusion > 0.0f) {
+                        occlude_color(
+                            relative_position, config.vision_range,
+                            config.color_dimension, occlusion);
+                    }
                 }
             }
         }
