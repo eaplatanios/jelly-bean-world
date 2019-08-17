@@ -703,6 +703,7 @@ private:
 	bool prepare_scene_helper(
 			const array<array<patch_state>>& patches,
 			position agent_position,
+			direction agent_direction,
 			const float* agent_visual_field,
 			bool render_background_map,
 			float left, float right, float bottom, float top)
@@ -939,9 +940,20 @@ private:
 			const unsigned int vision_range = get_config(sim).vision_range;
 			if (agent_visual_field != nullptr) {
 				const unsigned int color_dimension = get_config(sim).color_dimension;
-				for (int64_t i = 0; i < (2 * vision_range + 1) * (2 * vision_range + 1); i++) {
-					pixel& p = visual_field_texture_data[i];
-					vision_to_color(&agent_visual_field[i * color_dimension], p);
+				const unsigned int V = 2 * vision_range + 1;
+				for (int64_t i = 0; i < V; i++) {
+					for (int64_t j = 0; j < V; j++) {
+						int index = 0;
+						switch (agent_direction) {
+						case direction::UP: index = j * V + i; break;
+						case direction::DOWN: index = (V - j - 1) * V + V - i - 1; break;
+						case direction::LEFT: index = i * V + V - j - 1; break;
+						case direction::RIGHT: index = (V - i - 1) * V + j; break;
+						case direction::COUNT: break;
+						}
+						pixel& p = visual_field_texture_data[i * V + j];
+						vision_to_color(&agent_visual_field[index * color_dimension], p);
+					}
 				}
 			}
 
@@ -1054,12 +1066,14 @@ private:
 		}
 
 		position agent_position = {0, 0};
+		direction agent_direction = direction::UP;
 		float* agent_visual_field = nullptr;
 		if (track_agent_id != 0) {
 			agent_state* agent;
 			sim.get_agent_states(&agent, &track_agent_id, 1);
 			if (agent != nullptr) {
 				agent_position = agent->current_position;
+				agent_direction = agent->current_direction;
 				unsigned int color_dimension = sim.get_config().color_dimension;
 				unsigned int vision_range = sim.get_config().vision_range;
 				unsigned int visual_field_size = sizeof(float) * (2 * vision_range + 1) * (2 * vision_range + 1) * color_dimension;
@@ -1088,7 +1102,7 @@ private:
 		}
 
 		bool result = prepare_scene_helper<HasLock>(
-			patches, agent_position, agent_visual_field, render_background_map,
+			patches, agent_position, agent_direction, agent_visual_field, render_background_map,
 			left, right, bottom, top);
 		if (agent_visual_field != nullptr) { free(agent_visual_field); }
 		return result;
@@ -1163,10 +1177,12 @@ private:
 	inline void process_mpi_response(visualizer_client_data& response)
 	{
 		position agent_position = {0, 0};
+		direction agent_direction = direction::UP;
 		float* agent_visual_field = nullptr;
 		if (response.get_agent_states_response == status::OK && response.track_agent_id != 0) {
 			if (response.agent_state_count > 0) {
 				agent_position = response.agent_states[0].current_position;
+				agent_direction = response.agent_states[0].current_direction;
 				agent_visual_field = response.agent_states[0].current_vision;
 
 				float new_target_position[] = {response.agent_states[0].current_position.x + 0.5f, response.agent_states[0].current_position.y + 0.5f};
@@ -1192,7 +1208,7 @@ private:
 
 		if (response.get_map_response == status::OK) {
 			prepare_scene_helper<HasLock>(
-				*response.map, agent_position, agent_visual_field,
+				*response.map, agent_position, agent_direction, agent_visual_field,
 				response.get_map_render_background,
 				response.get_map_left, response.get_map_right,
 				response.get_map_bottom, response.get_map_top);
