@@ -53,8 +53,8 @@ class SimulatorConfig(object):
 
   def __init__(self, max_steps_per_movement, allowed_movement_directions,
       allowed_turn_directions, no_op_allowed, vision_range, patch_size,
-      mcmc_num_iter, items, agent_color, collision_policy, decay_param,
-      diffusion_param, deleted_item_lifetime, seed=0):
+      mcmc_num_iter, items, agent_color, collision_policy, agent_field_of_view,
+      decay_param, diffusion_param, deleted_item_lifetime, seed=0):
     """Creates a new simulator configuration.
 
     Arguments:
@@ -78,6 +78,17 @@ class SimulatorConfig(object):
                                    performed for sampling each patch of the
                                    map.
       items:                       List of items to include in this world.
+      agent_color:                 The color of all agents in the world.
+      collision_policy:            The policy describing how collisions between
+                                   multiple agents are resolved.
+      agent_field_of_view:         The field of view angle for all agents.
+      decay_param:                 The fraction of the scent at any cell that
+                                   remains in the cell after any time step.
+      diffusion_param:             The fraction of the scent at any cell that
+                                   diffuses to neighboring cells at every time
+                                   step.
+      deleted_item_lifetime:       How long to keep track of deleted items
+                                   after they have been removed from the world.
       seed:                        The initial seed for the pseudorandom number
                                    generator.
     """
@@ -103,6 +114,7 @@ class SimulatorConfig(object):
     self.decay_param = decay_param
     self.diffusion_param = diffusion_param
     self.deleted_item_lifetime = deleted_item_lifetime
+    self.agent_field_of_view = agent_field_of_view
     self.seed = seed
 
 
@@ -227,8 +239,8 @@ class Simulator(object):
         [d.value for d in sim_config.allowed_turn_directions], sim_config.no_op_allowed, sim_config.scent_num_dims,
         sim_config.color_num_dims, sim_config.vision_range, sim_config.patch_size, sim_config.mcmc_num_iter,
         [(i.name, i.scent, i.color, i.required_item_counts, i.required_item_costs, i.blocks_movement, i.visual_occlusion, i.intensity_fn, i.intensity_fn_args, i.interaction_fns) for i in sim_config.items],
-        sim_config.agent_color, sim_config.collision_policy.value, sim_config.decay_param,
-        sim_config.diffusion_param, sim_config.deleted_item_lifetime, self._step_callback)
+        sim_config.agent_color, sim_config.collision_policy.value, sim_config.agent_field_of_view,
+        sim_config.decay_param, sim_config.diffusion_param, sim_config.deleted_item_lifetime, self._step_callback)
       if is_server:
         self._server_handle = simulator_c.start_server(
           self._handle, port, conn_queue_capacity, num_workers, default_client_permissions)

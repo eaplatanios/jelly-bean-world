@@ -717,6 +717,7 @@ int main(int argc, const char** argv)
 	config.scent_dimension = 3;
 	config.color_dimension = 3;
 	config.vision_range = 5;
+	config.agent_field_of_view = 2.09f;
 	for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
 		config.allowed_movement_directions[i] = action_policy::ALLOWED;
 	for (unsigned int i = 0; i < (size_t) direction::COUNT; i++)
@@ -724,7 +725,6 @@ int main(int argc, const char** argv)
 	config.no_op_allowed = false;
 	config.patch_size = 32;
 	config.mcmc_iterations = 4000;
-	config.agent_field_of_view = 2.09f;
 	config.agent_color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.agent_color[2] = 1.0f;
 	config.collision_policy = collision_policy;

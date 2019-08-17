@@ -205,6 +205,7 @@ bool run_locally(
 	config.scent_dimension = 3;
 	config.color_dimension = 3;
 	config.vision_range = 5;
+	config.agent_field_of_view = 2.09f;
 	config.allowed_movement_directions[0] = action_policy::ALLOWED;
 	config.allowed_movement_directions[1] = action_policy::DISALLOWED;
 	config.allowed_movement_directions[2] = action_policy::DISALLOWED;
@@ -216,7 +217,6 @@ bool run_locally(
 	config.no_op_allowed = false;
 	config.patch_size = 32;
 	config.mcmc_iterations = 4000;
-	config.agent_field_of_view = 2.09f;
 	config.agent_color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.agent_color[2] = 1.0f;
 	config.collision_policy = movement_conflict_policy::FIRST_COME_FIRST_SERVED;

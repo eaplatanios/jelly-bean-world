@@ -268,7 +268,6 @@ public:
 		for (unsigned int i = 0; i < patch_count; i++) {
 			const position patch_position_offset = patch_positions[i] * n;
 			const patch_neighborhood<patch_type>& neighborhood = neighborhoods[i];
-			patch_type& current = *neighborhood.top_left_neighborhood[0];
 
 #if SAMPLING_METHOD == GIBBS_SAMPLING
 			unsigned int half_n_squared = (n / 2) * (n / 2);
@@ -288,6 +287,7 @@ public:
 
 #elif SAMPLING_METHOD == MH_SAMPLING
 
+			patch_type& current = *neighborhood.top_left_neighborhood[0];
 			if (rng() % 2 == 0) {
 				/* propose creating a new item */
 				const unsigned int item_type = rng() % cache.item_type_count;
@@ -403,7 +403,7 @@ private:
 	/* NOTE: we assume `neighborhood[0]` is the patch we're sampling */
 	template<typename RNGType>
 	inline void gibbs_sample_cell(RNGType& rng,
-			patch_type* neighborhood[4],
+			patch_type* const neighborhood[4],
 			unsigned int neighbor_count,
 			const position& world_position)
 	{

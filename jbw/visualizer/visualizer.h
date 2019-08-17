@@ -318,8 +318,8 @@ public:
 		glfwSetCursorPosCallback(window, cursor_position_callback<SimulatorType>);
 		glfwSetKeyCallback(window, key_callback<SimulatorType>);
 
-		// We need to get the actual framebuffer width and height because HiDPI sometimes scale the
-		// actual framebuffer size relative to the window size.
+		/* We need to get the actual framebuffer width and height because HiDPI sometimes scale the
+		   actual framebuffer size relative to the window size. */
 		int framebuffer_width, framebuffer_height;
 		glfwGetFramebufferSize(window, &framebuffer_width, &framebuffer_height);
 		width = (uint32_t) framebuffer_width;
