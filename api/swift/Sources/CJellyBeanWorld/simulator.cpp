@@ -292,8 +292,8 @@ inline void init(
 
   bool success = init(
     properties, src.name, strlen(src.name), src.scent, src.color, src.requiredItemCounts,
-    src.requiredItemCosts, src.blocksMovement, intensity_fn, interaction_fns, scent_dimension,
-    color_dimension, item_type_count);
+    src.requiredItemCosts, src.blocksMovement, src.visualOcclusion, intensity_fn, interaction_fns,
+    scent_dimension, color_dimension, item_type_count);
   if (!success) {
     status->code = JBW_OUT_OF_MEMORY;
     return;
@@ -365,6 +365,7 @@ inline void init(
     properties.requiredItemCounts[i] = src.required_item_counts[i];
 
   properties.blocksMovement = src.blocks_movement;
+  properties.visualOcclusion = src.visual_occlusion;
   init(properties.energyFunctions.intensityFn, src.intensity_fn, status);
   if (status->code != JBW_OK) {
     free(properties.name);

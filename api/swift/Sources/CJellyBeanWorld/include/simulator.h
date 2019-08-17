@@ -124,6 +124,7 @@ typedef struct ItemProperties {
   unsigned int* requiredItemCounts;
   unsigned int* requiredItemCosts;
   bool blocksMovement;
+  float visualOcclusion;
   EnergyFunctions energyFunctions;
 } ItemProperties;
 

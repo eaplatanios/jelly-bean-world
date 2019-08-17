@@ -23,6 +23,7 @@ public let banana = Item(
   requiredItemCounts: [:],
   requiredItemCosts: [:],
   blocksMovement: false,
+  visualOcclusion: 0.0,
   energyFunctions: EnergyFunctions(
     intensityFn: .constant(-5.3),
     interactionFns: [
@@ -37,6 +38,7 @@ public let onion = Item(
   requiredItemCounts: [:],
   requiredItemCosts: [:],
   blocksMovement: false,
+  visualOcclusion: 0.0,
   energyFunctions: EnergyFunctions(
     intensityFn: .constant(-5.0),
     interactionFns: [
@@ -50,6 +52,7 @@ public let jellyBean = Item(
   requiredItemCounts: [:],
   requiredItemCosts: [:],
   blocksMovement: false,
+  visualOcclusion: 0.0,
   energyFunctions: EnergyFunctions(
     intensityFn: .constant(-5.3),
     interactionFns: [
@@ -64,6 +67,7 @@ public let wall = Item(
   requiredItemCounts: [3: 1], // Make walls impossible to collect.
   requiredItemCosts: [:],
   blocksMovement: true,
+  visualOcclusion: 0.5,
   energyFunctions: EnergyFunctions(
     intensityFn: .constant(0.0),
     interactionFns: [

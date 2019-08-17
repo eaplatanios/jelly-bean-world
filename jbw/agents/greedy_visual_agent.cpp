@@ -261,6 +261,7 @@ int main(int argc, const char** argv)
 	config.item_types[0].color[1] = 1.0f;
 	config.item_types[0].required_item_counts[0] = 1;
 	config.item_types[0].blocks_movement = false;
+	config.item_types[0].visual_occlusion = 0.0;
 	config.item_types[1].name = "onion";
 	config.item_types[1].scent = (float*) calloc(config.scent_dimension, sizeof(float));
 	config.item_types[1].color = (float*) calloc(config.color_dimension, sizeof(float));
@@ -270,6 +271,7 @@ int main(int argc, const char** argv)
 	config.item_types[1].color[0] = 1.0f;
 	config.item_types[1].required_item_counts[1] = 1;
 	config.item_types[1].blocks_movement = false;
+	config.item_types[1].visual_occlusion = 0.0;
 	config.item_types[2].name = "jellybean";
 	config.item_types[2].scent = (float*) calloc(config.scent_dimension, sizeof(float));
 	config.item_types[2].color = (float*) calloc(config.color_dimension, sizeof(float));
@@ -278,6 +280,7 @@ int main(int argc, const char** argv)
 	config.item_types[2].scent[2] = 1.0f;
 	config.item_types[2].color[2] = 1.0f;
 	config.item_types[2].blocks_movement = false;
+	config.item_types[2].visual_occlusion = 0.0;
 	config.item_types[3].name = "wall";
 	config.item_types[3].scent = (float*) calloc(config.scent_dimension, sizeof(float));
 	config.item_types[3].color = (float*) calloc(config.color_dimension, sizeof(float));
@@ -288,6 +291,7 @@ int main(int argc, const char** argv)
 	config.item_types[3].color[2] = 0.5f;
 	config.item_types[3].required_item_counts[3] = 1;
 	config.item_types[3].blocks_movement = true;
+	config.item_types[3].visual_occlusion = 0.5;
 	config.item_types.length = item_type_count;
 
 	config.item_types[0].intensity_fn.fn = constant_intensity_fn;

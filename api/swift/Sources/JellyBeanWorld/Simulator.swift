@@ -657,6 +657,9 @@ public struct Item: Equatable, Hashable {
   /// Indicates whether this item blocks the movement of agents (e.g., used for walls).
   public let blocksMovement: Bool
 
+  /// Level of visual occlusion of this item (i.e., proportion of vision that it blocks).
+  public let visualOcclusion: Float
+
   /// Energy functions that represent how instances of this item type are distributed in the world.
   public let energyFunctions: EnergyFunctions
 
@@ -668,6 +671,7 @@ public struct Item: Equatable, Hashable {
     requiredItemCounts: [Int: UInt32],
     requiredItemCosts: [Int: UInt32],
     blocksMovement: Bool,
+    visualOcclusion: Float,
     energyFunctions: EnergyFunctions
   ) {
     self.name = name
@@ -676,6 +680,7 @@ public struct Item: Equatable, Hashable {
     self.requiredItemCounts = requiredItemCounts
     self.requiredItemCosts = requiredItemCosts
     self.blocksMovement = blocksMovement
+    self.visualOcclusion = visualOcclusion
     self.energyFunctions = energyFunctions
   }
 }

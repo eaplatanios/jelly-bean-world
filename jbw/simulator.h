@@ -20,6 +20,7 @@
 #include <core/array.h>
 #include <core/utility.h>
 #include <atomic>
+#include <math.h>
 #include <mutex>
 #include "map.h"
 #include "diffusion.h"
@@ -162,6 +163,7 @@ struct item_properties {
     unsigned int* required_item_costs;
 
     bool blocks_movement;
+    float visual_occlusion;
 
     energy_function<intensity_function> intensity_fn;
     energy_function<interaction_function>* interaction_fns;
@@ -231,7 +233,7 @@ template<typename InteractionFunctionInfo>
 inline bool init(
         item_properties& properties, const char* name, unsigned int name_length,
         const float* scent, const float* color, const unsigned int* required_item_counts,
-        const unsigned int* required_item_costs, bool blocks_movement,
+        const unsigned int* required_item_costs, bool blocks_movement, float visual_occlusion,
         const energy_function<intensity_function>& intensity_fn, const InteractionFunctionInfo& interaction_fns,
         unsigned int scent_dimension, unsigned int color_dimension, unsigned int item_type_count)
 {
@@ -289,6 +291,7 @@ inline bool init(
     for (unsigned int i = 0; i < item_type_count; i++)
         properties.required_item_costs[i] = required_item_costs[i];
     properties.blocks_movement = blocks_movement;
+    properties.visual_occlusion = visual_occlusion;
     return true;
 }
 
@@ -302,7 +305,7 @@ inline bool init(
 {
     return init(properties, src.name.data, src.name.length,
         src.scent, src.color, src.required_item_counts,
-        src.required_item_costs, src.blocks_movement,
+        src.required_item_costs, src.blocks_movement, src.visual_occlusion,
         src.intensity_fn, src.interaction_fns,
         scent_dimension, color_dimension, item_type_count);
 }
@@ -352,6 +355,7 @@ inline bool read(item_properties& properties, Stream& in,
      || !read(properties.required_item_counts, in, item_type_count)
      || !read(properties.required_item_costs, in, item_type_count)
      || !read(properties.blocks_movement, in)
+     || !read(properties.visual_occlusion, in)
      || !read(properties.intensity_fn, in))
     {
         free(properties.name); free(properties.scent); free(properties.color);
@@ -384,6 +388,7 @@ inline bool write(const item_properties& properties, Stream& out,
      || !write(properties.required_item_counts, out, item_type_count)
      || !write(properties.required_item_costs, out, item_type_count)
      || !write(properties.blocks_movement, out)
+     || !write(properties.visual_occlusion, out)
      || !write(properties.intensity_fn, out))
         return false;
 
@@ -789,6 +794,31 @@ struct agent_state {
             current_vision[offset + i] += color[i];
     }
 
+    inline void occlude_color(
+            position relative_position, unsigned int vision_range,
+            unsigned int color_dimension, const float occlusion)
+    {
+        switch (current_direction) {
+        case direction::UP: break;
+        case direction::DOWN:
+            relative_position.x *= -1;
+            relative_position.y *= -1;
+            break;
+        case direction::LEFT:
+            core::swap(relative_position.x, relative_position.y);
+            relative_position.y *= -1; break;
+        case direction::RIGHT:
+            core::swap(relative_position.x, relative_position.y);
+            relative_position.x *= -1; break;
+        case direction::COUNT: break;
+        }
+        unsigned int x = (unsigned int) (relative_position.x + vision_range);
+        unsigned int y = (unsigned int) (relative_position.y + vision_range);
+        unsigned int offset = (x*(2*vision_range + 1) + y) * color_dimension;
+        for (unsigned int i = 0; i < color_dimension; i++)
+            current_vision[offset + i] = current_vision[offset + i] * (1.0 - occlusion) + occlusion;
+    }
+
     template<typename T>
     inline void update_state(
             patch<patch_data>* neighborhood[4],
@@ -801,6 +831,8 @@ struct agent_state {
             current_scent[i] = 0.0f;
         for (unsigned int i = 0; i < (2*config.vision_range + 1) * (2*config.vision_range + 1) * config.color_dimension; i++)
             current_vision[i] = 0.0f;
+
+        array<item> visual_field_items(16);
 
         for (unsigned int i = 0; i < 4; i++) {
             /* iterate over neighboring items, and add their contributions to scent and vision */
@@ -819,9 +851,12 @@ struct agent_state {
                 if (item.deletion_time == 0
                  && (unsigned int) abs(relative_position.x) <= config.vision_range
                  && (unsigned int) abs(relative_position.y) <= config.vision_range) {
-                    add_color(relative_position, config.vision_range,
-                            config.item_types[item.item_type].color, config.color_dimension);
-                }
+                    visual_field_items.add(item);
+                    add_color(
+                        relative_position, config.vision_range,
+                        config.item_types[item.item_type].color,
+                        config.color_dimension);
+                 }
             }
 
             /* iterate over neighboring agents, and add their contributions to scent and vision */
@@ -832,8 +867,56 @@ struct agent_state {
                 /* if the neighbor is in the visual field, add its color to the appropriate pixel */
                 if ((unsigned int) abs(relative_position.x) <= config.vision_range
                  && (unsigned int) abs(relative_position.y) <= config.vision_range) {
-                    add_color(relative_position, config.vision_range,
-                            config.agent_color, config.color_dimension);
+                    add_color(
+                        relative_position, config.vision_range,
+                        config.agent_color, config.color_dimension);
+                }
+            }
+        }
+
+        int64_t V = (int64_t) config.vision_range;
+        for (int64_t i = -V; i <= V; i++) {
+            const float cell_x = (float) i;
+            for (int64_t j = -V; j <= V; j++) {
+                const float cell_y = (float) j;
+                const position relative_position = { i, j };
+                const float distance = (float) relative_position.squared_length();
+                for (item& item : visual_field_items) {
+                    const position relative_location = item.location - current_position;
+                    float item_distance = (float) relative_location.squared_length();
+                    if (item_distance > distance + 1.0f) continue;
+
+                    // Find the tangent points.
+                    const float radius = 0.5f;
+                    const float dx = (float) relative_location.x;
+                    const float dy = (float) relative_location.y;
+                    const float dd = sqrt(dx * dx + dy * dy);
+                    const float a = asin(radius / dd);
+                    const float b = atan2(dy, dx);
+                    const float b_minus_a = b - a;
+                    const float b_plus_a = b + a;
+                    const float left_x = dx + radius * sin(b_minus_a);
+                    const float left_y = dy - radius * cos(b_minus_a);
+                    const float right_x = dx - radius * sin(b_plus_a);
+                    const float right_y = dy + radius * cos(b_plus_a);
+
+                    // Check if we are within the region occluded by the item.
+                    // if (((left_x * (cell_y - 0.5f) - left_y * (cell_x - 0.5f) > 0.0f) &&
+                    //      (right_x * (cell_y - 0.5f) - right_y * (cell_x - 0.5f) < 0.0f)) ||
+                    //     ((left_x * (cell_y - 0.5f) - left_y * (cell_x + 0.5f) > 0.0f) &&
+                    //      (right_x * (cell_y - 0.5f) - right_y * (cell_x + 0.5f) < 0.0f)) ||
+                    //     ((left_x * (cell_y + 0.5f) - left_y * (cell_x - 0.5f) > 0.0f) &&
+                    //      (right_x * (cell_y + 0.5f) - right_y * (cell_x - 0.5f) < 0.0f)) ||
+                    //     ((left_x * (cell_y + 0.5f) - left_y * (cell_x + 0.5f) > 0.0f) &&
+                    //      (right_x * (cell_y + 0.5f) - right_y * (cell_x + 0.5f) < 0.0f))
+                    if ((left_x * cell_y - left_y * cell_x > 0.0f) &&
+                        (right_x * cell_y - right_y * cell_x < 0.0f)
+                    ) {
+                        float occlusion = config.item_types[item.item_type].visual_occlusion;
+                        occlude_color(
+                            relative_position, config.vision_range,
+                            config.color_dimension, occlusion);
+                    }
                 }
             }
         }

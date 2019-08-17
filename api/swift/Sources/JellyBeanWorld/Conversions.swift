@@ -223,6 +223,7 @@ internal extension Item {
       0..<itemCount,
       UnsafeBufferPointer(start: value.requiredItemCosts!, count: Int(itemCount))))
     self.blocksMovement = value.blocksMovement
+    self.visualOcclusion = value.visualOcclusion
     self.energyFunctions = EnergyFunctions(fromC: value.energyFunctions)
   }
 
@@ -255,6 +256,7 @@ internal extension Item {
           requiredItemCounts: cCounts, 
           requiredItemCosts: cCosts, 
           blocksMovement: blocksMovement,
+          visualOcclusion: visualOcclusion,
           energyFunctions: cEnergyFunctions.energyFunctions)
       },
       deallocate: { () in
