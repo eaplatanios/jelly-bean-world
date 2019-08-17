@@ -27,12 +27,15 @@ layout(binding = 0) uniform UniformBufferObject {
 
 layout(location = 0) in vec2 in_position;
 layout(location = 1) in vec2 in_tex_coord;
+layout(location = 2) in uint in_tex_index;
 
 layout(location = 0) out vec2 uv;
 layout(location = 1) out vec2 frag_tex_coord;
+layout(location = 2) flat out uint tex_index;
 
 void main() {
     gl_Position = ubo.proj * ubo.view * ubo.model * vec4(in_position, 0.0, 1.0);
     uv = (ubo.model * vec4(in_position, 0.0, 1.0)).xy;
     frag_tex_coord = in_tex_coord;
+    tex_index = in_tex_index;
 }

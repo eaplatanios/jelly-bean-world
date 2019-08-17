@@ -142,9 +142,8 @@ bool setup_renderer(vulkan_renderer& renderer,
 		const dynamic_texture_image& texture,
 		const sampler& sampler)
 {
-	uint32_t ub_binding = 0;
-	uint32_t texture_binding = 1;
 	descriptor_type pool_types[] = { descriptor_type::UNIFORM_BUFFER, descriptor_type::COMBINED_IMAGE_SAMPLER };
+	uint32_t descriptor_counts[] = {1, 1};
 	if (!renderer.create_render_pass(pass)) {
 		renderer.delete_render_pass(pass);
 	} else if (!renderer.create_graphics_pipeline(pipeline, pass, vertex_shader, "main", fragment_shader, "main", primitive_topology::TRIANGLE_STRIP, false, 0.0f, binding, attributes, &layout, 1)) {
@@ -159,13 +158,13 @@ bool setup_renderer(vulkan_renderer& renderer,
 		renderer.delete_graphics_pipeline(pipeline);
 		renderer.delete_render_pass(pass);
 		return false;
-	} else if (!renderer.create_descriptor_pool(pool, pool_types, 2)) {
+	} else if (!renderer.create_descriptor_pool(pool, pool_types, descriptor_counts, 2)) {
 		renderer.delete_uniform_buffer(ub);
 		renderer.delete_frame_buffer(fb);
 		renderer.delete_graphics_pipeline(pipeline);
 		renderer.delete_render_pass(pass);
 		return false;
-	} else if (!renderer.create_descriptor_set(ub_set, &ub, &ub_binding, 1, nullptr, nullptr, 0, &texture, &texture_binding, 1, &sampler, layout, pool)) {
+	} else if (!renderer.create_descriptor_set(ub_set, &ub, 0, 1, nullptr, 0, &texture, 1, 1, &sampler, layout, pool)) {
 		renderer.delete_uniform_buffer(ub);
 		renderer.delete_descriptor_pool(pool);
 		renderer.delete_frame_buffer(fb);

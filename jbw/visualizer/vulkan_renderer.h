@@ -155,6 +155,8 @@ public:
 			uint32_t binding, uint32_t location,
 			attribute_type type, uint32_t offset)
 	{
+		static_assert(Index < Count, "`Index` is out of bounds");
+
 		descriptions[Index].binding = binding;
 		descriptions[Index].location = location;
 		descriptions[Index].format = (VkFormat) type;
@@ -817,7 +819,8 @@ public:
 	}
 
 	inline bool create_descriptor_pool(descriptor_pool& pool,
-			const descriptor_type* descriptor_types, uint32_t pool_count)
+			const descriptor_type* descriptor_types,
+			const uint32_t* descriptor_sizes, uint32_t pool_count)
 	{
 		VkDescriptorPoolSize* pool_sizes = (VkDescriptorPoolSize*) calloc(pool_count, sizeof(VkDescriptorPoolSize));
 		if (pool_sizes == nullptr) {
@@ -827,7 +830,7 @@ public:
 
 		for (uint32_t i = 0; i < pool_count; i++) {
 			pool_sizes[i].type = (VkDescriptorType) descriptor_types[i];
-			pool_sizes[i].descriptorCount = swap_chain_image_count;
+			pool_sizes[i].descriptorCount = swap_chain_image_count * descriptor_sizes[i];
 		}
 
 		VkDescriptorPoolCreateInfo poolInfo = {};
@@ -849,10 +852,11 @@ public:
 
 	inline bool create_descriptor_set(
 			descriptor_set& ds, const uniform_buffer* uniform_buffers,
-			uint32_t* uniform_buffer_bindings, uint32_t uniform_buffer_count,
-			const texture_image* texture_images, uint32_t* texture_image_bindings, uint32_t texture_image_count,
-			const dynamic_texture_image* dyn_texture_images, uint32_t* dyn_texture_image_bindings, uint32_t dyn_texture_image_count,
-			const sampler* tex_sampler, const descriptor_set_layout& layout, const descriptor_pool& pool)
+			uint32_t uniform_buffer_binding, uint32_t uniform_buffer_count,
+			const texture_image* texture_images, uint32_t texture_image_count,
+			const dynamic_texture_image* dyn_texture_images, uint32_t dyn_texture_image_count,
+			uint32_t texture_binding, const sampler* tex_sampler,
+			const descriptor_set_layout& layout, const descriptor_pool& pool)
 	{
 		ds.sets = (VkDescriptorSet*) malloc(sizeof(VkDescriptorSet) * swap_chain_image_count);
 		if (ds.sets == nullptr) {
@@ -881,7 +885,7 @@ public:
 
 		VkDescriptorBufferInfo* buffer_info_array = (VkDescriptorBufferInfo*) calloc(max((uint32_t) 1, uniform_buffer_count), sizeof(VkDescriptorBufferInfo));
 		VkDescriptorImageInfo* image_info_array = (VkDescriptorImageInfo*) calloc(max((uint32_t) 1, texture_image_count + dyn_texture_image_count), sizeof(VkDescriptorImageInfo));
-		VkWriteDescriptorSet* descriptorWrites = (VkWriteDescriptorSet*) calloc(uniform_buffer_count + texture_image_count + dyn_texture_image_count, sizeof(VkWriteDescriptorSet));
+		VkWriteDescriptorSet descriptorWrites[2] = { 0 };
 		if (buffer_info_array == nullptr || image_info_array == nullptr || descriptorWrites == nullptr) {
 			fprintf(stderr, "vulkan_renderer.create_descriptor_set ERROR: Insufficient memory for `descriptorWrites`.\n");
 			if (buffer_info_array != nullptr) free(buffer_info_array);
@@ -893,47 +897,45 @@ public:
 				buffer_info_array[j].buffer = uniform_buffers[j].buffers[i];
 				buffer_info_array[j].offset = 0;
 				buffer_info_array[j].range = uniform_buffers[j].size;
-
-				descriptorWrites[j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				descriptorWrites[j].dstSet = ds.sets[i];
-				descriptorWrites[j].dstBinding = uniform_buffer_bindings[j];
-				descriptorWrites[j].dstArrayElement = 0;
-				descriptorWrites[j].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-				descriptorWrites[j].descriptorCount = 1;
-				descriptorWrites[j].pBufferInfo = &buffer_info_array[j];
 			}
 			for (size_t j = 0; j < texture_image_count; j++) {
 				image_info_array[j].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 				image_info_array[j].imageView = texture_images[j].view;
 				image_info_array[j].sampler = tex_sampler->vk_sampler;
-
-				descriptorWrites[uniform_buffer_count + j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				descriptorWrites[uniform_buffer_count + j].dstSet = ds.sets[i];
-				descriptorWrites[uniform_buffer_count + j].dstBinding = texture_image_bindings[j];
-				descriptorWrites[uniform_buffer_count + j].dstArrayElement = 0;
-				descriptorWrites[uniform_buffer_count + j].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-				descriptorWrites[uniform_buffer_count + j].descriptorCount = 1;
-				descriptorWrites[uniform_buffer_count + j].pImageInfo = &image_info_array[j];
 			}
 			for (size_t j = 0; j < dyn_texture_image_count; j++) {
 				image_info_array[texture_image_count + j].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 				image_info_array[texture_image_count + j].imageView = dyn_texture_images[j].view;
 				image_info_array[texture_image_count + j].sampler = tex_sampler->vk_sampler;
-
-				descriptorWrites[uniform_buffer_count + texture_image_count + j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				descriptorWrites[uniform_buffer_count + texture_image_count + j].dstSet = ds.sets[i];
-				descriptorWrites[uniform_buffer_count + texture_image_count + j].dstBinding = dyn_texture_image_bindings[j];
-				descriptorWrites[uniform_buffer_count + texture_image_count + j].dstArrayElement = 0;
-				descriptorWrites[uniform_buffer_count + texture_image_count + j].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-				descriptorWrites[uniform_buffer_count + texture_image_count + j].descriptorCount = 1;
-				descriptorWrites[uniform_buffer_count + texture_image_count + j].pImageInfo = &image_info_array[texture_image_count + j];
 			}
 
-			vkUpdateDescriptorSets(logical_device, uniform_buffer_count + texture_image_count + dyn_texture_image_count, descriptorWrites, 0, nullptr);
+			uint32_t num_descriptor_writes = 0;
+			if (uniform_buffer_count > 0) {
+				descriptorWrites[num_descriptor_writes].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+				descriptorWrites[num_descriptor_writes].dstSet = ds.sets[i];
+				descriptorWrites[num_descriptor_writes].dstBinding = uniform_buffer_binding;
+				descriptorWrites[num_descriptor_writes].dstArrayElement = 0;
+				descriptorWrites[num_descriptor_writes].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+				descriptorWrites[num_descriptor_writes].descriptorCount = uniform_buffer_count;
+				descriptorWrites[num_descriptor_writes].pBufferInfo = buffer_info_array;
+				num_descriptor_writes++;
+			}
+
+			if (texture_image_count > 0 || dyn_texture_image_count > 0) {
+				descriptorWrites[num_descriptor_writes].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+				descriptorWrites[num_descriptor_writes].dstSet = ds.sets[i];
+				descriptorWrites[num_descriptor_writes].dstBinding = texture_binding;
+				descriptorWrites[num_descriptor_writes].dstArrayElement = 0;
+				descriptorWrites[num_descriptor_writes].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+				descriptorWrites[num_descriptor_writes].descriptorCount = texture_image_count + dyn_texture_image_count;
+				descriptorWrites[num_descriptor_writes].pImageInfo = image_info_array;
+				num_descriptor_writes++;
+			}
+
+			vkUpdateDescriptorSets(logical_device, num_descriptor_writes, descriptorWrites, 0, nullptr);
 		}
 		free(buffer_info_array);
 		free(image_info_array);
-		free(descriptorWrites);
 		return true;
 	}
 

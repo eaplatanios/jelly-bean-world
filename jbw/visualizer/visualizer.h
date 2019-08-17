@@ -177,6 +177,7 @@ class visualizer
 	struct vertex {
 		float position[2];
 		float tex_coord[2];
+		unsigned int tex_index;
 	};
 
 	struct item_vertex {
@@ -227,9 +228,9 @@ class visualizer
 	graphics_pipeline scent_map_pipeline, item_pipeline, visual_field_pipeline;
 	frame_buffer fb;
 	command_buffer cb;
-	descriptor_set_layout background_layout, item_layout, visual_field_layout;
-	descriptor_pool background_ds_pool, item_ds_pool, visual_field_ds_pool;
-	descriptor_set background_ds, item_ds, visual_field_ds;
+	descriptor_set_layout layout;
+	descriptor_pool pool;
+	descriptor_set ds;
 	uniform_buffer ub;
 	dynamic_texture_image scent_map_texture, visual_field_texture;
 	sampler tex_sampler;
@@ -239,7 +240,7 @@ class visualizer
 	size_t item_quad_buffer_capacity;
 	uniform_buffer_data uniform_data;
 	binding_description background_binding;
-	attribute_descriptions<2> background_shader_attributes;
+	attribute_descriptions<3> background_shader_attributes;
 	binding_description item_binding;
 	attribute_descriptions<3> item_shader_attributes;
 
@@ -346,6 +347,7 @@ public:
 
 		background_shader_attributes.set<0>(0, 0, attribute_type::FLOAT2, offsetof(vertex, position));
 		background_shader_attributes.set<1>(0, 1, attribute_type::FLOAT2, offsetof(vertex, tex_coord));
+		background_shader_attributes.set<2>(0, 2, attribute_type::UINT, offsetof(vertex, tex_index));
 
 		vertex_shader_src = read_file<true>("item_vertex_shader.spv", vertex_shader_size);
 		if (vertex_shader_src == nullptr) {
@@ -427,36 +429,9 @@ public:
 
 		uint32_t binding_indices[] = { 0, 1 };
 		descriptor_type types[] = { descriptor_type::UNIFORM_BUFFER, descriptor_type::COMBINED_IMAGE_SAMPLER };
-		uint32_t descriptor_counts[] = { 1, 1 };
+		uint32_t descriptor_counts[] = { 1, 2 };
 		shader_stage visibilities[] = { shader_stage::ALL, shader_stage::FRAGMENT };
-		if (!renderer.create_descriptor_set_layout(background_layout, binding_indices, types, descriptor_counts, visibilities, 2)) {
-			renderer.delete_vertex_buffer(scent_quad_buffer);
-			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
-			renderer.delete_shader(item_vertex_shader);
-			renderer.delete_shader(item_fragment_shader);
-			renderer.delete_shader(background_vertex_shader);
-			renderer.delete_shader(background_fragment_shader);
-			renderer.delete_shader(visual_field_fragment_shader);
-			glfwDestroyWindow(window); glfwTerminate();
-			throw new std::runtime_error("visualizer ERROR: Failed to create descriptor_set_layout.");
-		}
-
-		if (!renderer.create_descriptor_set_layout(item_layout, binding_indices, types, descriptor_counts, visibilities, 1)) {
-			renderer.delete_descriptor_set_layout(background_layout);
-			renderer.delete_vertex_buffer(scent_quad_buffer);
-			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
-			renderer.delete_shader(item_vertex_shader);
-			renderer.delete_shader(item_fragment_shader);
-			renderer.delete_shader(background_vertex_shader);
-			renderer.delete_shader(background_fragment_shader);
-			renderer.delete_shader(visual_field_fragment_shader);
-			glfwDestroyWindow(window); glfwTerminate();
-			throw new std::runtime_error("visualizer ERROR: Failed to create descriptor_set_layout.");
-		}
-
-		if (!renderer.create_descriptor_set_layout(visual_field_layout, binding_indices, types, descriptor_counts, visibilities, 2)) {
-			renderer.delete_descriptor_set_layout(item_layout);
-			renderer.delete_descriptor_set_layout(background_layout);
+		if (!renderer.create_descriptor_set_layout(layout, binding_indices, types, descriptor_counts, visibilities, 2)) {
 			renderer.delete_vertex_buffer(scent_quad_buffer);
 			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
 			renderer.delete_shader(item_vertex_shader);
@@ -472,9 +447,7 @@ public:
 		texture_height = window_height + 2 * get_config(sim).patch_size;
 		size_t image_size = sizeof(pixel) * texture_width * texture_height;
 		if (!renderer.create_dynamic_texture_image(scent_map_texture, image_size, texture_width, texture_height, image_format::R8G8B8A8_UNORM)) {
-			renderer.delete_descriptor_set_layout(visual_field_layout);
-			renderer.delete_descriptor_set_layout(item_layout);
-			renderer.delete_descriptor_set_layout(background_layout);
+			renderer.delete_descriptor_set_layout(layout);
 			renderer.delete_vertex_buffer(scent_quad_buffer);
 			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
 			renderer.delete_shader(item_vertex_shader);
@@ -495,9 +468,7 @@ public:
 			image_format::R8G8B8A8_UNORM)
 		) {
 			renderer.delete_dynamic_texture_image(scent_map_texture);
-			renderer.delete_descriptor_set_layout(visual_field_layout);
-			renderer.delete_descriptor_set_layout(item_layout);
-			renderer.delete_descriptor_set_layout(background_layout);
+			renderer.delete_descriptor_set_layout(layout);
 			renderer.delete_vertex_buffer(scent_quad_buffer);
 			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
 			renderer.delete_shader(item_vertex_shader);
@@ -515,9 +486,7 @@ public:
 		{
 			renderer.delete_dynamic_texture_image(visual_field_texture);
 			renderer.delete_dynamic_texture_image(scent_map_texture);
-			renderer.delete_descriptor_set_layout(visual_field_layout);
-			renderer.delete_descriptor_set_layout(item_layout);
-			renderer.delete_descriptor_set_layout(background_layout);
+			renderer.delete_descriptor_set_layout(layout);
 			renderer.delete_vertex_buffer(scent_quad_buffer);
 			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
 			renderer.delete_shader(item_vertex_shader);
@@ -533,9 +502,7 @@ public:
 			renderer.delete_sampler(tex_sampler);
 			renderer.delete_dynamic_texture_image(visual_field_texture);
 			renderer.delete_dynamic_texture_image(scent_map_texture);
-			renderer.delete_descriptor_set_layout(visual_field_layout);
-			renderer.delete_descriptor_set_layout(item_layout);
-			renderer.delete_descriptor_set_layout(background_layout);
+			renderer.delete_descriptor_set_layout(layout);
 			renderer.delete_vertex_buffer(scent_quad_buffer);
 			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
 			renderer.delete_shader(item_vertex_shader);
@@ -552,9 +519,7 @@ public:
 			renderer.delete_sampler(tex_sampler);
 			renderer.delete_dynamic_texture_image(visual_field_texture);
 			renderer.delete_dynamic_texture_image(scent_map_texture);
-			renderer.delete_descriptor_set_layout(visual_field_layout);
-			renderer.delete_descriptor_set_layout(item_layout);
-			renderer.delete_descriptor_set_layout(background_layout);
+			renderer.delete_descriptor_set_layout(layout);
 			renderer.delete_vertex_buffer(scent_quad_buffer);
 			renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
 			renderer.delete_shader(item_vertex_shader);
@@ -613,9 +578,7 @@ public:
 		renderer.delete_sampler(tex_sampler);
 		renderer.delete_dynamic_texture_image(scent_map_texture);
 		renderer.delete_dynamic_texture_image(visual_field_texture);
-		renderer.delete_descriptor_set_layout(background_layout);
-		renderer.delete_descriptor_set_layout(item_layout);
-		renderer.delete_descriptor_set_layout(visual_field_layout);
+		renderer.delete_descriptor_set_layout(layout);
 		renderer.delete_vertex_buffer(scent_quad_buffer);
 		renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
 		cleanup_renderer();
@@ -970,14 +933,14 @@ private:
 			position visual_field_bottom_left = { agent_position.x - vision_range, agent_position.y - vision_range };
 			position visual_field_top_right = { agent_position.x + vision_range + 1, agent_position.y + vision_range + 1 };
 			vertex vertices[] = {
-				{{(float) bottom_left_corner.x * patch_size, (float) bottom_left_corner.y * patch_size}, {0.0f, 0.0f}},
-				{{(float) bottom_left_corner.x * patch_size, (float) (top_right_corner.y + 1) * patch_size}, {0.0f, (float) texture_height_cells / texture_height}},
-				{{(float) (top_right_corner.x + 1) * patch_size, (float) bottom_left_corner.y * patch_size}, {(float) texture_width_cells / texture_width, 0.0f}},
-				{{(float) (top_right_corner.x + 1) * patch_size, (float) (top_right_corner.y + 1) * patch_size}, {(float) texture_width_cells / texture_width, (float) texture_height_cells / texture_height}},
-				{{(float) visual_field_bottom_left.x, (float) visual_field_bottom_left.y}, {0.0f, 0.0f}},
-				{{(float) visual_field_bottom_left.x, (float) visual_field_top_right.y}, {0.0f, 1.0f}},
-				{{(float) visual_field_top_right.x, (float) visual_field_bottom_left.y}, {1.0f, 0.0f}},
-				{{(float) visual_field_top_right.x, (float) visual_field_top_right.y}, {1.0f, 1.0f}}
+				{{(float) bottom_left_corner.x * patch_size, (float) bottom_left_corner.y * patch_size}, {0.0f, 0.0f}, 0},
+				{{(float) bottom_left_corner.x * patch_size, (float) (top_right_corner.y + 1) * patch_size}, {0.0f, (float) texture_height_cells / texture_height}, 0},
+				{{(float) (top_right_corner.x + 1) * patch_size, (float) bottom_left_corner.y * patch_size}, {(float) texture_width_cells / texture_width, 0.0f}, 0},
+				{{(float) (top_right_corner.x + 1) * patch_size, (float) (top_right_corner.y + 1) * patch_size}, {(float) texture_width_cells / texture_width, (float) texture_height_cells / texture_height}, 0},
+				{{(float) visual_field_bottom_left.x, (float) visual_field_bottom_left.y}, {0.0f, 0.0f}, 1},
+				{{(float) visual_field_bottom_left.x, (float) visual_field_top_right.y}, {0.0f, 1.0f}, 1},
+				{{(float) visual_field_top_right.x, (float) visual_field_bottom_left.y}, {1.0f, 0.0f}, 1},
+				{{(float) visual_field_top_right.x, (float) visual_field_top_right.y}, {1.0f, 1.0f}, 1}
 			};
 
 			/* transfer all data to GPU */
@@ -992,14 +955,14 @@ private:
 		} else {
 			/* no patches are visible, so move the quad outside the view */
 			vertex vertices[] = {
-				{{top + 10.0f, top + 10.0f}, {1.0f, 0.0f}},
-				{{top + 10.0f, top + 10.0f}, {1.0f, 1.0f}},
-				{{top + 10.0f, top + 10.0f}, {0.0f, 1.0f}},
-				{{top + 10.0f, top + 10.0f}, {0.0f, 0.0f}},
-				{{top + 10.0f, top + 10.0f}, {1.0f, 0.0f}},
-				{{top + 10.0f, top + 10.0f}, {1.0f, 1.0f}},
-				{{top + 10.0f, top + 10.0f}, {0.0f, 1.0f}},
-				{{top + 10.0f, top + 10.0f}, {0.0f, 0.0f}}
+				{{top + 10.0f, top + 10.0f}, {1.0f, 0.0f}, 0},
+				{{top + 10.0f, top + 10.0f}, {1.0f, 1.0f}, 0},
+				{{top + 10.0f, top + 10.0f}, {0.0f, 1.0f}, 0},
+				{{top + 10.0f, top + 10.0f}, {0.0f, 0.0f}, 0},
+				{{top + 10.0f, top + 10.0f}, {1.0f, 0.0f}, 1},
+				{{top + 10.0f, top + 10.0f}, {1.0f, 1.0f}, 1},
+				{{top + 10.0f, top + 10.0f}, {0.0f, 1.0f}, 1},
+				{{top + 10.0f, top + 10.0f}, {0.0f, 0.0f}, 1}
 			};
 
 			if (!HasLock) while (!scene_lock.try_lock()) { }
@@ -1018,7 +981,7 @@ private:
 		draw_scent_map.vertex_count = 4;
 		draw_scent_map.vertex_buffers[0] = scent_quad_buffer;
 		draw_scent_map.vertex_buffer_offsets[0] = 0;
-		draw_scent_map.descriptor_sets[0] = background_ds;
+		draw_scent_map.descriptor_sets[0] = ds;
 
 		draw_call<0, 1, 1> draw_items;
 		draw_items.pipeline = item_pipeline;
@@ -1026,7 +989,7 @@ private:
 		draw_items.vertex_count = item_vertex_count;
 		draw_items.dynamic_vertex_buffers[0] = item_quad_buffer;
 		draw_items.dynamic_vertex_buffer_offsets[0] = 0;
-		draw_items.descriptor_sets[0] = item_ds;
+		draw_items.descriptor_sets[0] = ds;
 
 		if (agent_visual_field) {
 			draw_call<1, 0, 1> draw_visual_field;
@@ -1035,7 +998,7 @@ private:
 			draw_visual_field.vertex_count = 4;
 			draw_visual_field.vertex_buffers[0] = scent_quad_buffer;
 			draw_visual_field.vertex_buffer_offsets[0] = 0;
-			draw_visual_field.descriptor_sets[0] = visual_field_ds;
+			draw_visual_field.descriptor_sets[0] = ds;
 
 			float clear_color[] = { 0.0f, 0.0f, 0.0f, 1.0f };
 			if (!renderer.record_command_buffer(
@@ -1394,22 +1357,22 @@ private:
 	}
 
 	bool setup_renderer() {
-		uint32_t texture_bindings[] = { 1 };
-		uint32_t ub_binding = 0;
+		dynamic_texture_image textures[] = { scent_map_texture, visual_field_texture };
 		descriptor_type pool_types[] = { descriptor_type::UNIFORM_BUFFER, descriptor_type::COMBINED_IMAGE_SAMPLER };
+		uint32_t descriptor_counts[] = { 1, 2 };
 		if (!renderer.create_render_pass(pass)) {
 			return false;
 		} else if (!renderer.create_graphics_pipeline(scent_map_pipeline, pass,
 				background_vertex_shader, "main", background_fragment_shader, "main",
 				primitive_topology::TRIANGLE_STRIP, false, 1.0f,
-				background_binding, background_shader_attributes, &background_layout, 1))
+				background_binding, background_shader_attributes, &layout, 1))
 		{
 			renderer.delete_render_pass(pass);
 			return false;
 		} else if (!renderer.create_graphics_pipeline(item_pipeline, pass,
 				item_vertex_shader, "main", item_fragment_shader, "main",
 				primitive_topology::TRIANGLE_LIST, false, 1.0f,
-				item_binding, item_shader_attributes, &item_layout, 1))
+				item_binding, item_shader_attributes, &layout, 1))
 		{
 			renderer.delete_graphics_pipeline(scent_map_pipeline);
 			renderer.delete_render_pass(pass);
@@ -1417,7 +1380,7 @@ private:
 		} else if (!renderer.create_graphics_pipeline(visual_field_pipeline, pass,
 				background_vertex_shader, "main", visual_field_fragment_shader, "main",
 				primitive_topology::TRIANGLE_STRIP, false, 1.0f,
-				background_binding, background_shader_attributes, &visual_field_layout, 1)) {
+				background_binding, background_shader_attributes, &layout, 1)) {
 			renderer.delete_graphics_pipeline(item_pipeline);
 			renderer.delete_graphics_pipeline(scent_map_pipeline);
 			renderer.delete_render_pass(pass);
@@ -1434,7 +1397,7 @@ private:
 			renderer.delete_graphics_pipeline(scent_map_pipeline);
 			renderer.delete_render_pass(pass);
 			return false;
-		} else if (!renderer.create_descriptor_pool(background_ds_pool, pool_types, 2)) {
+		} else if (!renderer.create_descriptor_pool(pool, pool_types, descriptor_counts, 2)) {
 			renderer.delete_uniform_buffer(ub);
 			renderer.delete_frame_buffer(fb);
 			renderer.delete_graphics_pipeline(visual_field_pipeline);
@@ -1442,64 +1405,11 @@ private:
 			renderer.delete_graphics_pipeline(scent_map_pipeline);
 			renderer.delete_render_pass(pass);
 			return false;
-		} else if (!renderer.create_descriptor_pool(item_ds_pool, pool_types, 1)) {
-			renderer.delete_descriptor_pool(background_ds_pool);
-			renderer.delete_uniform_buffer(ub);
-			renderer.delete_frame_buffer(fb);
-			renderer.delete_graphics_pipeline(visual_field_pipeline);
-			renderer.delete_graphics_pipeline(item_pipeline);
-			renderer.delete_graphics_pipeline(scent_map_pipeline);
-			renderer.delete_render_pass(pass);
-			return false;
-		} else if (!renderer.create_descriptor_pool(visual_field_ds_pool, pool_types, 2)) {
-			renderer.delete_descriptor_pool(item_ds_pool);
-			renderer.delete_descriptor_pool(background_ds_pool);
-			renderer.delete_uniform_buffer(ub);
-			renderer.delete_frame_buffer(fb);
-			renderer.delete_graphics_pipeline(visual_field_pipeline);
-			renderer.delete_graphics_pipeline(item_pipeline);
-			renderer.delete_graphics_pipeline(scent_map_pipeline);
-			renderer.delete_render_pass(pass);
-			return false;
-		} else if (!renderer.create_descriptor_set(
-			background_ds, &ub, &ub_binding, 1, nullptr, nullptr, 0, &scent_map_texture,
-			texture_bindings, 1, &tex_sampler, background_layout, background_ds_pool))
+		} else if (!renderer.create_descriptor_set(ds, &ub, 0, 1,
+			nullptr, 0, textures, 2, 1, &tex_sampler, layout, pool)
+				|| !renderer.create_command_buffer(cb)) 
 		{
-			renderer.delete_descriptor_pool(visual_field_ds_pool);
-			renderer.delete_descriptor_pool(item_ds_pool);
-			renderer.delete_descriptor_pool(background_ds_pool);
-			renderer.delete_uniform_buffer(ub);
-			renderer.delete_frame_buffer(fb);
-			renderer.delete_graphics_pipeline(visual_field_pipeline);
-			renderer.delete_graphics_pipeline(item_pipeline);
-			renderer.delete_graphics_pipeline(scent_map_pipeline);
-			renderer.delete_render_pass(pass);
-			return false;
-		} else if (!renderer.create_descriptor_set(
-			item_ds, &ub, &ub_binding, 1, nullptr, nullptr, 0, nullptr,
-			nullptr, 0, &tex_sampler, item_layout, item_ds_pool))
-		{
-			renderer.delete_descriptor_set(background_ds);
-			renderer.delete_descriptor_pool(visual_field_ds_pool);
-			renderer.delete_descriptor_pool(item_ds_pool);
-			renderer.delete_descriptor_pool(background_ds_pool);
-			renderer.delete_uniform_buffer(ub);
-			renderer.delete_frame_buffer(fb);
-			renderer.delete_graphics_pipeline(visual_field_pipeline);
-			renderer.delete_graphics_pipeline(item_pipeline);
-			renderer.delete_graphics_pipeline(scent_map_pipeline);
-			renderer.delete_render_pass(pass);
-			return false;
-		} else if (!renderer.create_descriptor_set(
-			visual_field_ds, &ub, &ub_binding, 1, nullptr, nullptr, 0, &visual_field_texture,
-			texture_bindings, 1, &tex_sampler, visual_field_layout, visual_field_ds_pool
-		) || !renderer.create_command_buffer(cb))
-		{
-			renderer.delete_descriptor_set(item_ds);
-			renderer.delete_descriptor_set(background_ds);
-			renderer.delete_descriptor_pool(visual_field_ds_pool);
-			renderer.delete_descriptor_pool(item_ds_pool);
-			renderer.delete_descriptor_pool(background_ds_pool);
+			renderer.delete_descriptor_pool(pool);
 			renderer.delete_uniform_buffer(ub);
 			renderer.delete_frame_buffer(fb);
 			renderer.delete_graphics_pipeline(visual_field_pipeline);
@@ -1515,12 +1425,8 @@ private:
 	{
 		renderer.delete_command_buffer(cb);
 		renderer.delete_uniform_buffer(ub);
-		renderer.delete_descriptor_set(visual_field_ds);
-		renderer.delete_descriptor_set(item_ds);
-		renderer.delete_descriptor_set(background_ds);
-		renderer.delete_descriptor_pool(visual_field_ds_pool);
-		renderer.delete_descriptor_pool(item_ds_pool);
-		renderer.delete_descriptor_pool(background_ds_pool);
+		renderer.delete_descriptor_set(ds);
+		renderer.delete_descriptor_pool(pool);
 		renderer.delete_frame_buffer(fb);
 		renderer.delete_graphics_pipeline(visual_field_pipeline);
 		renderer.delete_graphics_pipeline(item_pipeline);

@@ -25,10 +25,11 @@ layout(binding = 0) uniform UniformBufferObject {
     float patch_size_texels;
 } ubo;
 
-layout(binding = 1) uniform sampler2D tex_sampler;
+layout(binding = 1) uniform sampler2D tex_sampler[2];
 
 layout(location = 0) in vec2 uv;
 layout(location = 1) in vec2 frag_tex_coord;
+layout(location = 2) flat in uint tex_index;
 
 layout(location = 0) out vec4 out_color;
 
@@ -36,9 +37,9 @@ void main() {
     vec2 grid = fract(uv + 0.1f);
     float line_weight;
     if (min(grid.x, grid.y) < 0.2f) {
-        line_weight = texture(tex_sampler, frag_tex_coord / ubo.patch_size_texels).w;
+        line_weight = texture(tex_sampler[tex_index], frag_tex_coord / ubo.patch_size_texels).w;
     } else {
         line_weight = 1.0f;
     }
-    out_color = (1.0f - line_weight) * vec4(0.0f, 0.0f, 0.0f, 1.0f) + line_weight * vec4(texture(tex_sampler, frag_tex_coord).xyz, 1.0);
+    out_color = (1.0f - line_weight) * vec4(0.0f, 0.0f, 0.0f, 1.0f) + line_weight * vec4(texture(tex_sampler[tex_index], frag_tex_coord).xyz, 1.0);
 }
