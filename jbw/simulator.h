@@ -921,22 +921,21 @@ struct agent_state {
                 const float distance = (float) relative_position.squared_length();
                 float cell_left_angle, cell_right_angle;
                 circle_tangent_angles(cell_x, cell_y, cell_left_angle, cell_right_angle);
+                const float cell_angle = abs(cell_left_angle - cell_right_angle);
 
                 /* Check if this cell is outside the agent's field of view. */
                 if (config.agent_field_of_view < 2 * M_PI) {
                     float overlap = angle_overlap(
                         fov_left_angle, fov_right_angle,
                         cell_left_angle, cell_right_angle);
-                    if (overlap <= 0.0f) {
-                        occlude_color(
-                            relative_position, config.vision_range,
-                            config.color_dimension, 1.0f);
-                        continue;
-                    }
+                    const float occlusion = 1.0f - min(1.0f, overlap / cell_angle);
+                    occlude_color(
+                        relative_position, config.vision_range,
+                        config.color_dimension, occlusion);
+                    if (occlusion == 1.0f) continue;
                 }
 
                 /* Check if this cell is occluded by any items. */
-                const float cell_angle = abs(cell_left_angle - cell_right_angle);
                 for (item& item : visual_field_items) {
                     const position relative_location = item.location - current_position;
                     float item_distance = (float) relative_location.squared_length();
