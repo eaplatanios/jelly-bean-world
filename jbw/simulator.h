@@ -875,16 +875,12 @@ struct agent_state {
         }
 
         const float circle_radius = 0.5f;
-        auto circle_tangents = [circle_radius](float x, float y, float& left_x, float& left_y, float& right_x, float& right_y) {
+        auto circle_tangent_angles = [circle_radius](float x, float y, float& left_angle, float& right_angle) {
             const float dd = sqrt(x * x + y * y);
             const float a = asin(circle_radius / dd);
             const float b = atan2(y, x);
-            const float b_minus_a = b - a;
-            const float b_plus_a = b + a;
-            left_x = x - circle_radius * sin(b_plus_a);
-            left_y = y + circle_radius * cos(b_plus_a);
-            right_x = x + circle_radius * sin(b_minus_a);
-            right_y = y - circle_radius * cos(b_minus_a);
+            left_angle = b + a;
+            right_angle = b - a;
         };
 
         int64_t V = (int64_t) config.vision_range;
@@ -894,11 +890,9 @@ struct agent_state {
                 const float cell_y = (float) j;
                 const position relative_position = { i, j };
                 const float distance = (float) relative_position.squared_length();
-                float cell_left_x, cell_left_y, cell_right_x, cell_right_y;
-                circle_tangents(cell_x, cell_y, cell_left_x, cell_left_y, cell_right_x, cell_right_y);
-                const float cell_left_angle = atan2(cell_left_y, cell_left_x);
-                const float cell_right_angle = atan2(cell_right_y, cell_right_x);
-                const float cell_angle = cell_left_angle - cell_right_angle;
+                float cell_left_angle, cell_right_angle;
+                circle_tangent_angles(cell_x, cell_y, cell_left_angle, cell_right_angle);
+                const float cell_angle = abs(cell_left_angle - cell_right_angle);
                 for (item& item : visual_field_items) {
                     const position relative_location = item.location - current_position;
                     float item_distance = (float) relative_location.squared_length();
@@ -906,11 +900,8 @@ struct agent_state {
 
                     const float x = (float) relative_location.x;
                     const float y = (float) relative_location.y;
-                    float left_x, left_y, right_x, right_y;
-                    circle_tangents(x, y, left_x, left_y, right_x, right_y);
-
-                    const float left_angle = atan2(left_y, left_x);
-                    const float right_angle = atan2(right_y, right_x);
+                    float left_angle, right_angle;
+                    circle_tangent_angles(x, y, left_angle, right_angle);
 
                     float overlap = angle_overlap(left_angle, right_angle, cell_left_angle, cell_right_angle);
                     if (overlap > 0.0f) {
@@ -966,10 +957,14 @@ struct agent_state {
 
 private:
     static inline float angle_overlap(float al, float ar, float bl, float br) {
+        al = al < 0 ? 2 * M_PI + al : al;
+        ar = ar < 0 ? 2 * M_PI + ar : ar;
+        bl = bl < 0 ? 2 * M_PI + bl : bl;
+        br = br < 0 ? 2 * M_PI + br : br;
         if (al < ar) {
-            return angle_overlap(al, -M_PI, bl, br) + angle_overlap(M_PI, ar, bl, br);
+            return angle_overlap(al, 0.0f, bl, br) + angle_overlap(2 * M_PI, ar, bl, br);
         } else if (bl < br) {
-            return angle_overlap(al, ar, bl, -M_PI) + angle_overlap(al, ar, M_PI, br);       
+            return angle_overlap(al, ar, bl, 0.0f) + angle_overlap(al, ar, 2 * M_PI, br);       
         } else {
             if (al > bl) {
                 if (ar > bl) return 0.0f;
