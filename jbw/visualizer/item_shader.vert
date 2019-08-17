@@ -22,7 +22,7 @@ layout(binding = 0) uniform UniformBufferObject {
     mat4 view;
     mat4 proj;
     float pixel_density;
-    float patch_size_texels;
+    uint patch_size_texels;
 } ubo;
 
 layout(location = 0) in vec2 in_position;

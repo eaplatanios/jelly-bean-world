@@ -14,10 +14,11 @@
  * the License.
  */
 
+#include "../mpi.h"
+
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include "vulkan_renderer.h"
-#include "../mpi.h"
 
 #include <thread>
 #include <condition_variable>
@@ -43,8 +44,8 @@ inline void cursor_position_callback(GLFWwindow* window, double x, double y)
 		v->left_mouse_button_pressed = true;
 	} else {
 		v->track_agent_id = 0;
-		v->camera_position[0] += (v->last_cursor_x - x) / v->pixel_density;
-		v->camera_position[1] -= (v->last_cursor_y - y) / v->pixel_density;
+		v->camera_position[0] += (float) (v->last_cursor_x - x) / v->pixel_density;
+		v->camera_position[1] -= (float) (v->last_cursor_y - y) / v->pixel_density;
 		v->translate_start_position[0] = v->camera_position[0];
 		v->translate_start_position[1] = v->camera_position[1];
 	}
@@ -202,7 +203,7 @@ class visualizer
 	struct uniform_buffer_data {
 		model_view_matrix mvp;
 		float pixel_density;
-		float patch_size_texels;
+		uint32_t patch_size_texels;
 	};
 
 	GLFWwindow* window;
@@ -212,7 +213,7 @@ class visualizer
 	uint32_t texture_height;
 	float camera_position[2];
 	float pixel_density;
-	unsigned int current_patch_size_texels;
+	uint32_t current_patch_size_texels;
 
 	SimulatorType& sim;
 	uint64_t semaphore;
@@ -236,8 +237,8 @@ class visualizer
 	sampler tex_sampler;
 	vertex_buffer scent_quad_buffer;
 	dynamic_vertex_buffer item_quad_buffer;
-	size_t item_vertex_count;
-	size_t item_quad_buffer_capacity;
+	uint32_t item_vertex_count;
+	uint32_t item_quad_buffer_capacity;
 	uniform_buffer_data uniform_data;
 	binding_description background_binding;
 	attribute_descriptions<3> background_shader_attributes;
@@ -284,7 +285,7 @@ public:
 			render_agent_visual_field(draw_visual_field),
 			running(true)
 	{
-		semaphore_signal_period = round(1000.0f / max_steps_per_second);
+		semaphore_signal_period = (unsigned long long) round(1000.0f / max_steps_per_second);
 
 		camera_position[0] = 0.5f;
 		camera_position[1] = 0.5f;
@@ -681,7 +682,7 @@ private:
 	{
 		const unsigned int texel_cell_length = (unsigned int) ceil(1 / pixel_density);
 
-		size_t new_item_vertex_count = 0;
+		uint32_t new_item_vertex_count = 0;
 		pixel* scent_map_texture_data = (pixel*) scent_map_texture.mapped_memory;
 		pixel* visual_field_texture_data = (pixel*) visual_field_texture.mapped_memory;
 		const unsigned int patch_size = get_config(sim).patch_size;
@@ -912,8 +913,8 @@ private:
 			if (agent_visual_field != nullptr) {
 				const unsigned int color_dimension = get_config(sim).color_dimension;
 				const unsigned int V = 2 * vision_range + 1;
-				for (int64_t i = 0; i < V; i++) {
-					for (int64_t j = 0; j < V; j++) {
+				for (unsigned int i = 0; i < V; i++) {
+					for (unsigned int j = 0; j < V; j++) {
 						int index = 0;
 						switch (agent_direction) {
 						case direction::UP: index = j * V + i; break;
@@ -1436,8 +1437,8 @@ private:
 
 	static inline float gamma_correction(const float channel_value) {
 		float corrected_value;
-		if (channel_value <= 0.0031308) {
-			corrected_value = 12.92 * channel_value;
+		if (channel_value <= 0.0031308f) {
+			corrected_value = 12.92f * channel_value;
 		}
 		corrected_value = 1.055f * pow(channel_value, 1.0f / 2.4f) - 0.055f;
 		return max(0.0f, min(1.0f, corrected_value));
@@ -1453,11 +1454,11 @@ private:
 		float b = 255 * (1 - (x + y) / 2);
 
 		if (is_patch_fixed) {
-			out.r = r;
-			out.g = g;
-			out.b = b;
+			out.r = (uint8_t) r;
+			out.g = (uint8_t) g;
+			out.b = (uint8_t) b;
 		} else {
-			float black_alpha = 0.2;
+			constexpr float black_alpha = 0.2f;
 			out.r = (uint8_t) ((1 - black_alpha) * r);
 			out.g = (uint8_t) ((1 - black_alpha) * g);
 			out.b = (uint8_t) ((1 - black_alpha) * b);
@@ -1469,9 +1470,9 @@ private:
 		float y = gamma_correction(cell_vision[1]);
 		float z = gamma_correction(cell_vision[2]);
 
-		out.r = 255 * (1 - (y + z) / 2);
-		out.g = 255 * (1 - (x + z) / 2);
-		out.b = 255 * (1 - (x + y) / 2);
+		out.r = (uint8_t) (255 * (1 - (y + z) / 2));
+		out.g = (uint8_t) (255 * (1 - (x + z) / 2));
+		out.b = (uint8_t) (255 * (1 - (x + y) / 2));
 	}
 
 	static inline void cross(float (&out)[3],
