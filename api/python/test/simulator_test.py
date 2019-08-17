@@ -23,7 +23,7 @@ class SimpleAgent(jbw.Agent):
 		super(SimpleAgent, self).__init__(simulator, load_filepath)
 
 	def do_next_action(self):
-		self.counter += 1
+		'''self.counter += 1
 		if self.counter % 20 == 0:
 			self.turn(jbw.RelativeDirection.LEFT)
 		elif self.counter % 20 == 5:
@@ -33,7 +33,8 @@ class SimpleAgent(jbw.Agent):
 		elif self.counter % 20 == 15:
 			self.turn(jbw.RelativeDirection.RIGHT)
 		else:
-			self.move(jbw.RelativeDirection.FORWARD)
+			self.move(jbw.RelativeDirection.FORWARD)'''
+		self.move(choice([jbw.RelativeDirection.FORWARD, jbw.RelativeDirection.RIGHT]))
 
 	def save(self, filepath):
 		with open(filepath, 'w') as fout:
@@ -46,7 +47,7 @@ class SimpleAgent(jbw.Agent):
 def make_config():
 	# specify the item types
 	items = []
-	items.append(jbw.Item("banana",    [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [1, 0, 0, 0], [0, 0, 0, 0], False,
+	items.append(jbw.Item("banana",    [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [1, 0, 0, 0], [0, 0, 0, 0], False, 0.0,
 					   intensity_fn=jbw.IntensityFunction.CONSTANT, intensity_fn_args=[-5.3],
 					   interaction_fns=[
 						   [jbw.InteractionFunction.PIECEWISE_BOX, 10.0, 200.0, 0.0, -6.0],      # parameters for interaction between item 0 and item 0
@@ -54,7 +55,7 @@ def make_config():
 						   [jbw.InteractionFunction.PIECEWISE_BOX, 10.0, 200.0, 2.0, -100.0],    # parameters for interaction between item 0 and item 2
 						   [jbw.InteractionFunction.ZERO]                                        # parameters for interaction between item 0 and item 3
 						]))
-	items.append(jbw.Item("onion",     [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0, 1, 0, 0], [0, 0, 0, 0], False,
+	items.append(jbw.Item("onion",     [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0, 1, 0, 0], [0, 0, 0, 0], False, 0.0,
 					   intensity_fn=jbw.IntensityFunction.CONSTANT, intensity_fn_args=[-5.0],
 					   interaction_fns=[
 						   [jbw.InteractionFunction.PIECEWISE_BOX, 200.0, 0.0, -6.0, -6.0],      # parameters for interaction between item 1 and item 0
@@ -62,7 +63,7 @@ def make_config():
 						   [jbw.InteractionFunction.PIECEWISE_BOX, 200.0, 0.0, -100.0, -100.0],  # parameters for interaction between item 1 and item 2
 						   [jbw.InteractionFunction.ZERO]                                        # parameters for interaction between item 1 and item 3
 						]))
-	items.append(jbw.Item("jellybean", [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0, 0, 0, 0], [0, 0, 0, 0], False,
+	items.append(jbw.Item("jellybean", [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0, 0, 0, 0], [0, 0, 0, 0], False, 0.0,
 					   intensity_fn=jbw.IntensityFunction.CONSTANT, intensity_fn_args=[-5.3],
 					   interaction_fns=[
 						   [jbw.InteractionFunction.PIECEWISE_BOX, 10.0, 200.0, 2.0, -100.0],    # parameters for interaction between item 2 and item 0
@@ -70,7 +71,7 @@ def make_config():
 						   [jbw.InteractionFunction.PIECEWISE_BOX, 10.0, 200.0, 0.0, -6.0],      # parameters for interaction between item 2 and item 2
 						   [jbw.InteractionFunction.ZERO]                                        # parameters for interaction between item 2 and item 3
 						]))
-	items.append(jbw.Item("wall",      [0.0, 0.0, 0.0], [0.5, 0.5, 0.5], [0, 0, 0, 1], [0, 0, 0, 0], True,
+	items.append(jbw.Item("wall",      [0.0, 0.0, 0.0], [0.5, 0.5, 0.5], [0, 0, 0, 1], [0, 0, 0, 0], True, 1.0,
 					   intensity_fn=jbw.IntensityFunction.CONSTANT, intensity_fn_args=[0.0],
 					   interaction_fns=[
 						   [jbw.InteractionFunction.ZERO],                                       # parameters for interaction between item 3 and item 0

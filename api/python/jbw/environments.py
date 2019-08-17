@@ -31,7 +31,7 @@ from .visualizer import MapVisualizer
 def make_config():
   # specify the item types
   items = []
-  items.append(Item("banana",    [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [1, 0, 0, 0], [0, 0, 0, 0], False,
+  items.append(Item("banana",    [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [1, 0, 0, 0], [0, 0, 0, 0], False, 0.0,
             intensity_fn=IntensityFunction.CONSTANT, intensity_fn_args=[-5.3],
             interaction_fns=[
               [InteractionFunction.PIECEWISE_BOX, 10.0, 200.0, 0.0, -6.0],      # parameters for interaction between item 0 and item 0
@@ -39,7 +39,7 @@ def make_config():
               [InteractionFunction.PIECEWISE_BOX, 10.0, 200.0, 2.0, -100.0],    # parameters for interaction between item 0 and item 2
               [InteractionFunction.ZERO]                                        # parameters for interaction between item 0 and item 3
             ]))
-  items.append(Item("onion",     [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0, 1, 0, 0], [0, 0, 0, 0], False,
+  items.append(Item("onion",     [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0, 1, 0, 0], [0, 0, 0, 0], False, 0.0,
             intensity_fn=IntensityFunction.CONSTANT, intensity_fn_args=[-5.0],
             interaction_fns=[
               [InteractionFunction.PIECEWISE_BOX, 200.0, 0.0, -6.0, -6.0],      # parameters for interaction between item 1 and item 0
@@ -47,7 +47,7 @@ def make_config():
               [InteractionFunction.PIECEWISE_BOX, 200.0, 0.0, -100.0, -100.0],  # parameters for interaction between item 1 and item 2
               [InteractionFunction.ZERO]                                        # parameters for interaction between item 1 and item 3
             ]))
-  items.append(Item("jellybean", [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0, 0, 0, 0], [0, 0, 0, 0], False,
+  items.append(Item("jellybean", [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0, 0, 0, 0], [0, 0, 0, 0], False, 0.0,
             intensity_fn=IntensityFunction.CONSTANT, intensity_fn_args=[-5.3],
             interaction_fns=[
               [InteractionFunction.PIECEWISE_BOX, 10.0, 200.0, 2.0, -100.0],    # parameters for interaction between item 2 and item 0
@@ -55,7 +55,7 @@ def make_config():
               [InteractionFunction.PIECEWISE_BOX, 10.0, 200.0, 0.0, -6.0],      # parameters for interaction between item 2 and item 2
               [InteractionFunction.ZERO]                                        # parameters for interaction between item 2 and item 3
             ]))
-  items.append(Item("wall",      [0.0, 0.0, 0.0], [0.5, 0.5, 0.5], [0, 0, 0, 1], [0, 0, 0, 0], True,
+  items.append(Item("wall",      [0.0, 0.0, 0.0], [0.5, 0.5, 0.5], [0, 0, 0, 1], [0, 0, 0, 0], True, 0.0,
             intensity_fn=IntensityFunction.CONSTANT, intensity_fn_args=[0.0],
             interaction_fns=[
               [InteractionFunction.ZERO],                                       # parameters for interaction between item 3 and item 0

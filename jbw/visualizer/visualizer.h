@@ -104,6 +104,8 @@ inline void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 			v->track_agent_id = 9;
 		} else if (key == GLFW_KEY_B) {
 			v->render_background = !v->render_background;
+		} else if (key == GLFW_KEY_V) {
+			v->render_agent_visual_field = !v->render_agent_visual_field;
 		} else if (key == GLFW_KEY_LEFT_BRACKET) {
 			v->semaphore_signal_period *= 2;
 		} else if (key == GLFW_KEY_RIGHT_BRACKET) {
@@ -131,6 +133,7 @@ struct visualizer_client_data {
 	status get_agent_states_response = status::OK;
 	const agent_state* agent_states = nullptr;
 	size_t agent_state_count = 0;
+	bool render_visual_field;
 
 	std::atomic_bool waiting_for_semaphore_op;
 	uint64_t semaphore_id;
@@ -148,10 +151,13 @@ struct visualizer_client_data {
 		get_map_response(src.get_map_response), map(src.map),
 		track_agent_id(src.track_agent_id),
 		get_agent_states_response(src.get_agent_states_response),
-		agent_states(src.agent_states), agent_state_count(src.agent_state_count)
+		agent_states(src.agent_states), agent_state_count(src.agent_state_count),
+		render_visual_field(src.render_visual_field), semaphore_id(src.semaphore_id),
+		semaphore_op_response(src.semaphore_op_response)
 	{
 		waiting_for_get_map.store(src.waiting_for_get_map.load());
 		waiting_for_get_agent_states.store(src.waiting_for_get_agent_states.load());
+		waiting_for_semaphore_op.store(src.waiting_for_semaphore_op.load());
 	}
 };
 
@@ -267,12 +273,14 @@ public:
 	visualizer(SimulatorType& sim,
 		uint32_t window_width, uint32_t window_height,
 		uint64_t track_agent_id, float pixels_per_cell,
-		bool draw_scent_map, float max_steps_per_second) :
+		bool draw_scent_map, bool draw_visual_field,
+		float max_steps_per_second) :
 			width(window_width), height(window_height), sim(sim),
 			semaphore(0), semaphore_signal_time(0),
 			background_binding(0, sizeof(vertex)), item_binding(0, sizeof(item_vertex)),
 			track_agent_id(track_agent_id), tracking_animating(false),
-			scene_ready(false), render_background(draw_scent_map), render_agent_visual_field(true),
+			scene_ready(false), render_background(draw_scent_map),
+			render_agent_visual_field(draw_visual_field),
 			running(true)
 	{
 		semaphore_signal_period = round(1000.0f / max_steps_per_second);
@@ -1020,22 +1028,34 @@ private:
 		draw_items.dynamic_vertex_buffer_offsets[0] = 0;
 		draw_items.descriptor_sets[0] = item_ds;
 
-		draw_call<1, 0, 1> draw_visual_field;
-		draw_visual_field.pipeline = visual_field_pipeline;
-		draw_visual_field.first_vertex = 4;
-		draw_visual_field.vertex_count = (agent_visual_field == nullptr ? 0 : 4);
-		draw_visual_field.vertex_buffers[0] = scent_quad_buffer;
-		draw_visual_field.vertex_buffer_offsets[0] = 0;
-		draw_visual_field.descriptor_sets[0] = visual_field_ds;
+		if (agent_visual_field) {
+			draw_call<1, 0, 1> draw_visual_field;
+			draw_visual_field.pipeline = visual_field_pipeline;
+			draw_visual_field.first_vertex = 4;
+			draw_visual_field.vertex_count = 4;
+			draw_visual_field.vertex_buffers[0] = scent_quad_buffer;
+			draw_visual_field.vertex_buffer_offsets[0] = 0;
+			draw_visual_field.descriptor_sets[0] = visual_field_ds;
 
-		float clear_color[] = { 0.0f, 0.0f, 0.0f, 1.0f };
-		if (!renderer.record_command_buffer(
-			cb, fb, clear_color, pass,
-			draw_scent_map, draw_items, draw_visual_field)
-		) {
-			cleanup_renderer();
-			if (!HasLock) scene_lock.unlock();
-			return false;
+			float clear_color[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+			if (!renderer.record_command_buffer(
+				cb, fb, clear_color, pass,
+				draw_scent_map, draw_items, draw_visual_field)
+			) {
+				cleanup_renderer();
+				if (!HasLock) scene_lock.unlock();
+				return false;
+			}
+		} else {
+			float clear_color[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+			if (!renderer.record_command_buffer(
+				cb, fb, clear_color, pass,
+				draw_scent_map, draw_items)
+			) {
+				cleanup_renderer();
+				if (!HasLock) scene_lock.unlock();
+				return false;
+			}
 		}
 		if (!HasLock) {
 			scene_ready_cv.notify_one();
@@ -1069,6 +1089,7 @@ private:
 		position agent_position = {0, 0};
 		direction agent_direction = direction::UP;
 		float* agent_visual_field = nullptr;
+		bool render_visual_field = render_agent_visual_field;
 		if (track_agent_id != 0) {
 			agent_state* agent;
 			sim.get_agent_states(&agent, &track_agent_id, 1);
@@ -1078,8 +1099,10 @@ private:
 				unsigned int color_dimension = sim.get_config().color_dimension;
 				unsigned int vision_range = sim.get_config().vision_range;
 				unsigned int visual_field_size = sizeof(float) * (2 * vision_range + 1) * (2 * vision_range + 1) * color_dimension;
-				agent_visual_field = (float*) malloc(visual_field_size);
-				memcpy(agent_visual_field, agent->current_vision, visual_field_size);
+				if (render_visual_field) {
+					agent_visual_field = (float*) malloc(visual_field_size);
+					memcpy(agent_visual_field, agent->current_vision, visual_field_size);
+				}
 				float new_target_position[] = {agent->current_position.x + 0.5f, agent->current_position.y + 0.5f};
 				agent->lock.unlock();
 
@@ -1103,7 +1126,8 @@ private:
 		}
 
 		bool result = prepare_scene_helper<HasLock>(
-			patches, agent_position, agent_direction, agent_visual_field, render_background_map,
+			patches, agent_position, agent_direction,
+			agent_visual_field, render_background_map,
 			left, right, bottom, top);
 		if (agent_visual_field != nullptr) { free(agent_visual_field); }
 		return result;
@@ -1162,6 +1186,7 @@ private:
 		sim.data.track_agent_id = track_agent_id;
 		if (sim.data.track_agent_id != 0) {
 			sim.data.waiting_for_get_agent_states = true;
+			sim.data.render_visual_field = render_agent_visual_field;
 			if (!send_get_agent_states(sim, &sim.data.track_agent_id, 1)) {
 				fprintf(stderr, "visualizer.send_mpi_requests ERROR: Unable to send `get_agent_states` message to server.\n");
 				sim.data.waiting_for_get_agent_states = false;
@@ -1184,7 +1209,8 @@ private:
 			if (response.agent_state_count > 0) {
 				agent_position = response.agent_states[0].current_position;
 				agent_direction = response.agent_states[0].current_direction;
-				agent_visual_field = response.agent_states[0].current_vision;
+				if (response.render_visual_field)
+					agent_visual_field = response.agent_states[0].current_vision;
 
 				float new_target_position[] = {response.agent_states[0].current_position.x + 0.5f, response.agent_states[0].current_position.y + 0.5f};
 

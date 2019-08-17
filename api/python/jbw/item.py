@@ -22,7 +22,7 @@ class Item(object):
   """Represents an item in the world (e.g., jelly beans)."""
 
   def __init__(self, name, scent, color, required_item_counts, required_item_costs,
-               blocks_movement, intensity_fn, intensity_fn_args, interaction_fns):
+               blocks_movement, visual_occlusion, intensity_fn, intensity_fn_args, interaction_fns):
     """Creates a new item.
   
     Arguments:
@@ -38,6 +38,7 @@ class Item(object):
                             the agent's inventory whenever the agent collects
                             items of this type.
       blocks_movement:      Whether this item blocks movement of agents.
+      visual_occlusion:     The amount by which this item occludes vision.
       intensity_fn:         The IntensityFunction used by the Gibbs sampler for
                             generating items of this type in the map.
       intensity_fn_args:    A list of float arguments to intensity_fn.
@@ -54,6 +55,7 @@ class Item(object):
     self.required_item_counts = required_item_counts
     self.required_item_costs = required_item_costs
     self.blocks_movement = blocks_movement
+    self.visual_occlusion = visual_occlusion
     self.intensity_fn = intensity_fn.value
     self.intensity_fn_args = intensity_fn_args
     self.interaction_fns = interaction_fns

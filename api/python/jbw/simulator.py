@@ -226,7 +226,7 @@ class Simulator(object):
         sim_config.max_steps_per_movement, [d.value for d in sim_config.allowed_movement_directions],
         [d.value for d in sim_config.allowed_turn_directions], sim_config.no_op_allowed, sim_config.scent_num_dims,
         sim_config.color_num_dims, sim_config.vision_range, sim_config.patch_size, sim_config.mcmc_num_iter,
-        [(i.name, i.scent, i.color, i.required_item_counts, i.required_item_costs, i.blocks_movement, i.intensity_fn, i.intensity_fn_args, i.interaction_fns) for i in sim_config.items],
+        [(i.name, i.scent, i.color, i.required_item_counts, i.required_item_costs, i.blocks_movement, i.visual_occlusion, i.intensity_fn, i.intensity_fn_args, i.interaction_fns) for i in sim_config.items],
         sim_config.agent_color, sim_config.collision_policy.value, sim_config.decay_param,
         sim_config.diffusion_param, sim_config.deleted_item_lifetime, self._step_callback)
       if is_server:

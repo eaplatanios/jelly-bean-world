@@ -133,6 +133,7 @@ void print_usage(Stream& out) {
 		"  --pixels-per-cell=NUM    Sets the initial number of pixels per cell.\n"
 		"  --max-steps-per-sec=NUM  Sets the maximum simulation steps per second.\n"
 		"  --no-scent-map           Disables drawing of the scent map.\n"
+		"  --visual-field           Draws the visual field around the tracked agent.\n"
 		"  --local                  Starts a simulation locally, rather than connecting\n"
 		"                           to a server (any specified address is ignored).\n"
 		"  --help                   Prints this usage text.\n");
@@ -147,6 +148,7 @@ void print_controls(Stream& out) {
 		"  [ key: Decrease max simulation steps per second.\n"
 		"  ] key: Increase max simulation steps per second.\n"
 		"  b key: Toggle drawing of the scent map.\n"
+		"  v key: Toggle drawing of the agent's visual field.\n"
 		"  1 key: Track agent with ID 1.\n"
 		"  2 key: Track agent with ID 2.\n"
 		"  3 key: Track agent with ID 3.\n"
@@ -195,6 +197,7 @@ bool run_locally(
 		uint64_t track_agent_id,
 		float pixels_per_cell,
 		bool draw_scent_map,
+		bool draw_visual_field,
 		float max_steps_per_second)
 {
 	simulator_config config;
@@ -316,7 +319,8 @@ bool run_locally(
 	}
 
 	print_controls(stdout); fflush(stdout);
-	visualizer<simulator<visualizer_data>> visualizer(sim, 800, 800, track_agent_id, pixels_per_cell, draw_scent_map, max_steps_per_second);
+	visualizer<simulator<visualizer_data>> visualizer(sim, 800, 800, track_agent_id,
+			pixels_per_cell, draw_scent_map, draw_visual_field, max_steps_per_second);
 
 	unsigned int move_count = 0;
 	std::thread simulation_worker = std::thread([&]() {
@@ -381,6 +385,7 @@ bool run(
 		uint64_t track_agent_id,
 		float pixels_per_cell,
 		bool draw_scent_map,
+		bool draw_visual_field,
 		float max_steps_per_second)
 {
 	uint64_t client_id;
@@ -393,7 +398,8 @@ bool run(
 
 	print_controls(stdout); fflush(stdout);
 
-	visualizer<client<visualizer_client_data>> visualizer(sim, 800, 800, track_agent_id, pixels_per_cell, draw_scent_map, max_steps_per_second);
+	visualizer<client<visualizer_client_data>> visualizer(sim, 800, 800, track_agent_id,
+			pixels_per_cell, draw_scent_map, draw_visual_field, max_steps_per_second);
 	visualizer_running = &visualizer.running;
 	while (simulation_running && sim.client_running) {
 		if (visualizer.is_window_closed())
@@ -428,6 +434,7 @@ int main(int argc, const char** argv)
 	float max_steps_per_second = 10.0f;
 	bool local = false;
 	bool draw_scent_map = true;
+	bool draw_visual_field = false;
 
 	/* parse command-line arguments */
 	bool fail = false;
@@ -438,6 +445,7 @@ int main(int argc, const char** argv)
 		if (parse_option(argv[i], fail, "--max-steps-per-sec=", max_steps_per_second)) continue;
 		if (parse_option(argv[i], fail, "--local")) { local = true; continue; }
 		if (parse_option(argv[i], fail, "--no-scent-map")) { draw_scent_map = false; continue; }
+		if (parse_option(argv[i], fail, "--visual-field")) { draw_visual_field = true; continue; }
 		if (parse_option(argv[i], fail, "--help")) {
 			print_usage(stdout);
 			fflush(stdout);
@@ -466,7 +474,7 @@ int main(int argc, const char** argv)
 			free(server_address);
 			server_address = nullptr;
 		}
-		if (!run_locally(track_agent_id, pixels_per_cell, draw_scent_map, max_steps_per_second))
+		if (!run_locally(track_agent_id, pixels_per_cell, draw_scent_map, draw_visual_field, max_steps_per_second))
 			return EXIT_FAILURE;
 	} else {
 		if (server_address == nullptr || server_port == nullptr) {
@@ -474,7 +482,7 @@ int main(int argc, const char** argv)
 			return EXIT_FAILURE;
 		}
 
-		if (!run(server_address, server_port, track_agent_id, pixels_per_cell, draw_scent_map, max_steps_per_second)) {
+		if (!run(server_address, server_port, track_agent_id, pixels_per_cell, draw_scent_map, draw_visual_field, max_steps_per_second)) {
 			free(server_address);
 			return EXIT_FAILURE;
 		}
