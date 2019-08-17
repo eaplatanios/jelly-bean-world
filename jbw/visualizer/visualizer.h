@@ -953,6 +953,7 @@ private:
 						}
 						pixel& p = visual_field_texture_data[i * V + j];
 						vision_to_color(&agent_visual_field[index * color_dimension], p);
+						p.a = 229;
 					}
 				}
 			}
