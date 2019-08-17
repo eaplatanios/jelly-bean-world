@@ -159,6 +159,7 @@ typedef struct SimulatorConfig {
   ItemProperties* itemTypes;
   unsigned int numItemTypes;
   float* agentColor;
+  float agentFieldOfView;
   MovementConflictPolicy movementConflictPolicy;
 
   /* Scent Diffusion Parameters */

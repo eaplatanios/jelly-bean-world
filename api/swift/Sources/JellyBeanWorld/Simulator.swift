@@ -459,6 +459,9 @@ extension Simulator {
     /// Color of each agent. This is a vector of size `colorDimensionality`.
     public let agentColor: ShapedArray<Float>
 
+    /// Field of view of each agent specified in radians.
+    public let agentFieldOfView: Float
+
     /// Conflict resolution policy for when multiple agents request to move to the same location.
     public let moveConflictPolicy: MoveConflictPolicy
 
@@ -484,6 +487,7 @@ extension Simulator {
       mcmcIterations: UInt32,
       items: [Item],
       agentColor: ShapedArray<Float>,
+      agentFieldOfView: Float,
       moveConflictPolicy: MoveConflictPolicy,
       scentDecay: Float,
       scentDiffusion: Float,
@@ -501,6 +505,7 @@ extension Simulator {
       self.mcmcIterations = mcmcIterations
       self.items = items
       self.agentColor = agentColor
+      self.agentFieldOfView = agentFieldOfView
       self.moveConflictPolicy = moveConflictPolicy
       self.scentDecay = scentDecay
       self.scentDiffusion = scentDiffusion

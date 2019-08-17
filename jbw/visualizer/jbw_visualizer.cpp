@@ -216,6 +216,7 @@ bool run_locally(
 	config.no_op_allowed = false;
 	config.patch_size = 32;
 	config.mcmc_iterations = 4000;
+	config.agent_field_of_view = 2.09f;
 	config.agent_color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.agent_color[2] = 1.0f;
 	config.collision_policy = movement_conflict_policy::FIRST_COME_FIRST_SERVED;
@@ -328,9 +329,7 @@ bool run_locally(
 			auto action = rand() % 20;
 			status result = status::OK;
 			sim.get_data().waiting_for_server = true;
-			if (action % 20 == 0 || action % 20 == 5) {
-				result = sim.turn(agent_id, direction::LEFT);
-			} else if (action % 20 == 10 || action % 20 == 15) {
+			if (action % 20 == 0) {
 				result = sim.turn(agent_id, direction::RIGHT);
 			} else {
 				result = sim.move(agent_id, direction::UP, 1);

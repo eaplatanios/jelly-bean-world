@@ -109,6 +109,7 @@ internal extension Simulator.Configuration {
     self.agentColor = ShapedArray(
       shape: [Int(colorDimensionality)],
       scalars: UnsafeBufferPointer(start: value.agentColor!, count: Int(colorDimensionality)))
+    self.agentFieldOfView = agentFieldOfView
     self.moveConflictPolicy = MoveConflictPolicy(fromC: value.movementConflictPolicy)
     self.scentDecay = value.scentDecay
     self.scentDiffusion = value.scentDiffusion
@@ -152,6 +153,7 @@ internal extension Simulator.Configuration {
         itemTypes: cItems,
         numItemTypes: UInt32(items.count),
         agentColor: cColor,
+        agentFieldOfView: agentFieldOfView,
         movementConflictPolicy: moveConflictPolicy.toC(),
         scentDecay: scentDecay,
         scentDiffusion: scentDiffusion,

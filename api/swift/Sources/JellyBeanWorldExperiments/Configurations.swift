@@ -87,6 +87,7 @@ public func simulatorConfiguration(randomSeed: UInt32) -> Simulator.Configuratio
     mcmcIterations: 4000,
     items: [banana, onion, jellyBean, wall],
     agentColor: [0.0, 0.0, 0.0],
+    agentFieldOfView: 2.09,
     moveConflictPolicy: .firstComeFirstServe,
     scentDecay: 0.4,
     scentDiffusion: 0.14,

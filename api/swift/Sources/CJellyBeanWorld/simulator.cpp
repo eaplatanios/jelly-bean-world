@@ -516,6 +516,7 @@ inline void init(simulator_config& config, const SimulatorConfig& src, JBW_Statu
   config.vision_range = src.visionRange;
   config.patch_size = src.patchSize;
   config.mcmc_iterations = src.mcmcIterations;
+  config.agent_field_of_view = src.agentFieldOfView;
   config.collision_policy = to_movement_conflict_policy(src.movementConflictPolicy);
   config.decay_param = src.scentDecay;
   config.diffusion_param = src.scentDiffusion;
@@ -566,6 +567,7 @@ inline void init(
   config.visionRange = src.vision_range;
   config.patchSize = src.patch_size;
   config.mcmcIterations = src.mcmc_iterations;
+  config.agentFieldOfView = src.agent_field_of_view;
   config.movementConflictPolicy = to_MovementConflictPolicy(src.collision_policy);
   config.scentDecay = src.decay_param;
   config.scentDiffusion = src.diffusion_param;
