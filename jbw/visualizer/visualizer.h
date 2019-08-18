@@ -270,6 +270,8 @@ class visualizer
 	bool render_background;
 	bool render_agent_visual_field;
 
+	float max_scent;
+
 public:
 	std::atomic_bool running;
 
@@ -283,7 +285,7 @@ public:
 			background_binding(0, sizeof(vertex)), item_binding(0, sizeof(item_vertex)),
 			track_agent_id(track_agent_id), tracking_animating(false),
 			scene_ready(false), render_background(draw_scent_map),
-			render_agent_visual_field(draw_visual_field),
+			render_agent_visual_field(draw_visual_field), max_scent(1.0f),
 			running(true)
 	{
 		semaphore_signal_period = (unsigned long long) round(1000.0f / max_steps_per_second);
@@ -695,6 +697,7 @@ private:
 		const unsigned int scent_dimension = get_config(sim).scent_dimension;
 		const array<item_properties>& item_types = get_config(sim).item_types;
 		const float* agent_color = get_config(sim).agent_color;
+		float updated_max_scent = 0.0f;
 		if (patches.length > 0) {
 			/* find position of the bottom-left corner and the top-right corner */
 			size_t required_item_vertices = 0;
@@ -806,7 +809,7 @@ private:
 
 								position texture_position = position(a, b) + offset;
 								pixel& current_pixel = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
-								scent_to_color(average_scent, current_pixel, patch.fixed);
+								scent_to_color(average_scent, current_pixel, patch.fixed, max_scent, updated_max_scent);
 							}
 						}
 					}
@@ -962,6 +965,7 @@ private:
 				uniform_data.agent_color.z = agent_color[2];
 			}
 
+			max_scent = updated_max_scent;
 			item_vertex_count = new_item_vertex_count;
 			current_patch_size_texels = patch_size_texels;
 			renderer.transfer_dynamic_vertex_buffer(item_quad_buffer, sizeof(item_vertex) * item_vertex_count);
@@ -1460,35 +1464,96 @@ private:
 		return max(0.0f, min(1.0f, corrected_value));
 	}
 
-	static inline void scent_to_color(const float* cell_scent, pixel& out, bool is_patch_fixed) {
-		float x = gamma_correction(max(0.0f, min(1.0f, log(pow(cell_scent[0], 3.0f) + 1.0f) / 2.0f)));
-		float y = gamma_correction(max(0.0f, min(1.0f, log(pow(cell_scent[1], 3.0f) + 1.0f) / 2.0f)));
-		float z = gamma_correction(max(0.0f, min(1.0f, log(pow(cell_scent[2], 3.0f) + 1.0f) / 2.0f)));
+	static inline void correct_color(
+		const float x, const float y, const float z,
+		float& r, float& g, float& b
+	) {
+		// Convert from RGB to HSL.
+		float min_c = min(x, min(y, z));
+		float max_c = max(x, max(y, z));
+		float delta = max_c - min_c;
+		float h = 0;
+    float s = 0;
+    float l = (max_c + min_c) / 2.0f;
+		if (delta != 0) {
+			if (l < 0.5f) {
+				s = delta / (max_c + min_c);
+			} else {
+				s = delta / (2.0f - max_c - min_c);
+			}
+			if (x == max_c) {
+				h = (y - z) / delta;
+			} else if (y == max_c) {
+				h = 2.0f + (z - x) / delta;
+			} else if (z == max_c) {
+				h = 4.0f + (x - y) / delta;
+			}
+		}
 
-		float r = 255 * (1 - (y + z) / 2);
-		float g = 255 * (1 - (x + z) / 2);
-		float b = 255 * (1 - (x + y) / 2);
+		// Adjust hue and lightness.
+		h /= 6.0f;
+		l = 1.0f - l;
+
+		// Convert from HSL to RGB.
+		auto color_calc = [](float c, const float t1, const float t2) {
+			if (c < 0) c += 1.0f;
+			if (c > 1) c -= 1.0f;
+			if (6.0f * c < 1.0f) return t1 + (t2 - t1) * 6.0f * c;
+			if (2.0f * c < 1.0f) return t2;
+			if (3.0f * c < 2.0f) return t1 + (t2 - t1) * (2.0f / 3.0f - c) * 6.0f;
+			return t1;
+		};
+
+		if (s == 0.0f) {
+			r = l;
+			g = l;
+			b = l;
+		} else {
+			float t2 = l < 0.5f ? l * (1.0f + s) : l + s - l * s;
+			float t1 = 2.0f * l - t2;
+			r = color_calc(h + 1.0f / 3.0f, t1,  t2);
+			g = color_calc(h, t1,  t2);
+			b = color_calc(h - 1.0f / 3.0f, t1,  t2);
+		}
+
+		r = gamma_correction(r);
+		g = gamma_correction(g);
+		b = gamma_correction(b);
+	}
+
+	static inline void scent_to_color(
+		const float* cell_scent, pixel& out, bool is_patch_fixed,
+		const float max_scent, float& updated_max_scent
+	) {
+		const float scent_x = cell_scent[0];
+		const float scent_y = cell_scent[1];
+		const float scent_z = cell_scent[2];
+		updated_max_scent = max(max(max(updated_max_scent, scent_x), scent_y), scent_z);
+		float x = max(0.0f, min(1.0f, pow(scent_x / max_scent, 0.25f)));
+		float y = max(0.0f, min(1.0f, pow(scent_y / max_scent, 0.25f)));
+		float z = max(0.0f, min(1.0f, pow(scent_z / max_scent, 0.25f)));
+
+		float r, g, b;
+		correct_color(x, y, z, r, g, b);
 
 		if (is_patch_fixed) {
-			out.r = (uint8_t) r;
-			out.g = (uint8_t) g;
-			out.b = (uint8_t) b;
+			out.r = (uint8_t) 255 * r;
+			out.g = (uint8_t) 255 * g;
+			out.b = (uint8_t) 255 * b;
 		} else {
 			constexpr float black_alpha = 0.2f;
-			out.r = (uint8_t) ((1 - black_alpha) * r);
-			out.g = (uint8_t) ((1 - black_alpha) * g);
-			out.b = (uint8_t) ((1 - black_alpha) * b);
+			out.r = (uint8_t) 255 * ((1 - black_alpha) * r);
+			out.g = (uint8_t) 255 * ((1 - black_alpha) * g);
+			out.b = (uint8_t) 255 * ((1 - black_alpha) * b);
 		}
 	}
 
 	static inline void vision_to_color(const float* cell_vision, pixel& out) {
-		float x = gamma_correction(cell_vision[0]);
-		float y = gamma_correction(cell_vision[1]);
-		float z = gamma_correction(cell_vision[2]);
-
-		out.r = (uint8_t) (255 * (1 - (y + z) / 2));
-		out.g = (uint8_t) (255 * (1 - (x + z) / 2));
-		out.b = (uint8_t) (255 * (1 - (x + y) / 2));
+		float r, g, b;
+		correct_color(cell_vision[0], cell_vision[1], cell_vision[2], r, g, b);
+		out.r = (uint8_t) 255 * r;
+		out.g = (uint8_t) 255 * g;
+		out.b = (uint8_t) 255 * b;
 	}
 
 	static inline void cross(float (&out)[3],
