@@ -902,10 +902,9 @@ struct agent_state {
         case direction::COUNT: return;
         }
 
-        constexpr float circle_radius = 0.5f;
-        auto circle_tangent_angles = [circle_radius](float x, float y, float& left_angle, float& right_angle) {
+        auto circle_tangent_angles = [](float x, float y, float& left_angle, float& right_angle) {
             const float dd = sqrt(x * x + y * y);
-            const float a = asin(circle_radius / dd);
+            const float a = asin(0.5f / dd);
             const float b = atan2(y, x);
             left_angle = b + a;
             right_angle = b - a;
@@ -937,6 +936,7 @@ struct agent_state {
                 }
 
                 /* Check if this cell is occluded by any items. */
+                float occlusion = 0.0f;
                 for (item& item : visual_field_items) {
                     const position relative_location = item.location - current_position;
                     float item_distance = (float) relative_location.squared_length();
@@ -950,15 +950,13 @@ struct agent_state {
                     float overlap = angle_overlap(
                         left_angle, right_angle,
                         cell_left_angle, cell_right_angle);
-                    if (overlap > 0.0f) {
-                        const float scaling_factor = min(1.0f, overlap / cell_angle);
-                        float occlusion = config.item_types[item.item_type].visual_occlusion * scaling_factor;
-                        if (occlusion > 0.0f) {
-                            occlude_color(
-                                relative_position, config.vision_range,
-                                config.color_dimension, occlusion);
-                        }
-                    }
+                    const float scaling_factor = max(0.0f, min(1.0f, overlap / cell_angle));
+                    occlusion += config.item_types[item.item_type].visual_occlusion * scaling_factor;
+                }
+                if (occlusion > 0.0f) {
+                    occlude_color(
+                        relative_position, config.vision_range,
+                        config.color_dimension, min(1.0f, occlusion));
                 }
             }
         }
