@@ -27,15 +27,17 @@
 
 using namespace jbw;
 
-bool simulation_running = true;
+bool simulation_running = false;
 std::atomic_bool* visualizer_running = nullptr;
 
 #if defined(WIN32)
 BOOL WINAPI signal_handler(DWORD sig_num) 
 {
     if (sig_num == CTRL_C_EVENT || sig_num ==  CTRL_CLOSE_EVENT
-	 || sig_num ==  CTRL_LOGOFF_EVENT || sig_num ==  CTRL_SHUTDOWN_EVENT) 
+	 || sig_num ==  CTRL_LOGOFF_EVENT || sig_num ==  CTRL_SHUTDOWN_EVENT)
     {
+		if (!simulation_running)
+			exit(EXIT_FAILURE);
 		if (visualizer_running != nullptr)
 			*visualizer_running = false;
 		simulation_running = false;
@@ -45,6 +47,8 @@ BOOL WINAPI signal_handler(DWORD sig_num)
 }
 #else
 void signal_handler(int sig_num) {
+	if (!simulation_running)
+		exit(EXIT_FAILURE);
 	if (visualizer_running != nullptr)
 		*visualizer_running = false;
 	simulation_running = false;
@@ -205,7 +209,7 @@ bool run_locally(
 	config.scent_dimension = 3;
 	config.color_dimension = 3;
 	config.vision_range = 5;
-	config.agent_field_of_view = 2.09f;
+	config.agent_field_of_view = 2 * M_PI;
 	config.allowed_movement_directions[0] = action_policy::ALLOWED;
 	config.allowed_movement_directions[1] = action_policy::DISALLOWED;
 	config.allowed_movement_directions[2] = action_policy::DISALLOWED;
@@ -294,8 +298,8 @@ bool run_locally(
 	config.item_types[3].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 
-	set_interaction_args(config.item_types.data, 0, 0, piecewise_box_interaction_fn, {10.0f, 200.0f, 0.0f, -6.0f});
-	set_interaction_args(config.item_types.data, 0, 1, piecewise_box_interaction_fn, {200.0f, 0.0f, -6.0f, -6.0f});
+	set_interaction_args(config.item_types.data, 0, 0, piecewise_box_interaction_fn, {200.0f, 1000.0f, 0.0f, -0.4f});
+	set_interaction_args(config.item_types.data, 0, 1, zero_interaction_fn, {});
 	set_interaction_args(config.item_types.data, 0, 2, piecewise_box_interaction_fn, {10.0f, 200.0f, 2.0f, -100.0f});
 	set_interaction_args(config.item_types.data, 0, 3, zero_interaction_fn, {});
 	set_interaction_args(config.item_types.data, 1, 0, piecewise_box_interaction_fn, {200.0f, 0.0f, -6.0f, -6.0f});
@@ -320,6 +324,7 @@ bool run_locally(
 	}
 
 	print_controls(stdout); fflush(stdout);
+	simulation_running = true;
 	visualizer<simulator<visualizer_data>> visualizer(sim, 800, 800, track_agent_id,
 			pixels_per_cell, draw_scent_map, draw_visual_field, max_steps_per_second);
 
@@ -389,6 +394,7 @@ bool run(
 {
 	uint64_t client_id;
 	client<visualizer_client_data> sim;
+	simulation_running = true;
 	uint64_t simulation_time = connect_client(sim, server_address, server_port, client_id);
 	if (simulation_time == UINT64_MAX) {
 		fprintf(stderr, "ERROR: Unable to connect to '%s:%s'.\n", server_address, server_port);
