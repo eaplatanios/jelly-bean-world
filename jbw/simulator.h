@@ -902,7 +902,7 @@ struct agent_state {
         case direction::COUNT: return;
         }
 
-        const float circle_radius = 0.5f;
+        constexpr float circle_radius = 0.5f;
         auto circle_tangent_angles = [circle_radius](float x, float y, float& left_angle, float& right_angle) {
             const float dd = sqrt(x * x + y * y);
             const float a = asin(circle_radius / dd);

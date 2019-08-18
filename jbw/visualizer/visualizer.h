@@ -554,6 +554,7 @@ public:
 				unsigned long long remaining_time = semaphore_signal_period;
 				while (true) {
 					std::this_thread::sleep_for(std::chrono::milliseconds(min(remaining_time, 100ull)));
+					if (!running) return;
 					unsigned long long current_time = milliseconds();
 					if (current_time > semaphore_signal_time + semaphore_signal_period) break;
 					remaining_time = semaphore_signal_time + semaphore_signal_period - current_time;
