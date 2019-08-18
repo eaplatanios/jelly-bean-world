@@ -242,11 +242,6 @@ public:
 		patches(32), n(n), mcmc_iterations(mcmc_iterations), initial_seed(seed), cache(item_types, item_type_count, n)
 	{
 		rng.seed(seed);
-#if !defined(NDEBUG)
-		rng.seed(0);
-#else
-		rng.seed((uint_fast32_t) milliseconds());
-#endif
 	}
 
 	map(unsigned int n, unsigned int mcmc_iterations, const ItemType* item_types, unsigned int item_type_count) :
