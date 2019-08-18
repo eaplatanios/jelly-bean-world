@@ -432,6 +432,7 @@ struct simulator_config {
     unsigned int scent_dimension;
     unsigned int color_dimension;
     unsigned int vision_range;
+    float agent_field_of_view;
     action_policy allowed_movement_directions[(size_t) direction::COUNT];
     action_policy allowed_rotations[(size_t) direction::COUNT];
     bool no_op_allowed;
@@ -441,14 +442,13 @@ struct simulator_config {
     unsigned int mcmc_iterations;
     array<item_properties> item_types;
     float* agent_color;
-    float agent_field_of_view;
     movement_conflict_policy collision_policy;
 
     /* parameters for scent diffusion */
     float decay_param, diffusion_param;
     unsigned int deleted_item_lifetime;
 
-    simulator_config() : item_types(8), agent_color(NULL), agent_field_of_view(2 * M_PI) { }
+    simulator_config() : item_types(8), agent_color(NULL) { }
 
     simulator_config(const simulator_config& src) : item_types(src.item_types.length) {
         if (!init_helper(src))
@@ -879,9 +879,9 @@ struct agent_state {
             }
         }
 
-        // Compute the agent's field of view.
-        float fov_left_angle;
-        float fov_right_angle;
+        /* Compute the agent's field of view. */
+        float fov_left_angle = 0.0f;
+        float fov_right_angle = 0.0f;
         switch (current_direction) {
         case direction::UP:
             fov_left_angle = (M_PI + config.agent_field_of_view) / 2;
@@ -899,10 +899,10 @@ struct agent_state {
             fov_left_angle = config.agent_field_of_view / 2;
             fov_right_angle = -config.agent_field_of_view / 2;
             break;
-        case direction::COUNT: break;
+        case direction::COUNT: return;
         }
 
-        const float circle_radius = 0.5f;
+        constexpr float circle_radius = 0.5f;
         auto circle_tangent_angles = [circle_radius](float x, float y, float& left_angle, float& right_angle) {
             const float dd = sqrt(x * x + y * y);
             const float a = asin(circle_radius / dd);
@@ -911,7 +911,7 @@ struct agent_state {
             right_angle = b - a;
         };
 
-        // Apply visual occlusion.
+        /* Apply visual occlusion. */
         int64_t V = (int64_t) config.vision_range;
         for (int64_t i = -V; i <= V; i++) {
             const float cell_x = (float) i;
@@ -924,7 +924,7 @@ struct agent_state {
                 circle_tangent_angles(cell_x, cell_y, cell_left_angle, cell_right_angle);
                 const float cell_angle = abs(cell_left_angle - cell_right_angle);
 
-                // Check if this cell is outside the agent's field of view.
+                /* Check if this cell is outside the agent's field of view. */
                 if (config.agent_field_of_view < 2 * M_PI) {
                     float overlap = angle_overlap(
                         fov_left_angle, fov_right_angle,
@@ -936,7 +936,7 @@ struct agent_state {
                     if (occlusion == 1.0f) continue;
                 }
 
-                // Check if this cell is occluded by any items.
+                /* Check if this cell is occluded by any items. */
                 for (item& item : visual_field_items) {
                     const position relative_location = item.location - current_position;
                     float item_distance = (float) relative_location.squared_length();

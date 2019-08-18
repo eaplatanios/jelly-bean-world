@@ -800,6 +800,7 @@ static inline void import_errors() {
  *                  - (list) A list of the item types.
  *                  - (list of floats) The color of all agents.
  *                  - (int) The movement conflict resolution policy.
+ *                  - (float) The field of view angle for all agents.
  *                  - (float) The scent decay parameter.
  *                  - (float) The scent diffusion parameter.
  *                  - (int) The duration of time for which removed items are
@@ -838,12 +839,12 @@ static PyObject* simulator_new(PyObject *self, PyObject *args)
     unsigned int collision_policy;
     PyObject* py_callback;
     if (!PyArg_ParseTuple(
-      args, "IIOOOIIIIIOOIffIO", &seed, &config.max_steps_per_movement,
+      args, "IIOOOIIIIIOOIfffIO", &seed, &config.max_steps_per_movement,
       &py_allowed_movement_directions, &py_allowed_turn_directions, &py_no_op_allowed,
       &config.scent_dimension, &config.color_dimension, &config.vision_range,
       &config.patch_size, &config.mcmc_iterations, &py_items, &py_agent_color,
-      &collision_policy, &config.decay_param, &config.diffusion_param,
-      &config.deleted_item_lifetime, &py_callback)) {
+      &collision_policy, &config.agent_field_of_view, &config.decay_param,
+      &config.diffusion_param, &config.deleted_item_lifetime, &py_callback)) {
         fprintf(stderr, "Invalid argument types in the call to 'simulator_c.new'.\n");
         return NULL;
     }

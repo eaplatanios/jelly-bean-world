@@ -318,8 +318,8 @@ public:
 		glfwSetCursorPosCallback(window, cursor_position_callback<SimulatorType>);
 		glfwSetKeyCallback(window, key_callback<SimulatorType>);
 
-		// We need to get the actual framebuffer width and height because HiDPI sometimes scale the
-		// actual framebuffer size relative to the window size.
+		/* We need to get the actual framebuffer width and height because HiDPI sometimes scale the
+		   actual framebuffer size relative to the window size. */
 		int framebuffer_width, framebuffer_height;
 		glfwGetFramebufferSize(window, &framebuffer_width, &framebuffer_height);
 		width = (uint32_t) framebuffer_width;
@@ -554,6 +554,7 @@ public:
 				unsigned long long remaining_time = semaphore_signal_period;
 				while (true) {
 					std::this_thread::sleep_for(std::chrono::milliseconds(min(remaining_time, 100ull)));
+					if (!running) return;
 					unsigned long long current_time = milliseconds();
 					if (current_time > semaphore_signal_time + semaphore_signal_period) break;
 					remaining_time = semaphore_signal_time + semaphore_signal_period - current_time;
