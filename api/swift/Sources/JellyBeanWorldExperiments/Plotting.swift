@@ -234,7 +234,7 @@ extension Array where Element == Line {
         ys.append((yLow * (xHigh - currentX) + yHigh * (currentX - xLow)) / (xHigh - xLow))
       }
       yMean.append(ys.mean)
-      yStandardDeviation.append(ys.standardDeviation)
+      yStandardDeviation.append(ys.standardDeviation / Float(count).squareRoot())
     }
     axes.plot(x, yMean, label: label, color: color, linewidth: 2)
     axes.fill_between(

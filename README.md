@@ -211,6 +211,7 @@ int main(int argc, const char** argv) {
   config.no_op_allowed = false;
   config.patch_size = 32;
   config.mcmc_iterations = 4000;
+  config.agent_field_of_view = 2.09f;
   config.agent_color = (float*) calloc(config.color_dimension, sizeof(float));
   config.agent_color[2] = 1.0f;
   config.collision_policy = movement_conflict_policy::FIRST_COME_FIRST_SERVED;
@@ -228,6 +229,7 @@ int main(int argc, const char** argv) {
   config.item_types[0].scent[0] = 1.0f;
   config.item_types[0].color[0] = 1.0f;
   config.item_types[0].blocks_movement = false;
+	config.item_types[0].visual_occlusion = 0.0;
   config.item_types.length = 1;
 
   /* specify the intensity and interaction function parameters */

@@ -155,7 +155,7 @@ let stepCountArg: OptionArgument<Int> = parser.add(
 let stepCountPerUpdateArg: OptionArgument<Int> = parser.add(
   option: "--step-count-per-update",
   kind: Int.self,
-  usage: "Number of steps between model updates. Defaults to 128.")
+  usage: "Number of steps between model updates. Defaults to 512.")
 let rewardRatePeriodArg: OptionArgument<Int> = parser.add(
   option: "--reward-rate-period",
   kind: Int.self,
@@ -168,6 +168,10 @@ let minimumRunIDArg: OptionArgument<Int> = parser.add(
   option: "--minimum-run-id",
   kind: Int.self,
   usage: "Minimum run ID to use.")
+let serverPortsArg: OptionArgument<[Int]> = parser.add(
+  option: "--server-ports",
+  kind: [Int].self,
+  usage: "Ports to use for launching simulation servers.")
 
 // The first argument is always the executable, and so we drop it.
 let arguments = Array(ProcessInfo.processInfo.arguments.dropFirst())
@@ -186,6 +190,7 @@ let stepCount = parsedArguments.get(stepCountArg) ?? 10_000_000
 let stepCountPerUpdate = parsedArguments.get(stepCountPerUpdateArg) ?? 512
 let rewardRatePeriod = parsedArguments.get(rewardRatePeriodArg) ?? 100_000
 let minimumRunID = parsedArguments.get(minimumRunIDArg) ?? 0
+let serverPorts = parsedArguments.get(serverPortsArg)
 
 switch parsedArguments.get(commandArg) {
 case .run:
@@ -200,7 +205,8 @@ case .run:
     stepCount: stepCount,
     stepCountPerUpdate: stepCountPerUpdate,
     resultsDir: resultsDir,
-    minimumRunID: minimumRunID)
+    minimumRunID: minimumRunID,
+    serverPorts: serverPorts)
   try! experiment.run(writeFrequency: 100, logFrequency: 1000)
 case .plot:
   let resultsPlotter = ResultsPlot(

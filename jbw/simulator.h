@@ -570,8 +570,7 @@ bool read(simulator_config& config, Stream& in) {
      || !read(config.no_op_allowed, in)
      || !read(config.patch_size, in)
      || !read(config.mcmc_iterations, in)
-     || !read(config.item_types.length, in)
-     || !read(config.agent_field_of_view, in))
+     || !read(config.item_types.length, in))
         return false;
 
     config.item_types.data = (item_properties*) malloc(max((size_t) 1, sizeof(item_properties) * config.item_types.length));
@@ -590,6 +589,7 @@ bool read(simulator_config& config, Stream& in) {
     }
 
     if (!read(config.agent_color, in, config.color_dimension)
+     || !read(config.agent_field_of_view, in)
      || !read(config.collision_policy, in)
      || !read(config.decay_param, in)
      || !read(config.diffusion_param, in)
@@ -916,6 +916,7 @@ struct agent_state {
         for (int64_t i = -V; i <= V; i++) {
             const float cell_x = (float) i;
             for (int64_t j = -V; j <= V; j++) {
+                if (i == 0 && j == 0) continue;
                 const float cell_y = (float) j;
                 const position relative_position = { i, j };
                 const float distance = (float) relative_position.squared_length();

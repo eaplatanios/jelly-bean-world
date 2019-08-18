@@ -36,8 +36,7 @@ public enum JellyBeanWorldError: Error {
 }
 
 @usableFromInline
-internal func checkStatus(_ status: UnsafeMutablePointer<JBW_Status>?) throws {
-  let status = status!.pointee
+internal func checkStatus(_ status: JBW_Status) throws {
   switch status.code {
   case JBW_OK: ()
   case JBW_OUT_OF_MEMORY: throw JellyBeanWorldError.OutOfMemory
@@ -131,9 +130,8 @@ public final class Simulator {
   /// Agents interacting with this simulator (keyed by their unique identifiers).
   @usableFromInline internal var agents: [UInt64: Agent] = [:]
 
-  /// Semaphore used for synchronization when multiple agents are added to the simulator (as
-  /// opposed to having just a single agent).
-  @usableFromInline internal var dispatchSemaphore: DispatchSemaphore? = nil
+  /// Semaphore used for synchronization across the simulator steps.
+  @usableFromInline internal var dispatchSemaphore: DispatchSemaphore = DispatchSemaphore(value: 0)
 
   /// Dispatch queue used for agents taking actions asynchronously. This is only used when multiple
   /// agents are added to the simulator (as opposed to having just a single agent).
@@ -154,9 +152,9 @@ public final class Simulator {
     self.clientConfiguration = nil
     var cConfig = configuration.toC()
     defer { cConfig.deallocate() }
-    var status = JBW_Status()
+    var status = JBW_Status(code: JBW_OK)
     self.handle = simulatorCreate(&cConfig.configuration, nativeOnStepCallback, &status)
-    try checkStatus(&status)
+    try checkStatus(status)
     simulatorSetStepCallbackData(handle, Unmanaged.passUnretained(self).toOpaque())
     if let config = serverConfiguration {
       self.serverHandle = simulationServerStart(
@@ -175,7 +173,7 @@ public final class Simulator {
           getAgentStates: true,
           semaphores: true),
         &status)
-      try checkStatus(&status)
+      try checkStatus(status)
     }
   }
 
@@ -193,9 +191,9 @@ public final class Simulator {
     agents: [Agent],
     serverConfiguration: ServerConfiguration? = nil
   ) throws {
-    var status = JBW_Status()
+    var status = JBW_Status(code: JBW_OK)
     let cSimulatorInfo = simulatorLoad(file.absoluteString, nativeOnStepCallback, &status)
-    try checkStatus(&status)
+    try checkStatus(status)
     defer { simulatorDeleteSimulatorInfo(cSimulatorInfo) }
     self.handle = cSimulatorInfo.handle
     self.configuration = Configuration(fromC: cSimulatorInfo.config)
@@ -232,7 +230,7 @@ public final class Simulator {
           getAgentStates: true,
           semaphores: true),
         &status)
-      try checkStatus(&status)
+      try checkStatus(status)
     }
   }
 
@@ -272,10 +270,10 @@ public final class Simulator {
   @inlinable
   @discardableResult
   public func add(agent: Agent) throws -> UInt64 {
-    var status = JBW_Status()
+    var status = JBW_Status(code: JBW_OK)
     let state = simulatorAddAgent(handle, clientHandle, &status)
-    try checkStatus(&status)
     defer { simulatorDeleteAgentSimulationState(state) }
+    try checkStatus(status)
     let id = state.id
     agents[id] = agent
     agentStates[id] = AgentState(fromC: state, using: configuration)
@@ -287,9 +285,9 @@ public final class Simulator {
   /// - Parameter id: ID of the agent to remove.
   @inlinable
   public func remove(agentWithID id: UInt64) throws {
-    var status = JBW_Status()
+    var status = JBW_Status(code: JBW_OK)
     simulatorRemoveAgent(handle, clientHandle, id, &status)
-    try checkStatus(&status)
+    try checkStatus(status)
   }
 
   /// Activates the agent with ID `agentID` managed by this simulator.
@@ -297,9 +295,9 @@ public final class Simulator {
   /// - Parameter id: ID of the agent to activate.
   @inlinable
   public func activate(agentWithID id: UInt64) throws {
-    var status = JBW_Status()
+    var status = JBW_Status(code: JBW_OK)
     simulatorSetActive(handle, clientHandle, id, true, &status)
-    try checkStatus(&status)
+    try checkStatus(status)
   }
 
   /// Deactivates the agent with ID `agentID` managed by this simulator.
@@ -307,9 +305,9 @@ public final class Simulator {
   /// - Parameter id: ID of the agent to deactivate.
   @inlinable
   public func deactivate(agentWithID id: UInt64) throws {
-    var status = JBW_Status()
+    var status = JBW_Status(code: JBW_OK)
     simulatorSetActive(handle, clientHandle, id, false, &status)
-    try checkStatus(&status)
+    try checkStatus(status)
   }
 
   /// Performs a simulation step.
@@ -325,7 +323,6 @@ public final class Simulator {
         agentID: id)
     } else {
       if dispatchQueue == nil {
-        dispatchSemaphore = DispatchSemaphore(value: 1)
         dispatchQueue = DispatchQueue(
           label: "Jelly Bean World Simulator",
           qos: .default,
@@ -341,8 +338,8 @@ public final class Simulator {
             agentID: id)
         }
       }
-      dispatchSemaphore!.wait()
     }
+    dispatchSemaphore.wait()
   }
 
   /// Saves this simulator in the provided file.
@@ -350,9 +347,9 @@ public final class Simulator {
   /// - Parameter file: File in which to save the state of this simulator.
   @inlinable
   public func save(to file: URL) throws {
-    var status = JBW_Status()
+    var status = JBW_Status(code: JBW_OK)
     simulatorSave(handle, file.absoluteString, &status)
-    try checkStatus(&status)
+    try checkStatus(status)
   }
 
   /// Returns the portion of the simulator map that lies within the rectangle formed by the
@@ -368,10 +365,10 @@ public final class Simulator {
     topRight: Position = Position(x: Int64.max, y: Int64.max),
     includingScent: Bool = true
    ) throws -> SimulationMap {
-    var status = JBW_Status()
+    var status = JBW_Status(code: JBW_OK)
     let cSimulationMap = simulatorMap(
       handle, clientHandle, bottomLeft.toC(), topRight.toC(), includingScent, &status)
-    try checkStatus(&status)
+    try checkStatus(status)
     defer { simulatorDeleteSimulationMap(cSimulationMap) }
     return SimulationMap(fromC: cSimulationMap, using: configuration)
   }
@@ -403,7 +400,7 @@ public final class Simulator {
     for state in buffer {
       simulator.agentStates[state.id] = AgentState(fromC: state, using: simulator.configuration)
     }
-    simulator.dispatchSemaphore?.signal()
+    simulator.dispatchSemaphore.signal()
   }
 
   /// Callback function that is invoked by the C API side simulator client whenever the connection
@@ -619,7 +616,7 @@ public enum Action {
     clientHandle: UnsafeMutableRawPointer?,
     agentID: UInt64
   ) throws {
-    var status = JBW_Status()
+    var status = JBW_Status(code: JBW_OK)
     switch self {
     case .none:
       simulatorNoOpAgent(simulatorHandle, clientHandle, agentID, &status)
@@ -634,7 +631,7 @@ public enum Action {
     case let .turn(direction):
       simulatorTurnAgent(simulatorHandle, clientHandle, agentID, direction.toC(), &status)
     }
-    try checkStatus(&status)
+    try checkStatus(status)
   }
 }
 

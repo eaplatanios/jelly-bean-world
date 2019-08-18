@@ -42,7 +42,9 @@ public struct Environment: ReinforcementLearning.Environment {
     self.observationSpace = ObservationSpace(batchSize: batchSize)
     self.parallelizedBatchProcessing = parallelizedBatchProcessing
     self.states = try configurations.map { configuration -> State in
-      let simulator = try Simulator(using: configuration.simulatorConfiguration)
+      let simulator = try Simulator(
+        using: configuration.simulatorConfiguration,
+        serverConfiguration: configuration.serverConfiguration)
       let agent = Agent()
       try simulator.add(agent: agent)
       return State(simulator: simulator, agent: agent)
@@ -150,11 +152,17 @@ extension Environment {
   public struct Configuration {
     public let simulatorConfiguration: Simulator.Configuration
     public let rewardSchedule: RewardSchedule
+    public let serverConfiguration: Simulator.ServerConfiguration?
 
     @inlinable
-    public init(simulatorConfiguration: Simulator.Configuration, rewardSchedule: RewardSchedule) {
+    public init(
+      simulatorConfiguration: Simulator.Configuration,
+      rewardSchedule: RewardSchedule,
+      serverConfiguration: Simulator.ServerConfiguration? = nil
+    ) {
       self.simulatorConfiguration = simulatorConfiguration
       self.rewardSchedule = rewardSchedule
+      self.serverConfiguration = serverConfiguration
     }
   }
 }

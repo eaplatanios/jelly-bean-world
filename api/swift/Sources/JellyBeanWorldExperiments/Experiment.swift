@@ -27,6 +27,7 @@ public struct Experiment {
   public let stepCountPerUpdate: Int
   public let runID: Int
   public let resultsFile: URL
+  public let serverPorts: [Int]?
 
   public init(
     reward: Reward,
@@ -37,7 +38,8 @@ public struct Experiment {
     stepCount: Int,
     stepCountPerUpdate: Int,
     resultsDir: URL,
-    minimumRunID: Int
+    minimumRunID: Int,
+    serverPorts: [Int]?
   ) throws {
     self.reward = reward
     self.agent = agent
@@ -71,11 +73,19 @@ public struct Experiment {
     FileManager.default.createFile(
       atPath: self.resultsFile.path,
       contents: "step\treward\n".data(using: .utf8))
+    self.serverPorts = serverPorts
   }
 
   public func run(writeFrequency: Int = 100, logFrequency: Int = 1000) throws {
-    let configurations = (0..<batchSize).map { _ in
-      JellyBeanWorld.Environment.Configuration(
+    let configurations = (0..<batchSize).map {
+      batchIndex -> JellyBeanWorld.Environment.Configuration in
+      if let ports = serverPorts, batchIndex < ports.count {
+        return JellyBeanWorld.Environment.Configuration(
+          simulatorConfiguration: simulatorConfiguration(randomSeed: UInt32(runID)),
+          rewardSchedule: reward.schedule,
+          serverConfiguration: Simulator.ServerConfiguration(port: UInt32(ports[batchIndex])))
+      }
+      return JellyBeanWorld.Environment.Configuration(
         simulatorConfiguration: simulatorConfiguration(randomSeed: UInt32(runID)),
         rewardSchedule: reward.schedule)
     }

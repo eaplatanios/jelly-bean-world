@@ -32,18 +32,18 @@ using namespace jbw;
 
 void JBW_SetJBWStatusFromStatus(JBW_Status* jbw_s, status s) {
   switch (s) {
-    case status::OK: jbw_s->code = JBW_OK;
-    case status::OUT_OF_MEMORY: jbw_s->code = JBW_OUT_OF_MEMORY;
-    case status::INVALID_AGENT_ID: jbw_s->code = JBW_INVALID_AGENT_ID;
-    case status::PERMISSION_ERROR: jbw_s->code = JBW_VIOLATED_PERMISSIONS;
-    case status::AGENT_ALREADY_ACTED: jbw_s->code = JBW_AGENT_ALREADY_ACTED;
-    case status::AGENT_ALREADY_EXISTS: jbw_s->code = JBW_AGENT_ALREADY_EXISTS;
-    case status::SERVER_PARSE_MESSAGE_ERROR: jbw_s->code = JBW_SERVER_PARSE_MESSAGE_ERROR;
-    case status::CLIENT_PARSE_MESSAGE_ERROR: jbw_s->code = JBW_CLIENT_PARSE_MESSAGE_ERROR;
-    case status::SERVER_OUT_OF_MEMORY: jbw_s->code = JBW_SERVER_OUT_OF_MEMORY;
-    case status::CLIENT_OUT_OF_MEMORY: jbw_s->code = JBW_CLIENT_OUT_OF_MEMORY;
-    case status::INVALID_SEMAPHORE_ID: jbw_s->code = JBW_INVALID_SEMAPHORE_ID;
-    case status::SEMAPHORE_ALREADY_SIGNALED: jbw_s->code = JBW_SEMAPHORE_ALREADY_SIGNALED;
+    case status::OK: jbw_s->code = JBW_OK; break;
+    case status::OUT_OF_MEMORY: jbw_s->code = JBW_OUT_OF_MEMORY; break;
+    case status::INVALID_AGENT_ID: jbw_s->code = JBW_INVALID_AGENT_ID; break;
+    case status::PERMISSION_ERROR: jbw_s->code = JBW_VIOLATED_PERMISSIONS; break;
+    case status::AGENT_ALREADY_ACTED: jbw_s->code = JBW_AGENT_ALREADY_ACTED; break;
+    case status::AGENT_ALREADY_EXISTS: jbw_s->code = JBW_AGENT_ALREADY_EXISTS; break;
+    case status::SERVER_PARSE_MESSAGE_ERROR: jbw_s->code = JBW_SERVER_PARSE_MESSAGE_ERROR; break;
+    case status::CLIENT_PARSE_MESSAGE_ERROR: jbw_s->code = JBW_CLIENT_PARSE_MESSAGE_ERROR; break;
+    case status::SERVER_OUT_OF_MEMORY: jbw_s->code = JBW_SERVER_OUT_OF_MEMORY; break;
+    case status::CLIENT_OUT_OF_MEMORY: jbw_s->code = JBW_CLIENT_OUT_OF_MEMORY; break;
+    case status::INVALID_SEMAPHORE_ID: jbw_s->code = JBW_INVALID_SEMAPHORE_ID; break;
+    case status::SEMAPHORE_ALREADY_SIGNALED: jbw_s->code = JBW_SEMAPHORE_ALREADY_SIGNALED; break;
   }
 }
 
