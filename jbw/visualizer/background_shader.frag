@@ -35,9 +35,9 @@ layout(location = 2) flat in uint tex_index;
 layout(location = 0) out vec4 out_color;
 
 void main() {
-    vec2 grid = fract(uv + 0.1f);
+    vec2 grid = fract(uv + 0.05f);
     float line_weight;
-    if (min(grid.x, grid.y) < 0.2f) {
+    if (min(grid.x, grid.y) < 0.1f) {
         line_weight = texture(tex_sampler[tex_index], frag_tex_coord / ubo.patch_size_texels).w;
     } else {
         line_weight = 1.0f;

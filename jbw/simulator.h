@@ -939,6 +939,7 @@ struct agent_state {
                 float occlusion = 0.0f;
                 for (item& item : visual_field_items) {
                     const position relative_location = item.location - current_position;
+                    if (relative_location.x == 0 && relative_location.y == 0) continue;
                     float item_distance = (float) relative_location.squared_length();
                     if (item_distance + 1.0f > distance) continue;
 
