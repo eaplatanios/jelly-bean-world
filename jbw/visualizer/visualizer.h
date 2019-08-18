@@ -1360,7 +1360,9 @@ private:
 		while (sim.client_running && sim.data.waiting_for_semaphore_op) { }
 		if (!sim.client_running) return;
 
-		if (sim.data.semaphore_op_response != status::OK && result != status::SEMAPHORE_ALREADY_SIGNALED) {
+		if (sim.data.semaphore_op_response != status::OK
+		 && sim.data.semaphore_op_response != status::SEMAPHORE_ALREADY_SIGNALED)
+		{
 			fprintf(stderr, "visualizer.signal_semaphore ERROR: `signal_semaphore` failed.\n");
 			sim.data.semaphore_op_response = status::OK;
 			return;
@@ -1423,7 +1425,7 @@ private:
 			renderer.delete_render_pass(pass);
 			return false;
 		} else if (!renderer.create_descriptor_set(ds, &ub, 0, 1,
-			nullptr, 0, textures, 2, 1, &tex_sampler, layout, pool)
+					nullptr, 0, textures, 2, 1, &tex_sampler, layout, pool)
 				|| !renderer.create_command_buffer(cb)) 
 		{
 			renderer.delete_descriptor_pool(pool);
