@@ -204,8 +204,8 @@ bool run_locally(
 	config.max_steps_per_movement = 1;
 	config.scent_dimension = 3;
 	config.color_dimension = 3;
-	config.vision_range = 5;
-	config.agent_field_of_view = 2.09f;
+	config.vision_range = 15;
+	config.agent_field_of_view = 4.19f;
 	config.allowed_movement_directions[0] = action_policy::ALLOWED;
 	config.allowed_movement_directions[1] = action_policy::DISALLOWED;
 	config.allowed_movement_directions[2] = action_policy::DISALLOWED;
@@ -216,7 +216,7 @@ bool run_locally(
 	config.allowed_rotations[3] = action_policy::ALLOWED;
 	config.no_op_allowed = false;
 	config.patch_size = 32;
-	config.mcmc_iterations = 4000;
+	config.mcmc_iterations = 20000;
 	config.agent_color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.agent_color[2] = 1.0f;
 	config.collision_policy = movement_conflict_policy::FIRST_COME_FIRST_SERVED;
@@ -225,14 +225,16 @@ bool run_locally(
 	config.deleted_item_lifetime = 2000;
 
 	/* configure item types */
-	unsigned int item_type_count = 4;
+	unsigned int item_type_count = 5;
 	config.item_types.ensure_capacity(item_type_count);
 	config.item_types[0].name = "banana";
 	config.item_types[0].scent = (float*) calloc(config.scent_dimension, sizeof(float));
 	config.item_types[0].color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.item_types[0].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
 	config.item_types[0].required_item_costs = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
-	config.item_types[0].scent[1] = 1.0f;
+	config.item_types[0].scent[0] = 10.0f;
+	config.item_types[0].scent[1] = 10.0f;
+	config.item_types[0].color[0] = 1.0f;
 	config.item_types[0].color[1] = 1.0f;
 	config.item_types[0].required_item_counts[0] = 1;
 	config.item_types[0].blocks_movement = false;
@@ -242,8 +244,12 @@ bool run_locally(
 	config.item_types[1].color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.item_types[1].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
 	config.item_types[1].required_item_costs = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
-	config.item_types[1].scent[0] = 1.0f;
-	config.item_types[1].color[0] = 1.0f;
+	config.item_types[1].scent[0] = 0.68f;
+	config.item_types[1].scent[1] = 0.01f;
+	config.item_types[1].scent[2] = 0.99f;
+	config.item_types[1].color[0] = 0.68f;
+	config.item_types[1].color[1] = 0.01f;
+	config.item_types[1].color[2] = 0.99f;
 	config.item_types[1].required_item_counts[1] = 1;
 	config.item_types[1].blocks_movement = false;
 	config.item_types[1].visual_occlusion = 0.0;
@@ -252,8 +258,8 @@ bool run_locally(
 	config.item_types[2].color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.item_types[2].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
 	config.item_types[2].required_item_costs = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
-	config.item_types[2].scent[2] = 1.0f;
-	config.item_types[2].color[2] = 1.0f;
+	config.item_types[2].scent[0] = 1.0f;
+	config.item_types[2].color[0] = 1.0f;
 	config.item_types[2].blocks_movement = false;
 	config.item_types[2].visual_occlusion = 0.0;
 	config.item_types[3].name = "wall";
@@ -266,50 +272,83 @@ bool run_locally(
 	config.item_types[3].color[2] = 0.16f;
 	config.item_types[3].required_item_counts[3] = 1;
 	config.item_types[3].blocks_movement = true;
-	config.item_types[3].visual_occlusion = 0.5f;
+	config.item_types[3].visual_occlusion = 1.0f;
+	config.item_types[4].name = "tree";
+	config.item_types[4].scent = (float*) calloc(config.scent_dimension, sizeof(float));
+	config.item_types[4].color = (float*) calloc(config.color_dimension, sizeof(float));
+	config.item_types[4].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
+	config.item_types[4].required_item_costs = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
+	config.item_types[4].scent[0] = 0.00f;
+	config.item_types[4].scent[1] = 0.47f;
+	config.item_types[4].scent[2] = 0.06f;
+	config.item_types[4].color[0] = 0.00f;
+	config.item_types[4].color[1] = 0.47f;
+	config.item_types[4].color[2] = 0.06f;
+	config.item_types[4].required_item_counts[3] = 1;
+	config.item_types[4].blocks_movement = false;
+	config.item_types[4].visual_occlusion = 0.1f;
 	config.item_types.length = item_type_count;
 
 	config.item_types[0].intensity_fn.fn = constant_intensity_fn;
 	config.item_types[0].intensity_fn.arg_count = 1;
 	config.item_types[0].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[0].intensity_fn.args[0] = -5.3f;
+	config.item_types[0].intensity_fn.args[0] = 0.0f;
 	config.item_types[0].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 	config.item_types[1].intensity_fn.fn = constant_intensity_fn;
 	config.item_types[1].intensity_fn.arg_count = 1;
 	config.item_types[1].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[1].intensity_fn.args[0] = -5.0f;
+	config.item_types[1].intensity_fn.args[0] = -10.0f;
 	config.item_types[1].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 	config.item_types[2].intensity_fn.fn = constant_intensity_fn;
 	config.item_types[2].intensity_fn.arg_count = 1;
 	config.item_types[2].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[2].intensity_fn.args[0] = -5.3f;
+	config.item_types[2].intensity_fn.args[0] = 0.0f;
 	config.item_types[2].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 	config.item_types[3].intensity_fn.fn = constant_intensity_fn;
 	config.item_types[3].intensity_fn.arg_count = 1;
 	config.item_types[3].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[3].intensity_fn.args[0] = 0.0f;
+	config.item_types[3].intensity_fn.args[0] = -13.0f;
 	config.item_types[3].interaction_fns = (energy_function<interaction_function>*)
+			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
+	config.item_types[4].intensity_fn.fn = constant_intensity_fn;
+	config.item_types[4].intensity_fn.arg_count = 1;
+	config.item_types[4].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
+	config.item_types[4].intensity_fn.args[0] = -10.0f;
+	config.item_types[4].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 
 	set_interaction_args(config.item_types.data, 0, 0, piecewise_box_interaction_fn, {10.0f, 200.0f, 0.0f, -6.0f});
-	set_interaction_args(config.item_types.data, 0, 1, piecewise_box_interaction_fn, {200.0f, 0.0f, -6.0f, -6.0f});
+	set_interaction_args(config.item_types.data, 0, 1, zero_interaction_fn, {});
 	set_interaction_args(config.item_types.data, 0, 2, piecewise_box_interaction_fn, {10.0f, 200.0f, 2.0f, -100.0f});
 	set_interaction_args(config.item_types.data, 0, 3, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 1, 0, piecewise_box_interaction_fn, {200.0f, 0.0f, -6.0f, -6.0f});
-	set_interaction_args(config.item_types.data, 1, 1, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 1, 2, piecewise_box_interaction_fn, {200.0f, 0.0f, -100.0f, -100.0f});
+	set_interaction_args(config.item_types.data, 0, 4, zero_interaction_fn, {});
+
+	set_interaction_args(config.item_types.data, 1, 0, piecewise_box_interaction_fn, {100.0f, 200.0f, -10.0f, 0.0f});
+	set_interaction_args(config.item_types.data, 1, 1, piecewise_box_interaction_fn, {5.0f, 200.0f, -100.0f, 0.0f});
+	set_interaction_args(config.item_types.data, 1, 2, piecewise_box_interaction_fn, {100.0f, 200.0f, -10.0f, 0.0f});
 	set_interaction_args(config.item_types.data, 1, 3, zero_interaction_fn, {});
+	set_interaction_args(config.item_types.data, 1, 4, piecewise_box_interaction_fn, {10.0f, 20.0f, 1.5f, 0.0f});
+
 	set_interaction_args(config.item_types.data, 2, 0, piecewise_box_interaction_fn, {10.0f, 200.0f, 2.0f, -100.0f});
-	set_interaction_args(config.item_types.data, 2, 1, piecewise_box_interaction_fn, {200.0f, 0.0f, -100.0f, -100.0f});
+	set_interaction_args(config.item_types.data, 2, 1, zero_interaction_fn, {});
 	set_interaction_args(config.item_types.data, 2, 2, piecewise_box_interaction_fn, {10.0f, 200.0f, 0.0f, -6.0f});
 	set_interaction_args(config.item_types.data, 2, 3, zero_interaction_fn, {});
+	set_interaction_args(config.item_types.data, 2, 4, zero_interaction_fn, {});
+
 	set_interaction_args(config.item_types.data, 3, 0, zero_interaction_fn, {});
 	set_interaction_args(config.item_types.data, 3, 1, zero_interaction_fn, {});
 	set_interaction_args(config.item_types.data, 3, 2, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 3, 3, cross_interaction_fn, {10.0f, 15.0f, 20.0f, -200.0f, -20.0f, 1.0f});
+	set_interaction_args(config.item_types.data, 3, 3, cross_interaction_fn, {10.0f, 15.0f, 30.0f, -200.0f, -30.0f, 1.0f});
+	set_interaction_args(config.item_types.data, 3, 4, piecewise_box_interaction_fn, {100.0f, 200.0f, -10.0f, 0.0f});
+
+	set_interaction_args(config.item_types.data, 4, 0, zero_interaction_fn, {});
+	set_interaction_args(config.item_types.data, 4, 1, piecewise_box_interaction_fn, {10.0f, 20.0f, 1.5f, 0.0f});
+	set_interaction_args(config.item_types.data, 4, 2, zero_interaction_fn, {});
+	set_interaction_args(config.item_types.data, 4, 3, piecewise_box_interaction_fn, {100.0f, 200.0f, -10.0f, 0.0f});
+	set_interaction_args(config.item_types.data, 4, 4, piecewise_box_interaction_fn, {100.0f, 500.0f, 20.0f, -200.0f});
 
 	simulator<visualizer_data> sim(config, visualizer_data());
 
