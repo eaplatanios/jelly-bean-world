@@ -768,7 +768,7 @@ private:
 					const patch_state& patch = row[x_index++];
 
 					pixel& p = scent_map_texture_data[patch_offset.y * texture_width + patch_offset.x];
-					p.a = 229;
+					p.a = 240;
 
 					if (!render_background_map) {
 						/* fill this patch with blank pixels */
@@ -933,7 +933,7 @@ private:
 						}
 						pixel& p = visual_field_texture_data[i * V + j];
 						vision_to_color(&agent_visual_field[index * color_dimension], p);
-						p.a = 229;
+						p.a = 240;
 					}
 				}
 			}
@@ -1460,9 +1460,9 @@ private:
 	}
 
 	static inline void scent_to_color(const float* cell_scent, pixel& out, bool is_patch_fixed) {
-		float x = gamma_correction(max(0.0f, min(1.0f, log(pow(cell_scent[0], 0.4f) + 1.0f) / 0.9f)));
-		float y = gamma_correction(max(0.0f, min(1.0f, log(pow(cell_scent[1], 0.4f) + 1.0f) / 0.9f)));
-		float z = gamma_correction(max(0.0f, min(1.0f, log(pow(cell_scent[2], 0.4f) + 1.0f) / 0.9f)));
+		float x = gamma_correction(max(0.0f, min(1.0f, log(pow(cell_scent[0], 3.0f) + 1.0f) / 2.0f)));
+		float y = gamma_correction(max(0.0f, min(1.0f, log(pow(cell_scent[1], 3.0f) + 1.0f) / 2.0f)));
+		float z = gamma_correction(max(0.0f, min(1.0f, log(pow(cell_scent[2], 3.0f) + 1.0f) / 2.0f)));
 
 		float r = 255 * (1 - (y + z) / 2);
 		float g = 255 * (1 - (x + z) / 2);
