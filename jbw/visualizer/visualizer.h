@@ -390,7 +390,7 @@ public:
 
 		fragment_shader_src = read_file<true>("visual_field_fragment_shader.spv", fragment_shader_size);
 		if (fragment_shader_src == nullptr) {
-			free(vertex_shader_src); free(fragment_shader_src);
+			free(fragment_shader_src);
 			renderer.delete_shader(item_vertex_shader);
 			renderer.delete_shader(item_fragment_shader);
 			renderer.delete_shader(background_vertex_shader);
@@ -400,7 +400,7 @@ public:
 		}
 
 		if (!renderer.create_shader(visual_field_fragment_shader, fragment_shader_src, fragment_shader_size)) {
-			free(vertex_shader_src); free(fragment_shader_src);
+			free(fragment_shader_src);
 			renderer.delete_shader(item_vertex_shader);
 			renderer.delete_shader(item_fragment_shader);
 			renderer.delete_shader(background_vertex_shader);
@@ -408,6 +408,7 @@ public:
 			glfwDestroyWindow(window); glfwTerminate();
 			throw new std::runtime_error("visualizer ERROR: Failed to create fragment shader.");
 		}
+		free(fragment_shader_src);
 
 		if (!renderer.create_vertex_buffer(scent_quad_buffer, sizeof(vertex) * 8)) {
 			renderer.delete_shader(item_vertex_shader);
