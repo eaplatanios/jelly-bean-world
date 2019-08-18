@@ -1360,7 +1360,7 @@ private:
 		while (sim.client_running && sim.data.waiting_for_semaphore_op) { }
 		if (!sim.client_running) return;
 
-		if (sim.data.semaphore_op_response != status::OK) {
+		if (sim.data.semaphore_op_response != status::OK && result != status::SEMAPHORE_ALREADY_SIGNALED) {
 			fprintf(stderr, "visualizer.signal_semaphore ERROR: `signal_semaphore` failed.\n");
 			sim.data.semaphore_op_response = status::OK;
 			return;
