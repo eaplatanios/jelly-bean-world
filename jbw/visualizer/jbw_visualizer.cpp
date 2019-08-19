@@ -294,21 +294,20 @@ bool run_locally(
 	config.item_types[4].color[0] = 0.00f;
 	config.item_types[4].color[1] = 0.47f;
 	config.item_types[4].color[2] = 0.06f;
-	config.item_types[4].required_item_counts[3] = 1;
+	config.item_types[4].required_item_counts[4] = 1;
 	config.item_types[4].blocks_movement = false;
 	config.item_types[4].visual_occlusion = 0.1f;
-	config.item_types[5].name = "mushroom";
+	config.item_types[5].name = "truffle";
 	config.item_types[5].scent = (float*) calloc(config.scent_dimension, sizeof(float));
 	config.item_types[5].color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.item_types[5].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
 	config.item_types[5].required_item_costs = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
-	config.item_types[5].scent[0] = 0.00f;
-	config.item_types[5].scent[1] = 0.00f;
-	config.item_types[5].scent[2] = 1.00f; /* TODO: for testing; change these */
-	config.item_types[5].color[0] = 0.00f;
-	config.item_types[5].color[1] = 0.00f;
-	config.item_types[5].color[2] = 1.00f;
-	config.item_types[5].required_item_counts[3] = 1;
+	config.item_types[5].scent[0] = 0.42f;
+	config.item_types[5].scent[1] = 0.24f;
+	config.item_types[5].scent[2] = 0.13f;
+	config.item_types[5].color[0] = 0.42f;
+	config.item_types[5].color[1] = 0.24f;
+	config.item_types[5].color[2] = 0.13f;
 	config.item_types[5].blocks_movement = false;
 	config.item_types[5].visual_occlusion = 0.0f;
 	config.item_types.length = item_type_count;
@@ -316,19 +315,19 @@ bool run_locally(
 	config.item_types[0].intensity_fn.fn = constant_intensity_fn;
 	config.item_types[0].intensity_fn.arg_count = 1;
 	config.item_types[0].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[0].intensity_fn.args[0] = 0.0f;
+	config.item_types[0].intensity_fn.args[0] = 1.5f;
 	config.item_types[0].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 	config.item_types[1].intensity_fn.fn = constant_intensity_fn;
 	config.item_types[1].intensity_fn.arg_count = 1;
 	config.item_types[1].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[1].intensity_fn.args[0] = -6.0f;
+	config.item_types[1].intensity_fn.args[0] = -3.0f;
 	config.item_types[1].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 	config.item_types[2].intensity_fn.fn = constant_intensity_fn;
 	config.item_types[2].intensity_fn.arg_count = 1;
 	config.item_types[2].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[2].intensity_fn.args[0] = 0.0f;
+	config.item_types[2].intensity_fn.args[0] = 1.5f;
 	config.item_types[2].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 	config.item_types[3].intensity_fn.fn = constant_intensity_fn;
@@ -340,21 +339,21 @@ bool run_locally(
 	config.item_types[4].intensity_fn.fn = constant_intensity_fn;
 	config.item_types[4].intensity_fn.arg_count = 1;
 	config.item_types[4].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[4].intensity_fn.args[0] = 1.0f;
+	config.item_types[4].intensity_fn.args[0] = 2.0f;
 	config.item_types[4].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 	config.item_types[5].intensity_fn.fn = constant_intensity_fn;
 	config.item_types[5].intensity_fn.arg_count = 1;
 	config.item_types[5].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[5].intensity_fn.args[0] = -12.3f;
+	config.item_types[5].intensity_fn.args[0] = -10.0f;
 	config.item_types[5].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 
-	set_interaction_args(config.item_types.data, 0, 0, piecewise_box_interaction_fn, {10.0f, 200.0f, 0.0f, -6.0f});
+	set_interaction_args(config.item_types.data, 0, 0, piecewise_box_interaction_fn, {10.0f, 100.0f, 0.0f, -6.0f});
 	set_interaction_args(config.item_types.data, 0, 1, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 0, 2, piecewise_box_interaction_fn, {10.0f, 200.0f, 2.0f, -100.0f});
+	set_interaction_args(config.item_types.data, 0, 2, piecewise_box_interaction_fn, {10.0f, 100.0f, 2.0f, -100.0f});
 	set_interaction_args(config.item_types.data, 0, 3, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 0, 4, piecewise_box_interaction_fn, {100.0f, 400.0f, -100.0f, -100.0f});
+	set_interaction_args(config.item_types.data, 0, 4, piecewise_box_interaction_fn, {50.0f, 100.0f, -100.0f, -100.0f});
 	set_interaction_args(config.item_types.data, 0, 5, zero_interaction_fn, {});
 
 	set_interaction_args(config.item_types.data, 1, 0, zero_interaction_fn, {});
@@ -364,11 +363,11 @@ bool run_locally(
 	set_interaction_args(config.item_types.data, 1, 4, zero_interaction_fn, {});
 	set_interaction_args(config.item_types.data, 1, 5, zero_interaction_fn, {});
 
-	set_interaction_args(config.item_types.data, 2, 0, piecewise_box_interaction_fn, {10.0f, 200.0f, 2.0f, -100.0f});
+	set_interaction_args(config.item_types.data, 2, 0, piecewise_box_interaction_fn, {10.0f, 100.0f, 2.0f, -100.0f});
 	set_interaction_args(config.item_types.data, 2, 1, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 2, 2, piecewise_box_interaction_fn, {10.0f, 200.0f, 0.0f, -6.0f});
+	set_interaction_args(config.item_types.data, 2, 2, piecewise_box_interaction_fn, {10.0f, 100.0f, 0.0f, -6.0f});
 	set_interaction_args(config.item_types.data, 2, 3, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 2, 4, piecewise_box_interaction_fn, {100.0f, 400.0f, -100.0f, -100.0f});
+	set_interaction_args(config.item_types.data, 2, 4, piecewise_box_interaction_fn, {50.0f, 100.0f, -100.0f, -100.0f});
 	set_interaction_args(config.item_types.data, 2, 5, zero_interaction_fn, {});
 
 	set_interaction_args(config.item_types.data, 3, 0, zero_interaction_fn, {});
@@ -382,7 +381,7 @@ bool run_locally(
 	set_interaction_args(config.item_types.data, 4, 1, zero_interaction_fn, {});
 	set_interaction_args(config.item_types.data, 4, 2, zero_interaction_fn, {});
 	set_interaction_args(config.item_types.data, 4, 3, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 4, 4, piecewise_box_interaction_fn, {100.0f, 800.0f, 0.0f, -0.1f});
+	set_interaction_args(config.item_types.data, 4, 4, piecewise_box_interaction_fn, {100.0f, 500.0f, 0.0f, -0.1f});
 	set_interaction_args(config.item_types.data, 4, 5, zero_interaction_fn, {});
 
 	set_interaction_args(config.item_types.data, 5, 0, zero_interaction_fn, {});
