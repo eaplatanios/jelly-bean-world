@@ -84,7 +84,7 @@ extension Experiment {
             }
             return Line(x: x, y: y).movingAverage(period: rewardRatePeriod) }
         if lines.isEmpty { continue }
-        let rewardFunctions = resultFiles
+        let rewardSchedules = resultFiles
           .filter { $0.lastPathComponent.hasSuffix("-reward-schedule.tsv") }
           .compactMap { file -> RewardSchedule? in
             guard let fileContent = try? String(contentsOf: file, encoding: .utf8) else {
@@ -113,9 +113,9 @@ extension Experiment {
           label: "\(network.description)-\(observation.description)",
           color: colorPalette[observationIndex])
 
-        if !rewardFunctions.isEmpty {
-          assert(rewardFunctions.allSatisfy { $0 == rewardFunctions.first! })
-          addVerticalAnnotations(on: ax, rewardSchedule: rewardFunctions.first!)
+        if !rewardSchedules.isEmpty {
+          assert(rewardSchedules.allSatisfy { $0 == rewardSchedules.first! })
+          rewardSchedules.first!.addVerticalAnnotations(on: ax)
         }
       }
     }
@@ -258,8 +258,10 @@ extension Array where Element == Line {
       linewidth: 0)
     axes.axhline(y: yMean.max(), linestyle: "dashed", alpha: 0.7, color: color)
   }
+}
 
-  fileprivate func addVerticalAnnotations(on axes: PythonObject, rewardSchedule: RewardSchedule) {
+extension RewardSchedule {
+  fileprivate func addVerticalAnnotations(on axes: PythonObject) {
     // TODO: !!!!
   }
 }

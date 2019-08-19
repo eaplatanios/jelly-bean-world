@@ -31,8 +31,8 @@ public struct Experiment {
 
   public var description: String {
     "reward-\(reward.description)" +
-      "-agent-fov-\(agentFieldOfView)" +
-      "\(enableVisualOcclusion ? "" : "-no-visual-occlusion")"
+      ":agent-fov-\(agentFieldOfView)" +
+      "\(enableVisualOcclusion ? "" : ":no-visual-occlusion")"
   }
 
   public init(
