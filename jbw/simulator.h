@@ -821,7 +821,7 @@ struct agent_state {
         unsigned int y = (unsigned int) (relative_position.y + vision_range);
         unsigned int offset = (x*(2*vision_range + 1) + y) * color_dimension;
         for (unsigned int i = 0; i < color_dimension; i++)
-            current_vision[offset + i] = current_vision[offset + i] * (1.0f - occlusion) + occlusion;
+            current_vision[offset + i] = current_vision[offset + i] * (1.0f - occlusion);
     }
 
     template<typename T>

@@ -1466,7 +1466,7 @@ private:
 		return max(0.0f, min(1.0f, corrected_value));
 	}
 
-	static inline void correct_color(
+	static inline void invert_color_brightness(
 		const float x, const float y, const float z,
 		float& r, float& g, float& b
 	) {
@@ -1535,8 +1535,9 @@ private:
 		float y = max(0.0f, min(1.0f, pow(scent_y / max_scent, 0.25f)));
 		float z = max(0.0f, min(1.0f, pow(scent_z / max_scent, 0.25f)));
 
-		float r, g, b;
-		correct_color(x, y, z, r, g, b);
+		const float r = gamma_correction(1 - x);
+		const float g = gamma_correction(1 - y);
+		const float b = gamma_correction(1 - z);
 
 		if (is_patch_fixed) {
 			out.r = (uint8_t) 255 * r;
@@ -1552,7 +1553,7 @@ private:
 
 	static inline void vision_to_color(const float* cell_vision, pixel& out) {
 		float r, g, b;
-		correct_color(cell_vision[0], cell_vision[1], cell_vision[2], r, g, b);
+		invert_color_brightness(cell_vision[0], cell_vision[1], cell_vision[2], r, g, b);
 		out.r = (uint8_t) 255 * r;
 		out.g = (uint8_t) 255 * g;
 		out.b = (uint8_t) 255 * b;
