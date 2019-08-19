@@ -171,7 +171,8 @@ public final class Simulator {
           getMap: true,
           getAgentIds: true,
           getAgentStates: true,
-          semaphores: true),
+          manageSemaphores: true,
+          getSemaphores: true),
         &status)
       try checkStatus(status)
     }
@@ -228,7 +229,8 @@ public final class Simulator {
           getMap: true,
           getAgentIds: true,
           getAgentStates: true,
-          semaphores: true),
+          manageSemaphores: true,
+          getSemaphores: true),
         &status)
       try checkStatus(status)
     }

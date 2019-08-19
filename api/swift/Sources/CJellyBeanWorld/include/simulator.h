@@ -232,7 +232,7 @@ typedef struct AgentIDList {
 typedef struct SemaphoreList {
   uint64_t* semaphoreIds;
   bool* signaled;
-  unsigned int numSemaphore;
+  unsigned int numSemaphores;
 } SemaphoreList;
 
 void* simulatorCreate(

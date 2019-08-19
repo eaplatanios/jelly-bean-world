@@ -1633,9 +1633,9 @@ SemaphoreList simulatorGetSemaphores(
       return EMPTY_SEMAPHORE_LIST;
     }
     SemaphoreList list;
-    list.length = (unsigned int) semaphores.length;
     list.semaphoreIds = (uint64_t*) malloc(max((size_t) 1, sizeof(uint64_t) * semaphores.length));
     list.signaled = (bool*) malloc(max((size_t) 1, sizeof(bool) * semaphores.length));
+    list.numSemaphores = (unsigned int) semaphores.length;
     if (list.semaphoreIds == nullptr || list.signaled == nullptr) {
       if (list.semaphoreIds != nullptr) free(list.semaphoreIds);
       status->code = JBW_OUT_OF_MEMORY;
@@ -1668,9 +1668,10 @@ SemaphoreList simulatorGetSemaphores(
       return EMPTY_SEMAPHORE_LIST;
     }
 
+    SemaphoreList list;
     list.semaphoreIds = client_handle->data.response_data.semaphores.ids;
     list.signaled = client_handle->data.response_data.semaphores.signaled;
-    list.length = (unsigned int) client_handle->data.response_data.semaphores.length;
+    list.numSemaphores = (unsigned int) client_handle->data.response_data.semaphores.length;
     return list;
   }
 }
