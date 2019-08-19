@@ -706,10 +706,12 @@ private:
 				top_right_corner.x = max(top_right_corner.x, row.last().patch_position.x);
 				for (const patch_state& patch : row) {
 					required_item_vertices += 6 * patch.item_count + 3 * patch.agent_count;
-					for (unsigned int a = 0; a < patch_size; a++) {
-						for (unsigned int b = 0; b < patch_size; b++) {
-							float* cell_scent = patch.scent + ((a*patch_size + b)*scent_dimension);
-							max_scent = max(cell_scent[0], max(cell_scent[1], max(cell_scent[2], max_scent)));
+					if (render_background_map) {
+						for (unsigned int a = 0; a < patch_size; a++) {
+							for (unsigned int b = 0; b < patch_size; b++) {
+								float* cell_scent = patch.scent + ((a*patch_size + b)*scent_dimension);
+								max_scent = max(cell_scent[0], max(cell_scent[1], max(cell_scent[2], max_scent)));
+							}
 						}
 					}
 				}
@@ -1469,7 +1471,30 @@ private:
 		return max(0.0f, min(1.0f, corrected_value));
 	}
 
-	static inline void invert_color_brightness(
+	static inline void invert_scent_color_brightness(
+			const float x, const float y, const float z,
+			float& r, float& g, float& b
+	) {
+		/* Convert from RGB to CMYK. */
+		float K = 1.0f - max(x, max(y, z));
+		float C = (1.0f - x - K) / (1.0f - K);
+		float M = (1.0f - y - K) / (1.0f - K);
+		float Y = (1.0f - z - K) / (1.0f - K);
+
+		/* Adjust hue and lightness. */
+		K = 1.0f - K;
+
+		/* Convert from CMYK to RGB. */
+		r = (1.0f - C) * (1.0f - K);
+		g = (1.0f - M) * (1.0f - K);
+		b = (1.0f - Y) * (1.0f - K);
+
+		r = gamma_correction(r);
+		g = gamma_correction(g);
+		b = gamma_correction(b);
+	}
+
+	static inline void invert_vision_color_brightness(
 		const float x, const float y, const float z,
 		float& r, float& g, float& b
 	) {
@@ -1534,13 +1559,12 @@ private:
 		const float scent_x = cell_scent[0];
 		const float scent_y = cell_scent[1];
 		const float scent_z = cell_scent[2];
-		float x = max(0.0f, min(1.0f, pow(scent_x / max_scent, 0.4f)));
-		float y = max(0.0f, min(1.0f, pow(scent_y / max_scent, 0.4f)));
-		float z = max(0.0f, min(1.0f, pow(scent_z / max_scent, 0.4f)));
+		float x = max(0.0f, min(1.0f, pow(0.1f * scent_x / max_scent, 0.4f)));
+		float y = max(0.0f, min(1.0f, pow(0.1f * scent_y / max_scent, 0.4f)));
+		float z = max(0.0f, min(1.0f, pow(0.1f * scent_z / max_scent, 0.4f)));
 
-		const float r = gamma_correction(1 - x);
-		const float g = gamma_correction(1 - y);
-		const float b = gamma_correction(1 - z);
+		float r, g, b;
+		invert_scent_color_brightness(x, y, z, r, g, b);
 
 		if (is_patch_fixed) {
 			out.r = (uint8_t) 255 * r;
@@ -1556,7 +1580,7 @@ private:
 
 	static inline void vision_to_color(const float* cell_vision, pixel& out) {
 		float r, g, b;
-		invert_color_brightness(cell_vision[0], cell_vision[1], cell_vision[2], r, g, b);
+		invert_vision_color_brightness(cell_vision[0], cell_vision[1], cell_vision[2], r, g, b);
 		out.r = (uint8_t) 255 * r;
 		out.g = (uint8_t) 255 * g;
 		out.b = (uint8_t) 255 * b;
