@@ -270,8 +270,6 @@ class visualizer
 	bool render_background;
 	bool render_agent_visual_field;
 
-	float max_scent;
-
 public:
 	std::atomic_bool running;
 
@@ -285,8 +283,7 @@ public:
 			background_binding(0, sizeof(vertex)), item_binding(0, sizeof(item_vertex)),
 			track_agent_id(track_agent_id), tracking_animating(false),
 			scene_ready(false), render_background(draw_scent_map),
-			render_agent_visual_field(draw_visual_field), max_scent(1.0f),
-			running(true)
+			render_agent_visual_field(draw_visual_field), running(true)
 	{
 		semaphore_signal_period = (unsigned long long) round(1000.0f / max_steps_per_second);
 
@@ -697,9 +694,9 @@ private:
 		const unsigned int scent_dimension = get_config(sim).scent_dimension;
 		const array<item_properties>& item_types = get_config(sim).item_types;
 		const float* agent_color = get_config(sim).agent_color;
-		float updated_max_scent = 0.0f;
 		if (patches.length > 0) {
-			/* find position of the bottom-left corner and the top-right corner */
+			/* find position of the bottom-left corner and the top-right corner, and compute the max scent */
+			float max_scent = 0.0f;
 			size_t required_item_vertices = 0;
 			position bottom_left_corner(INT64_MAX, INT64_MAX), top_right_corner(INT64_MIN, INT64_MIN);
 			bottom_left_corner.y = patches[0][0].patch_position.y;
@@ -707,8 +704,15 @@ private:
 			for (const array<patch_state>& row : patches) {
 				bottom_left_corner.x = min(bottom_left_corner.x, row[0].patch_position.x);
 				top_right_corner.x = max(top_right_corner.x, row.last().patch_position.x);
-				for (const patch_state& patch : row)
+				for (const patch_state& patch : row) {
 					required_item_vertices += 6 * patch.item_count + 3 * patch.agent_count;
+					for (unsigned int a = 0; a < patch_size; a++) {
+						for (unsigned int b = 0; b < patch_size; b++) {
+							float* cell_scent = patch.scent + ((a*patch_size + b)*scent_dimension);
+							max_scent = max(cell_scent[0], max(cell_scent[1], max(cell_scent[2], max_scent)));
+						}
+					}
+				}
 			}
 
 			if (required_item_vertices > item_quad_buffer_capacity) {
@@ -809,7 +813,7 @@ private:
 
 								position texture_position = position(a, b) + offset;
 								pixel& current_pixel = scent_map_texture_data[texture_position.y * texture_width + texture_position.x];
-								scent_to_color(average_scent, current_pixel, patch.fixed, max_scent, updated_max_scent);
+								scent_to_color(average_scent, current_pixel, patch.fixed, max_scent);
 							}
 						}
 					}
@@ -965,7 +969,6 @@ private:
 				uniform_data.agent_color.z = agent_color[2];
 			}
 
-			max_scent = updated_max_scent;
 			item_vertex_count = new_item_vertex_count;
 			current_patch_size_texels = patch_size_texels;
 			renderer.transfer_dynamic_vertex_buffer(item_quad_buffer, sizeof(item_vertex) * item_vertex_count);
@@ -1470,13 +1473,13 @@ private:
 		const float x, const float y, const float z,
 		float& r, float& g, float& b
 	) {
-		// Convert from RGB to HSL.
+		/* Convert from RGB to HSL. */
 		float min_c = min(x, min(y, z));
 		float max_c = max(x, max(y, z));
 		float delta = max_c - min_c;
 		float h = 0;
-    float s = 0;
-    float l = (max_c + min_c) / 2.0f;
+		float s = 0;
+		float l = (max_c + min_c) / 2.0f;
 		if (delta != 0) {
 			if (l < 0.5f) {
 				s = delta / (max_c + min_c);
@@ -1492,11 +1495,11 @@ private:
 			}
 		}
 
-		// Adjust hue and lightness.
+		/* Adjust hue and lightness. */
 		h /= 6.0f;
 		l = 1.0f - l;
 
-		// Convert from HSL to RGB.
+		/* Convert from HSL to RGB. */
 		auto color_calc = [](float c, const float t1, const float t2) {
 			if (c < 0) c += 1.0f;
 			if (c > 1) c -= 1.0f;
@@ -1524,13 +1527,13 @@ private:
 	}
 
 	static inline void scent_to_color(
-		const float* cell_scent, pixel& out, bool is_patch_fixed,
-		const float max_scent, float& updated_max_scent
+		const float* cell_scent,
+		pixel& out, bool is_patch_fixed,
+		const float max_scent
 	) {
 		const float scent_x = cell_scent[0];
 		const float scent_y = cell_scent[1];
 		const float scent_z = cell_scent[2];
-		updated_max_scent = max(max(max(updated_max_scent, scent_x), scent_y), scent_z);
 		float x = max(0.0f, min(1.0f, pow(scent_x / max_scent, 0.25f)));
 		float y = max(0.0f, min(1.0f, pow(scent_y / max_scent, 0.25f)));
 		float z = max(0.0f, min(1.0f, pow(scent_z / max_scent, 0.25f)));
