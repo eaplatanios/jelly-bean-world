@@ -997,11 +997,11 @@ inline bool receive_get_map(
 	state.client_states_lock.unlock();
 
 	position bottom_left, top_right;
-	bool get_scent_map;
+	bool get_scent_map, get_vision_map;
 	status response;
 	array<array<patch_state>> patches(32);
 	bool success = true;
-	if (!read(bottom_left, in) || !read(top_right, in) || !read(get_scent_map, in)) {
+	if (!read(bottom_left, in) || !read(top_right, in) || !read(get_scent_map, in) || !read(get_vision_map, in)) {
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else if (!cstate->perms.get_map) {
@@ -1016,9 +1016,17 @@ inline bool receive_get_map(
 		cstate = nullptr;
 
 		if (get_scent_map) {
-			response = sim.template get_map<true>(bottom_left, top_right, patches);
+			if (get_vision_map) {
+				response = sim.template get_map<true, true>(bottom_left, top_right, patches);
+			} else {
+				response = sim.template get_map<true, false>(bottom_left, top_right, patches);
+			}
 		} else {
-			response = sim.template get_map<false>(bottom_left, top_right, patches);
+			if (get_vision_map) {
+				response = sim.template get_map<false, true>(bottom_left, top_right, patches);
+			} else {
+				response = sim.template get_map<false, false>(bottom_left, top_right, patches);
+			}
 		}
 		if (response != status::OK) {
 			for (array<patch_state>& row : patches) {
@@ -1905,14 +1913,18 @@ bool send_do_nothing(ClientType& c, uint64_t agent_id) {
  * \param get_scent_map Whether we want to also retrieve the array of scent
  * 		values at every cell in each patch. If `false`, the `scent` field will
  * 		be set to `nullptr`.
+ * \param get_vision_map Whether we want to also retrieve the array of vision
+ * 		values at every cell in each patch. If `false`, the `vision` field will
+ * 		be set to `nullptr`.
  * \returns `true` if the sending is successful; `false` otherwise.
  */
 template<typename ClientType>
-bool send_get_map(ClientType& c, position bottom_left, position top_right, bool get_scent_map) {
-	memory_stream mem_stream = memory_stream(sizeof(message_type) + 2 * sizeof(position) + sizeof(get_scent_map));
+bool send_get_map(ClientType& c, position bottom_left, position top_right, bool get_scent_map, bool get_vision_map) {
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + 2 * sizeof(position) + sizeof(get_scent_map) + sizeof(get_vision_map));
 	fixed_width_stream<memory_stream> out(mem_stream);
 	return write(message_type::GET_MAP, out)
-		&& write(bottom_left, out) && write(top_right, out) && write(get_scent_map, out)
+		&& write(bottom_left, out) && write(top_right, out)
+		&& write(get_scent_map, out) && write(get_vision_map, out)
 		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
 }
 

@@ -318,6 +318,7 @@ const SimulationMap simulatorMap(
   Position bottomLeftCorner,
   Position topRightCorner,
   bool getScentMap,
+  bool getVisionMap,
   JBW_Status* status);
 
 const AgentIDList simulatorAgentIds(

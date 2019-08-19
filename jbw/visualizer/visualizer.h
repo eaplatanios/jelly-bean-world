@@ -1059,12 +1059,12 @@ private:
 
 		bool render_background_map = render_background;
 		if (render_background_map) {
-			if (sim.template get_map<true>({(int64_t) left, (int64_t) bottom}, {(int64_t) ceil(right), (int64_t) ceil(top)}, patches) != status::OK) {
+			if (sim.template get_map<true, false>({(int64_t) left, (int64_t) bottom}, {(int64_t) ceil(right), (int64_t) ceil(top)}, patches) != status::OK) {
 				fprintf(stderr, "visualizer.prepare_scene_helper ERROR: Unable to get map from simulator.\n");
 				return false;
 			}
 		} else {
-			if (sim.template get_map<false>({(int64_t) left, (int64_t) bottom}, {(int64_t) ceil(right), (int64_t) ceil(top)}, patches) != status::OK) {
+			if (sim.template get_map<false, false>({(int64_t) left, (int64_t) bottom}, {(int64_t) ceil(right), (int64_t) ceil(top)}, patches) != status::OK) {
 				fprintf(stderr, "visualizer.prepare_scene_helper ERROR: Unable to get map from simulator.\n");
 				return false;
 			}
@@ -1162,7 +1162,7 @@ private:
 		sim.data.get_map_bottom = bottom;
 		sim.data.get_map_top = top;
 		sim.data.get_map_render_background = render_background;
-		if (!send_get_map(sim, {(int64_t) left, (int64_t) bottom}, {(int64_t) ceil(right), (int64_t) ceil(top)}, sim.data.get_map_render_background)) {
+		if (!send_get_map(sim, {(int64_t) left, (int64_t) bottom}, {(int64_t) ceil(right), (int64_t) ceil(top)}, sim.data.get_map_render_background, false)) {
 			fprintf(stderr, "visualizer.send_mpi_requests ERROR: Unable to send `get_map` message to server.\n");
 			sim.data.waiting_for_get_map = false;
 			return false;

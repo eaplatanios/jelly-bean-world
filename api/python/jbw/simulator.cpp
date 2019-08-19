@@ -2027,15 +2027,14 @@ static PyObject* build_py_map(
 
             npy_intp n = (npy_intp) config.patch_size;
             float* scent = (patch.scent == nullptr) ? nullptr : (float*) malloc(sizeof(float) * n * n * config.scent_dimension);
-            float* vision = (float*) malloc(sizeof(float) * n * n * config.color_dimension);
+            float* vision = (patch.vision == nullptr) ? nullptr : (float*) malloc(sizeof(float) * n * n * config.color_dimension);
             if (patch.scent != nullptr) memcpy(scent, patch.scent, sizeof(float) * n * n * config.scent_dimension);
-            memcpy(vision, patch.vision, sizeof(float) * n * n * config.color_dimension);
+            if (patch.vision != nullptr) memcpy(vision, patch.vision, sizeof(float) * n * n * config.color_dimension);
 
             npy_intp scent_dim[] = {n, n, (npy_intp) config.scent_dimension};
             npy_intp vision_dim[] = {n, n, (npy_intp) config.color_dimension};
-            PyArrayObject* py_vision = (PyArrayObject*) PyArray_SimpleNewFromData(3, vision_dim, NPY_FLOAT, vision);
-            PyArray_ENABLEFLAGS(py_vision, NPY_ARRAY_OWNDATA);
             PyObject* py_scent;
+            PyObject* py_vision;
             if (patch.scent == nullptr) {
                 py_scent = Py_None;
                 Py_INCREF(Py_None);
@@ -2043,6 +2042,14 @@ static PyObject* build_py_map(
                 PyArrayObject* py_scent_array = (PyArrayObject*) PyArray_SimpleNewFromData(3, scent_dim, NPY_FLOAT, scent);
                 PyArray_ENABLEFLAGS(py_scent_array, NPY_ARRAY_OWNDATA);
                 py_scent = (PyObject*) py_scent_array;
+            }
+            if (patch.vision == nullptr) {
+                py_vision = Py_None;
+                Py_INCREF(Py_None);
+            } else {
+                PyArrayObject* py_vision_array = (PyArrayObject*) PyArray_SimpleNewFromData(3, vision_dim, NPY_FLOAT, vision);
+                PyArray_ENABLEFLAGS(py_vision_array, NPY_ARRAY_OWNDATA);
+                py_vision = (PyObject*) py_vision_array;
             }
 
             PyObject* fixed = patch.fixed ? Py_True : Py_False;
@@ -2085,8 +2092,10 @@ static PyObject* simulator_map(PyObject *self, PyObject *args) {
     int64_t py_bottom_left_x, py_bottom_left_y;
     int64_t py_top_right_x, py_top_right_y;
     PyObject* py_get_scent_map;
-    if (!PyArg_ParseTuple(args, "OO(LL)(LL)O", &py_sim_handle, &py_client_handle,
-            &py_bottom_left_x, &py_bottom_left_y, &py_top_right_x, &py_top_right_y, &py_get_scent_map))
+    PyObject* py_get_vision_map;
+    if (!PyArg_ParseTuple(args, "OO(LL)(LL)OO", &py_sim_handle, &py_client_handle,
+            &py_bottom_left_x, &py_bottom_left_y, &py_top_right_x, &py_top_right_y,
+            &py_get_scent_map, &py_get_vision_map))
         return NULL;
     position bottom_left = position(py_bottom_left_x, py_bottom_left_y);
     position top_right = position(py_top_right_x, py_top_right_y);
@@ -2096,16 +2105,23 @@ static PyObject* simulator_map(PyObject *self, PyObject *args) {
         simulator<py_simulator_data>* sim_handle =
                 (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
         array<array<patch_state>> patches(32);
+        status result;
         if (py_get_scent_map == Py_True) {
-            if (sim_handle->get_map<true>(bottom_left, top_right, patches) != status::OK) {
-                PyErr_SetString(PyExc_RuntimeError, "simulator.get_map failed.");
-                return NULL;
+            if (py_get_vision_map == Py_True) {
+                result = sim_handle->get_map<true, true>(bottom_left, top_right, patches);
+            } else {
+                result = sim_handle->get_map<true, false>(bottom_left, top_right, patches);
             }
         } else {
-            if (sim_handle->get_map<false>(bottom_left, top_right, patches) != status::OK) {
-                PyErr_SetString(PyExc_RuntimeError, "simulator.get_map failed.");
-                return NULL;
+            if (py_get_vision_map == Py_True) {
+                result = sim_handle->get_map<false, true>(bottom_left, top_right, patches);
+            } else {
+                result = sim_handle->get_map<false, false>(bottom_left, top_right, patches);
             }
+        }
+        if (result != status::OK) {
+            PyErr_SetString(PyExc_RuntimeError, "simulator.get_map failed.");
+            return NULL;
         }
         PyObject* py_map = build_py_map(patches, sim_handle->get_config());
         for (array<patch_state>& row : patches) {
@@ -2123,7 +2139,7 @@ static PyObject* simulator_map(PyObject *self, PyObject *args) {
         }
 
         client_handle->data.waiting_for_server = true;
-        if (!send_get_map(*client_handle, bottom_left, top_right, py_get_scent_map == Py_True)) {
+        if (!send_get_map(*client_handle, bottom_left, top_right, py_get_scent_map == Py_True, py_get_vision_map == Py_True)) {
             PyErr_SetString(PyExc_RuntimeError, "Unable to send get_map request.");
             return NULL;
         }

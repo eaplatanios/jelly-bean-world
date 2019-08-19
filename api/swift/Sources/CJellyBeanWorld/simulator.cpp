@@ -602,13 +602,15 @@ inline void init(
       return;
     }
   }
-  patch.vision = (float*) malloc(sizeof(float) * n * n * config.color_dimension);
-  if (patch.vision == nullptr) {
-    free(patch.items);
-    free(patch.agents);
-    if (src.scent != nullptr) free(patch.scent);
-    status->code = JBW_OUT_OF_MEMORY;
-    return;
+  if (src.vision != nullptr) {
+    patch.vision = (float*) malloc(sizeof(float) * n * n * config.color_dimension);
+    if (patch.vision == nullptr) {
+      free(patch.items);
+      free(patch.agents);
+      if (src.scent != nullptr) free(patch.scent);
+      status->code = JBW_OUT_OF_MEMORY;
+      return;
+    }
   }
   for (unsigned int i = 0; i < src.item_count; i++) {
     patch.items[i].type = src.items[i].item_type;
@@ -626,7 +628,7 @@ inline void init(
   patch.numAgents = src.agent_count;
   patch.fixed = src.fixed;
   if (src.scent != nullptr) memcpy(patch.scent, src.scent, sizeof(float) * n * n * config.scent_dimension);
-  memcpy(patch.vision, src.vision, sizeof(float) * n * n * config.color_dimension);
+  if (src.vision != nullptr) memcpy(patch.vision, src.vision, sizeof(float) * n * n * config.color_dimension);
 }
 
 
@@ -635,7 +637,8 @@ inline void free(SimulationMapPatch& patch) {
   free(patch.agents);
   if (patch.scent != nullptr)
     free(patch.scent);
-  free(patch.vision);
+  if (patch.vision != nullptr)
+    free(patch.vision);
 }
 
 
@@ -1787,6 +1790,7 @@ const SimulationMap simulatorMap(
   Position bottomLeftCorner,
   Position topRightCorner,
   bool getScentMap,
+  bool getVisionMap,
   JBW_Status* status
 ) {
   position bottom_left = position(bottomLeftCorner.x, bottomLeftCorner.y);
@@ -1795,9 +1799,20 @@ const SimulationMap simulatorMap(
     /* the simulation is local, so call get_map directly */
     simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
     array<array<patch_state>> patches(16);
-    auto result = (getScentMap ?
-      sim_handle->get_map<true>(bottom_left, top_right, patches) :
-      sim_handle->get_map<false>(bottom_left, top_right, patches));
+    jbw::status result;
+    if (getScentMap) {
+      if (getVisionMap) {
+        result = sim_handle->get_map<true, true>(bottom_left, top_right, patches);
+      } else {
+        result = sim_handle->get_map<true, false>(bottom_left, top_right, patches);
+      }
+    } else {
+      if (getVisionMap) {
+        result = sim_handle->get_map<false, true>(bottom_left, top_right, patches);
+      } else {
+        result = sim_handle->get_map<false, false>(bottom_left, top_right, patches);
+      }
+    }
     if (result != status::OK) {
       JBW_SetJBWStatusFromStatus(status, result);
       return EMPTY_SIM_MAP;
@@ -1822,7 +1837,7 @@ const SimulationMap simulatorMap(
     }
 
     client_handle->data.waiting_for_server = true;
-    if (!send_get_map(*client_handle, bottom_left, top_right, getScentMap)) {
+    if (!send_get_map(*client_handle, bottom_left, top_right, getScentMap, getVisionMap)) {
       status->code = JBW_MPI_ERROR;
       return EMPTY_SIM_MAP;
     }

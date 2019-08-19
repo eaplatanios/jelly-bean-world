@@ -86,10 +86,10 @@ inline bool item_exists(
 inline void move_forward(int x, int y, direction dir, int& new_x, int& new_y) {
 	new_x = x;
 	new_y = y;
-	if (dir == direction::UP) new_y++;
-	else if (dir == direction::DOWN) new_y--;
-	else if (dir == direction::LEFT) new_x--;
-	else if (dir == direction::RIGHT) new_x++;
+	if (dir == direction::UP) ++new_y;
+	else if (dir == direction::DOWN) --new_y;
+	else if (dir == direction::LEFT) --new_x;
+	else if (dir == direction::RIGHT) ++new_x;
 }
 
 inline direction turn_left(direction dir) {
@@ -163,7 +163,7 @@ shortest_path_state* shortest_path(
 					new_state->dir = new_dir;
 					new_state->reference_count = 1;
 					new_state->prev = state;
-					state->reference_count++;
+					++state->reference_count;
 					queue.insert(new_state);
 				}
 			}
@@ -184,7 +184,7 @@ shortest_path_state* shortest_path(
 			new_state->dir = new_dir;
 			new_state->reference_count = 1;
 			new_state->prev = state;
-			state->reference_count++;
+			++state->reference_count;
 			queue.insert(new_state);
 		}
 
@@ -203,7 +203,7 @@ shortest_path_state* shortest_path(
 			new_state->dir = new_dir;
 			new_state->reference_count = 1;
 			new_state->prev = state;
-			state->reference_count++;
+			++state->reference_count;
 			queue.insert(new_state);
 		}
 
@@ -405,10 +405,10 @@ int main(int argc, const char** argv)
 
 			shortest_path_state* curr = new_path;
 			while (curr != nullptr) {
-				current_path_length++;
+				++current_path_length;
 				curr = curr->prev;
 			}
-			if (new_path != nullptr) new_path->reference_count++;
+			if (new_path != nullptr) ++new_path->reference_count;
 		}
 
 		if (new_path != nullptr) {
@@ -450,7 +450,7 @@ int main(int argc, const char** argv)
 			}
 
 			if (action_status == status::OK) {
-				current_path_position++;
+				++current_path_position;
 				if (current_path_position + 1 >= current_path_length) {
 					free(*best_path);
 					if (best_path->reference_count == 0)
