@@ -56,6 +56,17 @@ public enum Reward {
   }
 }
 
+extension Reward: CustomStringConvertible {
+  public var description: String {
+    switch self {
+    case .collect(item, value):
+      return "Collect[\(item.description), \(String(format: "%.2f", value))]"
+    case .combined(reward1, reward2):
+      return "\(reward1.description) ∧ \(reward2.description)"
+    }
+  }
+}
+
 /// Reward function schedule which specifies which reward function is used at each time step.
 /// This is useful for representing never-ending learning settings that require adaptation.
 public protocol RewardSchedule {

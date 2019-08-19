@@ -17,7 +17,7 @@ import ReinforcementLearning
 import TensorFlow
 
 public let banana = Item(
-  name: "banana",
+  name: "Banana",
   scent: ShapedArray([0.0, 1.0, 0.0]),
   color: ShapedArray([0.0, 1.0, 0.0]),
   requiredItemCounts: [:],
@@ -32,7 +32,7 @@ public let banana = Item(
       .piecewiseBox(itemId: 2,  10.0, 200.0, 2.0, -100.0)]))
 
 public let onion = Item(
-  name: "onion",
+  name: "Onion",
   scent: ShapedArray([1.0, 0.0, 0.0]),
   color: ShapedArray([1.0, 0.0, 0.0]),
   requiredItemCounts: [:],
@@ -46,7 +46,7 @@ public let onion = Item(
       .piecewiseBox(itemId: 2, 200.0, 0.0, -100.0, -100.0)]))
 
 public let jellyBean = Item(
-  name: "jellyBean",
+  name: "JellyBean",
   scent: ShapedArray([0.0, 0.0, 1.0]),
   color: ShapedArray([0.0, 0.0, 1.0]),
   requiredItemCounts: [:],
@@ -61,7 +61,7 @@ public let jellyBean = Item(
       .piecewiseBox(itemId: 2,  10.0, 200.0,  0.0,   -6.0)]))
 
 public let wall = Item(
-  name: "wall",
+  name: "Wall",
   scent: ShapedArray([0.0, 0.0, 0.0]),
   color: ShapedArray([0.5, 0.5, 0.5]),
   requiredItemCounts: [3: 1], // Make walls impossible to collect.
@@ -73,7 +73,10 @@ public let wall = Item(
     interactionFns: [
       .cross(itemId: 3, 10.0, 15.0, 20.0, -200.0, -20.0, 1.0)]))
 
-public func simulatorConfiguration(randomSeed: UInt32) -> Simulator.Configuration {
+public func simulatorConfiguration(
+  randomSeed: UInt32,
+  agentFieldOfView: Float
+) -> Simulator.Configuration {
   Simulator.Configuration(
     randomSeed: randomSeed,
     maxStepsPerMove: 1,
@@ -87,7 +90,7 @@ public func simulatorConfiguration(randomSeed: UInt32) -> Simulator.Configuratio
     mcmcIterations: 4000,
     items: [banana, onion, jellyBean, wall],
     agentColor: [0.0, 0.0, 0.0],
-    agentFieldOfView: 2.09,
+    agentFieldOfView: agentFieldOfView,
     moveConflictPolicy: .firstComeFirstServe,
     scentDecay: 0.4,
     scentDiffusion: 0.14,

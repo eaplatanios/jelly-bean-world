@@ -144,6 +144,10 @@ let networkArg: OptionArgument<Network> = parser.add(
   option: "--network",
   kind: Network.self,
   usage: "Network type. Can be one of: `plain` and `contextual`.")
+let agentFieldOfViewArg: OptionArgument<Float> = parser.add(
+  option: "--agent-field-of-view",
+  kind: Float.self,
+  usage: "Agents' field of view. Defaults to 2π.")
 let batchSizeArg: OptionArgument<Int> = parser.add(
   option: "--batch-size",
   kind: Int.self,
@@ -185,6 +189,7 @@ let resultsDir: Foundation.URL = {
 }()
 guard let reward = parsedArguments.get(rewardArg) else { throw Error.invalidArgument }
 guard let agent = parsedArguments.get(agentArg) else { throw Error.invalidArgument }
+let agentFieldOfView = parsedArguments.get(agentFieldOfViewArg) ?? 6.3
 let batchSize = parsedArguments.get(batchSizeArg) ?? 32
 let stepCount = parsedArguments.get(stepCountArg) ?? 10_000_000
 let stepCountPerUpdate = parsedArguments.get(stepCountPerUpdateArg) ?? 512
@@ -201,6 +206,7 @@ case .run:
     agent: agent,
     observation: observation,
     network: network,
+    agentFieldOfView: agentFieldOfView,
     batchSize: batchSize,
     stepCount: stepCount,
     stepCountPerUpdate: stepCountPerUpdate,

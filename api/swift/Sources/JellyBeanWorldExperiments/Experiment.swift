@@ -22,11 +22,13 @@ public struct Experiment {
   public let agent: Agent
   public let observation: Observation
   public let network: Network
+  public let agentFieldOfView: Float
   public let batchSize: Int
   public let stepCount: Int
   public let stepCountPerUpdate: Int
   public let runID: Int
   public let resultsFile: URL
+  public let rewardScheduleFile: URL
   public let serverPorts: [Int]?
 
   public init(
@@ -34,17 +36,19 @@ public struct Experiment {
     agent: Agent,
     observation: Observation,
     network: Network,
+    agentFieldOfView: Float,
     batchSize: Int,
     stepCount: Int,
     stepCountPerUpdate: Int,
     resultsDir: URL,
-    minimumRunID: Int,
-    serverPorts: [Int]?
+    minimumRunID: Int = 0,
+    serverPorts: [Int]? = nil
   ) throws {
     self.reward = reward
     self.agent = agent
     self.observation = observation
     self.network = network
+    self.agentFieldOfView = agentFieldOfView
     self.batchSize = batchSize
     self.stepCount = stepCount
     self.stepCountPerUpdate = stepCountPerUpdate
@@ -70,23 +74,30 @@ public struct Experiment {
     while runIDs.contains(runID) { runID += 1 }
     self.runID = runID
     self.resultsFile = resultsDir.appendingPathComponent("\(runID).tsv")
+    self.rewardScheduleFile = resultsDir.appendingPathComponent("\(runID)_reward_schedule.tsv")
     FileManager.default.createFile(
       atPath: self.resultsFile.path,
+      contents: "step\treward\n".data(using: .utf8))
+    FileManager.default.createFile(
+      atPath: self.rewardScheduleFile.path,
       contents: "step\treward\n".data(using: .utf8))
     self.serverPorts = serverPorts
   }
 
   public func run(writeFrequency: Int = 100, logFrequency: Int = 1000) throws {
+    let configuration = simulatorConfiguration(
+      randomSeed: UInt32(runID),
+      agentFieldOfView: agentFieldOfView)
     let configurations = (0..<batchSize).map {
       batchIndex -> JellyBeanWorld.Environment.Configuration in
       if let ports = serverPorts, batchIndex < ports.count {
         return JellyBeanWorld.Environment.Configuration(
-          simulatorConfiguration: simulatorConfiguration(randomSeed: UInt32(runID)),
+          simulatorConfiguration: configuration,
           rewardSchedule: reward.schedule,
           serverConfiguration: Simulator.ServerConfiguration(port: UInt32(ports[batchIndex])))
       }
       return JellyBeanWorld.Environment.Configuration(
-        simulatorConfiguration: simulatorConfiguration(randomSeed: UInt32(runID)),
+        simulatorConfiguration: configuration,
         rewardSchedule: reward.schedule)
     }
     var environment = try JellyBeanWorld.Environment(
@@ -94,6 +105,7 @@ public struct Experiment {
       parallelizedBatchProcessing: batchSize > 1)
     var totalReward = Float(0.0)
     var rewardWriteDeque = Deque<Float>(size: writeFrequency)
+    var currentRewardFunction = environment.currentStep.observation.rewardFunction
     try withRandomSeedForTensorFlow((Int32(runID), Int32(runID))) {
       var agent = self.agent.create(
         in: environment,
@@ -103,6 +115,9 @@ public struct Experiment {
       let resultsFileHandle = try? FileHandle(forWritingTo: resultsFile)
       defer { resultsFileHandle?.closeFile() }
       resultsFileHandle?.seekToEndOfFile()
+      let rewardScheduleFileHandle = try? FileHandle(forWritingTo: rewardScheduleFile)
+      defer { rewardScheduleFileHandle?.closeFile() }
+      rewardScheduleFileHandle?.seekToEndOfFile()
       var environmentStep = 0
       for _ in 0..<(stepCount / stepCountPerUpdate) {
         try agent.update(
@@ -119,6 +134,11 @@ public struct Experiment {
             if environmentStep % writeFrequency == 0 {
               let reward = rewardWriteDeque.sum()
               resultsFileHandle?.write("\(environmentStep)\t\(reward)\n".data(using: .utf8)!)
+            }
+            if trajectory.observation.rewardFunction != currentRewardFunction {
+              currentRewardFunction = trajectory.observation.rewardFunction
+              rewardScheduleFileHandle?.write(
+                "\(environmentStep)\t\(currentRewardFunction.description)\n".data(using: .utf8)!)
             }
             environmentStep += 1
           }])
