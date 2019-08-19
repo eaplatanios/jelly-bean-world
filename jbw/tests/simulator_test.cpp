@@ -366,11 +366,18 @@ struct client_data {
 		size_t length;
 	};
 
+	struct semaphore_array {
+		const uint64_t* ids;
+		const bool* signaled;
+		size_t length;
+	};
+
 	uint64_t client_id;
+	uint64_t semaphore_id;
 	const array<array<patch_state>>* map;
 	fixed_array<uint64_t> agent_ids;
 	agent_state_array agent_states;
-	uint64_t semaphore_id;
+	semaphore_array semaphores;
 	bool waiting_for_server;
 	std::mutex lock;
 	std::condition_variable condition;
@@ -441,6 +448,18 @@ void on_signal_semaphore(client<client_data>& c,
 {
 	std::unique_lock<std::mutex> lck(c.data.lock);
 	c.data.waiting_for_server = false;
+	c.data.action_result = (response == status::OK);
+	c.data.condition.notify_one();
+}
+
+void on_get_semaphores(client<client_data>& c, status response,
+		uint64_t* semaphore_ids, bool* signaled, size_t semaphore_count)
+{
+	std::unique_lock<std::mutex> lck(c.data.lock);
+	c.data.waiting_for_server = false;
+	c.data.semaphores.ids = semaphore_ids;
+	c.data.semaphores.signaled = signaled;
+	c.data.semaphores.length = semaphore_count;
 	c.data.action_result = (response == status::OK);
 	c.data.condition.notify_one();
 }

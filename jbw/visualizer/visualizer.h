@@ -1673,6 +1673,12 @@ void on_signal_semaphore(client<visualizer_client_data>& c,
 	c.data.waiting_for_semaphore_op = false;
 }
 
+void on_get_semaphores(client<visualizer_client_data>& c, status response,
+		uint64_t* semaphore_ids, bool* signaled, size_t semaphore_count)
+{
+	fprintf(stderr, "WARNING: `on_get_semaphores` should not be called.\n");
+}
+
 void on_move(client<visualizer_client_data>& c, uint64_t agent_id, status response)
 {
 	fprintf(stderr, "WARNING: `on_move` should not be called.\n");

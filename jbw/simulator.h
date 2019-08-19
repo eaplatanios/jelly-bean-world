@@ -1848,6 +1848,23 @@ public:
     }
 
     /**
+     * Retrieves an array of all semaphore IDs in the simulation as well as
+     * whether or not they've been signaled during this turn.
+     *
+     * \param   semaphore_list The array to write the semaphore information.
+     */
+    inline status get_semaphores(array<pair<uint64_t, bool>>& semaphore_list) {
+        std::unique_lock<std::mutex> lock(simulator_lock);
+        if (!semaphore_list.ensure_capacity(semaphore_list.length + semaphores.table.size)) {
+            simulator_lock.unlock();
+            return status::OUT_OF_MEMORY;
+        }
+        for (const auto& entry : semaphores)
+            semaphore_list[semaphore_list.length++] = {entry.key, entry.value};
+        return status::OK;
+    }
+
+    /**
      * Retrieves the set of patches of the map within the bounding box defined
      * by `bottom_left_corner` and `top_right_corner`. The patches are stored
      * in the map `patches`.

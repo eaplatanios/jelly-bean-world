@@ -38,6 +38,8 @@ enum class message_type : uint64_t {
 	REMOVE_SEMAPHORE_RESPONSE,
 	SIGNAL_SEMAPHORE,
 	SIGNAL_SEMAPHORE_RESPONSE,
+	GET_SEMAPHORES,
+	GET_SEMAPHORES_RESPONSE,
 	MOVE,
 	MOVE_RESPONSE,
 	TURN,
@@ -88,6 +90,7 @@ inline bool print(const message_type& type, Stream& out) {
 	case message_type::ADD_SEMAPHORE:    return core::print("ADD_SEMAPHORE", out);
 	case message_type::REMOVE_SEMAPHORE: return core::print("REMOVE_SEMAPHORE", out);
 	case message_type::SIGNAL_SEMAPHORE: return core::print("SIGNAL_SEMAPHORE", out);
+	case message_type::GET_SEMAPHORES:   return core::print("GET_SEMAPHORES", out);
 	case message_type::MOVE:             return core::print("MOVE", out);
 	case message_type::TURN:             return core::print("TURN", out);
 	case message_type::DO_NOTHING:       return core::print("DO_NOTHING", out);
@@ -102,6 +105,7 @@ inline bool print(const message_type& type, Stream& out) {
 	case message_type::ADD_SEMAPHORE_RESPONSE:    return core::print("ADD_SEMAPHORE_RESPONSE", out);
 	case message_type::REMOVE_SEMAPHORE_RESPONSE: return core::print("REMOVE_SEMAPHORE_RESPONSE", out);
 	case message_type::SIGNAL_SEMAPHORE_RESPONSE: return core::print("SIGNAL_SEMAPHORE_RESPONSE", out);
+	case message_type::GET_SEMAPHORES_RESPONSE:   return core::print("GET_SEMAPHORES_RESPONSE", out);
 	case message_type::MOVE_RESPONSE:             return core::print("MOVE_RESPONSE", out);
 	case message_type::TURN_RESPONSE:             return core::print("TURN_RESPONSE", out);
 	case message_type::DO_NOTHING_RESPONSE:       return core::print("DO_NOTHING_RESPONSE", out);
@@ -136,13 +140,15 @@ struct permissions {
 	bool get_map;
 	bool get_agent_ids;
 	bool get_agent_states;
-	bool semaphores;
+	bool manage_semaphores;
+	bool get_semaphores;
 
 	permissions() { }
 	constexpr permissions(bool value) :
 		add_agent(value), remove_agent(value), remove_client(value),
 		set_active(value), get_map(value), get_agent_ids(value),
-		get_agent_states(value), semaphores(value)
+		get_agent_states(value), manage_semaphores(value),
+		get_semaphores(value)
 	{ }
 
 	static inline void swap(permissions& first, permissions& second) {
@@ -153,7 +159,8 @@ struct permissions {
 		core::swap(first.get_map, second.get_map);
 		core::swap(first.get_agent_ids, second.get_agent_ids);
 		core::swap(first.get_agent_states, second.get_agent_states);
-		core::swap(first.semaphores, second.semaphores);
+		core::swap(first.manage_semaphores, second.manage_semaphores);
+		core::swap(first.get_semaphores, second.get_semaphores);
 	}
 
 	static constexpr permissions grant_all() { return permissions(true); }
@@ -169,7 +176,8 @@ bool read(permissions& perms, Stream& in) {
 		&& read(perms.get_map, in)
 		&& read(perms.get_agent_ids, in)
 		&& read(perms.get_agent_states, in)
-		&& read(perms.semaphores, in);
+		&& read(perms.manage_semaphores, in)
+		&& read(perms.get_semaphores, in);
 }
 
 template<typename Stream>
@@ -181,7 +189,8 @@ bool write(const permissions& perms, Stream& out) {
 		&& write(perms.get_map, out)
 		&& write(perms.get_agent_ids, out)
 		&& write(perms.get_agent_states, out)
-		&& write(perms.semaphores, out);
+		&& write(perms.manage_semaphores, out)
+		&& write(perms.get_semaphores, out);
 }
 
 struct client_state {
@@ -629,7 +638,7 @@ inline bool receive_add_semaphore(
 
 	status response;
 	uint64_t new_semaphore_id = 0;
-	if (!cstate->perms.semaphores) {
+	if (!cstate->perms.manage_semaphores) {
 		/* the client has no permission for this operation */
 		response = status::PERMISSION_ERROR;
 	} else {
@@ -699,7 +708,7 @@ inline bool receive_remove_semaphore(
 		success = false;
 	} else {
 		unsigned int index = cstate->semaphore_ids.index_of(semaphore_id);
-		if (!cstate->perms.semaphores) {
+		if (!cstate->perms.manage_semaphores) {
 			/* the client has no permission for this operation */
 			response = status::PERMISSION_ERROR;
 		} else if (index == cstate->semaphore_ids.length) {
@@ -757,7 +766,10 @@ inline bool receive_signal_semaphore(
 		response = status::SERVER_PARSE_MESSAGE_ERROR;
 		success = false;
 	} else {
-		if (semaphore_id == 0 || !cstate->semaphore_ids.contains(semaphore_id)) {
+		if (!cstate->perms.manage_semaphores) {
+			/* the client has no permission for this operation */
+			response = status::PERMISSION_ERROR;
+		} else if (semaphore_id == 0 || !cstate->semaphore_ids.contains(semaphore_id)) {
 			response = status::INVALID_SEMAPHORE_ID;
 		} else {
 			/* We have to unlock this to avoid deadlock since other simulator
@@ -778,6 +790,65 @@ inline bool receive_signal_semaphore(
 
 	success &= write(message_type::SIGNAL_SEMAPHORE_RESPONSE, out)
 			&& write(semaphore_id, out) && write(response, out);
+	if (!success) {
+		if (cstate != nullptr)
+			cstate->lock.unlock();
+		return false;
+	}
+
+	if (cstate == nullptr) {
+		cstate = acquire_client_lock(state, client_id);
+		if (cstate == nullptr)
+			/* the client was destroyed while we didn't have the client lock */
+			return true;
+	}
+	success = send_message(connection, mem_stream.buffer, mem_stream.position);
+	cstate->lock.unlock();
+	return success;
+}
+
+/* Precondition: `state.client_states_lock` must be held by the calling thread. */
+template<typename Stream, typename SimulatorData>
+inline bool receive_get_semaphores(
+		Stream& in, socket_type& connection,
+		server_state& state, uint64_t client_id,
+		simulator<SimulatorData>& sim)
+{
+	bool contains;
+	client_state* cstate = state.client_states.get(client_id, contains);
+	if (!contains) {
+		state.client_states_lock.unlock();
+		return true; /* the client was already destroyed */
+	}
+	cstate->lock.lock();
+	state.client_states_lock.unlock();
+
+	status response;
+	bool success = true;
+	array<pair<uint64_t, bool>> semaphores(64);
+	if (!cstate->perms.get_semaphores) {
+		/* the client has no permission for this operation */
+		response = status::PERMISSION_ERROR;
+	} else {
+		/* We have to unlock this to avoid deadlock since other simulator
+			functions (i.e. `move`, `turn`, `do_nothing`) can cause the
+			simulator to step. This calls `send_step_response` which needs the
+			client_state locks. */
+		cstate->lock.unlock();
+		cstate = nullptr;
+
+		response = sim.get_semaphores(semaphores);
+		if (response == status::OUT_OF_MEMORY)
+			response = status::SERVER_OUT_OF_MEMORY;
+	}
+
+	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(response) + sizeof(semaphores.length) + sizeof(pair<uint64_t, bool>));
+	fixed_width_stream<memory_stream> out(mem_stream);
+
+	success &= write(message_type::GET_SEMAPHORES_RESPONSE, out)
+			&& write(response, out)
+			&& write(semaphores.length, out)
+			&& write(semaphores.data, out, semaphores.length);
 	if (!success) {
 		if (cstate != nullptr)
 			cstate->lock.unlock();
@@ -1402,6 +1473,8 @@ void server_process_message(socket_type& connection,
 			receive_remove_semaphore(in, connection, state, client_id, sim); return;
 		case message_type::SIGNAL_SEMAPHORE:
 			receive_signal_semaphore(in, connection, state, client_id, sim); return;
+		case message_type::GET_SEMAPHORES:
+			receive_get_semaphores(in, connection, state, client_id, sim); return;
 		case message_type::MOVE:
 			receive_move(in, connection, state, client_id, sim); return;
 		case message_type::TURN:
@@ -1424,6 +1497,7 @@ void server_process_message(socket_type& connection,
 		case message_type::ADD_SEMAPHORE_RESPONSE:
 		case message_type::REMOVE_SEMAPHORE_RESPONSE:
 		case message_type::SIGNAL_SEMAPHORE_RESPONSE:
+		case message_type::GET_SEMAPHORES_RESPONSE:
 		case message_type::MOVE_RESPONSE:
 		case message_type::TURN_RESPONSE:
 		case message_type::DO_NOTHING_RESPONSE:
@@ -1840,6 +1914,25 @@ bool send_signal_semaphore(ClientType& c, uint64_t semaphore_id) {
 }
 
 /**
+ * Sends a `get_semaphores` message to the server from the client `c`. Once the
+ * server responds, the function
+ * `on_get_semaphores(ClientType&, status, uint64_t*, bool*, size_t*)` will be
+ * invoked, where the first argument is `c`, the second is the response (OK if
+ * successful, and a different value if and error occurred), the third is the
+ * array of semaphore IDs, and the fourth is the array of whether each
+ * semaphore is signaled, and the fifth is the number of semaphores.
+ *
+ * \returns `true` if the sending is successful; `false` otherwise.
+ */
+template<typename ClientType>
+bool send_get_semaphores(ClientType& c) {
+	memory_stream mem_stream = memory_stream(sizeof(message_type));
+	fixed_width_stream<memory_stream> out(mem_stream);
+	return write(message_type::GET_SEMAPHORES, out)
+		&& send_message(c.connection, mem_stream.buffer, mem_stream.position);
+}
+
+/**
  * Sends a `move` message to the server from the client `c`. Once the server
  * responds, the function `on_move(ClientType&, uint64_t, status)` will be
  * invoked, where the first argument is `c`, the second is `agent_id`, and the
@@ -2085,6 +2178,34 @@ inline bool receive_signal_semaphore_response(ClientType& c) {
 		success = false;
 	}
 	on_signal_semaphore(c, semaphore_id, response);
+	return success;
+}
+
+template<typename ClientType>
+inline bool receive_get_semaphores_response(ClientType& c) {
+	status response;
+	bool success = true;
+	size_t semaphore_count = 0;
+	fixed_width_stream<socket_type> in(c.connection);
+	if (!read(response, in) || !read(semaphore_count, in)) {
+		response = status::CLIENT_PARSE_MESSAGE_ERROR;
+		success = false;
+	}
+	uint64_t* semaphore_ids = (uint64_t*) malloc(max((size_t) 1, sizeof(uint64_t) * semaphore_count));
+	bool* semaphore_signaled = (bool*) malloc(max((size_t) 1, sizeof(bool) * semaphore_count));
+	if (semaphore_ids == nullptr || semaphore_signaled == nullptr) {
+		if (semaphore_ids != nullptr) free(semaphore_ids);
+		response = status::CLIENT_OUT_OF_MEMORY;
+		success = false;
+	} else if (!read(semaphore_ids, in, semaphore_count)
+			|| !read(semaphore_signaled, in, semaphore_count))
+	{
+		response = status::CLIENT_PARSE_MESSAGE_ERROR;
+		free(semaphore_ids); free(semaphore_signaled);
+		success = false;
+	}
+	/* ownership of `semaphore_ids` and `semaphore_signaled` is passed to the callee */
+	on_get_semaphores(c, response, semaphore_ids, semaphore_signaled, semaphore_count);
 	return success;
 }
 
@@ -2347,6 +2468,8 @@ void run_response_listener(ClientType& c) {
 			receive_remove_semaphore_response(c); continue;
 		case message_type::SIGNAL_SEMAPHORE_RESPONSE:
 			receive_signal_semaphore_response(c); continue;
+		case message_type::GET_SEMAPHORES_RESPONSE:
+			receive_get_semaphores_response(c); continue;
 		case message_type::MOVE_RESPONSE:
 			receive_move_response(c); continue;
 		case message_type::TURN_RESPONSE:
@@ -2372,6 +2495,7 @@ void run_response_listener(ClientType& c) {
 		case message_type::ADD_SEMAPHORE:
 		case message_type::REMOVE_SEMAPHORE:
 		case message_type::SIGNAL_SEMAPHORE:
+		case message_type::GET_SEMAPHORES:
 		case message_type::MOVE:
 		case message_type::TURN:
 		case message_type::DO_NOTHING:

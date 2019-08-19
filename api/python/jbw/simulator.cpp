@@ -125,6 +125,12 @@ struct py_client_data {
         size_t length;
     };
 
+    struct semaphore_array {
+        uint64_t* ids;
+        bool* signaled;
+        size_t length;
+    };
+
     /* storing the server responses */
     status server_response;
     union response_data {
@@ -134,6 +140,7 @@ struct py_client_data {
         array<array<patch_state>>* map;
         pair<uint64_t*, size_t> agent_ids;
         agent_state_array agent_states;
+        semaphore_array semaphores;
     } response_data;
 
     /* for synchronization */
@@ -502,6 +509,33 @@ void on_signal_semaphore(client<py_client_data>& c, uint64_t semaphore_id, statu
     check_response(response, "signal_semaphore: ");
     std::unique_lock<std::mutex> lck(c.data.lock);
     c.data.waiting_for_server = false;
+    c.data.server_response = response;
+    c.data.cv.notify_one();
+}
+
+/**
+ * The callback invoked when the client receives a get_semaphores response from
+ * the server. This function copies the result into
+ * `c.data.response_data.semaphores` and wakes up the Python thread (which
+ * should be waiting in the `simulator_get_semaphores` function) so that it can
+ * return the response back to Python.
+ *
+ * \param   c               The client that received the response.
+ * \param   response        The response from the server, containing
+ *                          information about any errors.
+ * \param   semaphore_ids   The IDs of the semaphores in the simulation.
+ * \param   signaled        Whether or not each semaphore is signaled.
+ * \param   semaphore_count The number of semaphores in the simulation.
+ */
+void on_get_semaphores(client<py_client_data>& c, status response,
+        uint64_t* semaphore_ids, bool* signaled, size_t semaphore_count)
+{
+    check_response(response, "get_semaphores: ");
+    std::unique_lock<std::mutex> lck(c.data.lock);
+    c.data.waiting_for_server = false;
+    c.data.response_data.semaphores.ids = semaphore_ids;
+    c.data.response_data.semaphores.signaled = signaled;
+    c.data.response_data.semaphores.length = semaphore_count;
     c.data.server_response = response;
     c.data.cv.notify_one();
 }
@@ -1177,7 +1211,8 @@ static PyObject* simulator_start_server(PyObject *self, PyObject *args)
     success &= parse_permission(perms.get_map, py_permissions, "get_map");
     success &= parse_permission(perms.get_agent_ids, py_permissions, "get_agent_ids");
     success &= parse_permission(perms.get_agent_states, py_permissions, "get_agent_states");
-    success &= parse_permission(perms.semaphores, py_permissions, "semaphores");
+    success &= parse_permission(perms.manage_semaphores, py_permissions, "manage_semaphores");
+    success &= parse_permission(perms.get_semaphores, py_permissions, "get_semaphores");
     if (!success) return NULL;
 
     simulator<py_simulator_data>* sim_handle =
@@ -1427,7 +1462,7 @@ static PyObject* simulator_get_permissions(PyObject *self, PyObject *args)
 
     async_server* server = (async_server*) PyLong_AsVoidPtr(py_server_handle);
     permissions perms = get_permissions(*server, client_id);
-    return Py_BuildValue("(OOOOOOO)",
+    return Py_BuildValue("(OOOOOOOO)",
             perms.add_agent ? Py_True : Py_False,
             perms.remove_agent ? Py_True : Py_False,
             perms.remove_client ? Py_True : Py_False,
@@ -1435,7 +1470,8 @@ static PyObject* simulator_get_permissions(PyObject *self, PyObject *args)
             perms.get_map ? Py_True : Py_False,
             perms.get_agent_ids ? Py_True : Py_False,
             perms.get_agent_states ? Py_True : Py_False,
-            perms.semaphores ? Py_True : Py_False);
+            perms.manage_semaphores ? Py_True : Py_False,
+            perms.get_semaphores ? Py_True : Py_False);
 }
 
 /**
@@ -1468,7 +1504,8 @@ static PyObject* simulator_set_permissions(PyObject *self, PyObject *args)
     success &= parse_permission(perms.get_map, py_permissions, "get_map");
     success &= parse_permission(perms.get_agent_ids, py_permissions, "get_agent_ids");
     success &= parse_permission(perms.get_agent_states, py_permissions, "get_agent_states");
-    success &= parse_permission(perms.semaphores, py_permissions, "semaphores");
+    success &= parse_permission(perms.manage_semaphores, py_permissions, "manage_semaphores");
+    success &= parse_permission(perms.get_semaphores, py_permissions, "get_semaphores");
     if (!success) return NULL;
 
     async_server* server = (async_server*) PyLong_AsVoidPtr(py_server_handle);
@@ -1784,6 +1821,81 @@ static PyObject* simulator_signal_semaphore(PyObject *self, PyObject *args) {
 
         PyObject* result = (client_handle->data.server_response == status::OK ? Py_True : Py_False);
         Py_INCREF(result); return result;
+    }
+}
+
+/**
+ * Retrieves a list of all semaphores in the simulation and whether they are
+ * signaled.
+ *
+ * \param   self    Pointer to the Python object calling this method.
+ * \param   args    Arguments:
+ *                  - Handle to the native simulator object as a PyLong.
+ *                  - Handle to the native client object as a PyLong. If this
+ *                    is None, `get_semaphores` is directly invoked on the
+ *                    simulator object. Otherwise, the client sends a
+ *                    get_semaphores message to the server and waits for its
+ *                    response.
+ * \returns A list of tuples, one for each semaphore, with the first tuple
+ *          element containing the semaphore ID, and the second element either
+ *          `True` or `False` depending on whether the semaphore is signaled.
+ */
+static PyObject* simulator_get_semaphores(PyObject *self, PyObject *args) {
+    PyObject* py_sim_handle;
+    PyObject* py_client_handle;
+    if (!PyArg_ParseTuple(args, "OO", &py_sim_handle, &py_client_handle))
+        return NULL;
+    if (py_client_handle == Py_None) {
+        /* the simulation is local, so call get_semaphores directly */
+        simulator<py_simulator_data>* sim_handle =
+                (simulator<py_simulator_data>*) PyLong_AsVoidPtr(py_sim_handle);
+
+        /* release the global interpreter lock */
+        PyThreadState* python_thread = PyEval_SaveThread();
+        array<pair<uint64_t, bool>> semaphores(64);
+        status result = sim_handle->get_semaphores(semaphores);
+
+        /* re-acquire the global interpreter lock and return */
+        PyEval_RestoreThread(python_thread);
+        if (result != status::OK) {
+            fprintf(stderr, "Failed to get semaphores.\n");
+            Py_INCREF(Py_None); return Py_None;
+        }
+
+        PyObject* py_semaphores = PyList_New(semaphores.length);
+        if (py_semaphores == NULL) return NULL;
+        for (Py_ssize_t i = 0; i < (Py_ssize_t) semaphores.length; i++)
+            PyList_SetItem(py_semaphores, i, Py_BuildValue("(KO)", semaphores[i].key, (semaphores[i].value ? Py_True : Py_False)));
+        return py_semaphores;
+    } else {
+        /* this is a client, so send a get_semaphores message to the server */
+        client<py_client_data>* client_handle =
+                (client<py_client_data>*) PyLong_AsVoidPtr(py_client_handle);
+        if (!client_handle->client_running) {
+            PyErr_SetString(mpi_error, "Connection to the server was lost.");
+            return NULL;
+        }
+
+        client_handle->data.waiting_for_server = true;
+        if (!send_get_semaphores(*client_handle)) {
+            PyErr_SetString(PyExc_RuntimeError, "Unable to send get_semaphores request.");
+            return NULL;
+        }
+
+        /* wait for response from server */
+        wait_for_server(*client_handle);
+        if (client_handle->data.server_response != status::OK) {
+            Py_INCREF(Py_None);
+            return Py_None;
+        }
+
+        PyObject* py_semaphores = PyList_New(client_handle->data.response_data.semaphores.length);
+        if (py_semaphores == NULL) return NULL;
+        for (Py_ssize_t i = 0; i < (Py_ssize_t) client_handle->data.response_data.semaphores.length; i++)
+            PyList_SetItem(py_semaphores, i, Py_BuildValue("(KO)",
+                    client_handle->data.response_data.semaphores.ids[i],
+                    (client_handle->data.response_data.semaphores.signaled[i] ? Py_True : Py_False)));
+        return py_semaphores;
     }
 }
 
@@ -2508,6 +2620,7 @@ static PyMethodDef SimulatorMethods[] = {
     {"add_semaphore",  jbw::simulator_add_semaphore, METH_VARARGS, "Adds a semaphore to the simulator and returns its ID."},
     {"remove_semaphore",  jbw::simulator_remove_semaphore, METH_VARARGS, "Removes a semaphore from the simulator."},
     {"signal_semaphore",  jbw::simulator_signal_semaphore, METH_VARARGS, "Attempts to signal a semaphore."},
+    {"get_semaphores",  jbw::simulator_get_semaphores, METH_VARARGS, "Returns a list of all semaphores in the simulation environment."},
     {"move",  jbw::simulator_move, METH_VARARGS, "Attempts to move the agent in the simulation environment."},
     {"turn",  jbw::simulator_turn, METH_VARARGS, "Attempts to turn the agent in the simulation environment."},
     {"no_op",  jbw::simulator_no_op, METH_VARARGS, "Attempts to instruct the agent to do nothing (a no-op) in the simulation environment."},

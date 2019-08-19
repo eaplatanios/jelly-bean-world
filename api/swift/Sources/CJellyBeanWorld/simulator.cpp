@@ -53,6 +53,7 @@ constexpr SimulationNewClientInfo EMPTY_NEW_CLIENT_INFO = { 0 };
 constexpr SimulationClientInfo EMPTY_CLIENT_INFO = { 0 };
 constexpr SimulationMap EMPTY_SIM_MAP = { 0 };
 constexpr AgentIDList EMPTY_AGENT_ID_LIST = { 0 };
+constexpr SemaphoreList EMPTY_SEMAPHORE_LIST = { 0 };
 
 inline Direction to_Direction(direction dir) {
   switch (dir) {
@@ -157,7 +158,8 @@ inline Permissions to_Permissions(const permissions& src) {
   perms.getMap = src.get_map;
   perms.getAgentIds = src.get_agent_ids;
   perms.getAgentStates = src.get_agent_states;
-  perms.semaphores = src.semaphores;
+  perms.manageSemaphores = src.manage_semaphores;
+  perms.getSemaphores = src.get_semaphores;
   return perms;
 }
 
@@ -171,7 +173,8 @@ inline permissions to_permissions(const Permissions& src) {
   perms.get_map = src.getMap;
   perms.get_agent_ids = src.getAgentIds;
   perms.get_agent_states = src.getAgentStates;
-  perms.semaphores = src.semaphores;
+  perms.manage_semaphores = src.manageSemaphores;
+  perms.get_semaphores = src.getSemaphores;
   return perms;
 }
 
@@ -742,15 +745,22 @@ struct client_data {
     size_t length;
   };
 
+  struct semaphore_array {
+    uint64_t* ids;
+    bool* signaled;
+    size_t length;
+  };
+
   /* storing the server responses */
   status server_response;
   union response_data {
     bool active;
+    uint64_t semaphore_id;
     AgentSimulationState agent_state;
     array<array<patch_state>>* map;
     pair<uint64_t*, size_t> agent_ids;
     agent_state_array agent_states;
-    uint64_t semaphore_id;
+    semaphore_array semaphores;
   } response_data;
 
   /* for synchronization */
@@ -889,7 +899,7 @@ void on_add_agent(
  * The callback invoked when the client receives a remove_agent response from
  * the server. This function wakes up the parent thread (which should be
  * waiting in the `simulatorRemoveAgent` function) so that it can return the
- * response back to Python.
+ * response.
  *
  * \param   c         The client that received the response.
  * \param   agent_id  The ID of the removed agent.
@@ -907,9 +917,9 @@ void on_remove_agent(client<client_data>& c, uint64_t agent_id, status response)
 /**
  * The callback invoked when the client receives an add_semaphore response from
  * the server. This function stores the new semaphore ID in
- * `c.data.response_data.semaphore_id`, and wakes up the Python thread (which
- * should be waiting in the `simulator_add_semaphore` function) so that it can
- * return the response back to Python.
+ * `c.data.response_data.semaphore_id`, and wakes up the parent thread (which
+ * should be waiting in the `simulatorAddSemaphore` function) so that it can
+ * return the response.
  *
  * \param   c             The client that received the response.
  * \param   semaphore_id  The ID of the new semaphore.
@@ -926,10 +936,10 @@ void on_add_semaphore(client<client_data>& c, uint64_t semaphore_id, status resp
 
 // TODO: Update for Swift.
 /**
- * The callback invoked when the client receives a remove_semaphore response from
- * the server. This function wakes up the Python thread (which should be
- * waiting in the `simulator_remove_semaphore` function) so that it can return the
- * response back to Python.
+ * The callback invoked when the client receives a remove_semaphore response
+ * from the server. This function wakes up the parent thread (which should be
+ * waiting in the `simulatorRemoveSemaphore` function) so that it can return
+ * the response.
  *
  * \param   c             The client that received the response.
  * \param   semaphore_id  The ID of the removed semaphore.
@@ -947,9 +957,9 @@ void on_remove_semaphore(client<client_data>& c, uint64_t semaphore_id, status r
 /**
  * The callback invoked when the client receives a signal_semaphore response
  * from the server. This function copies the result into
- * `c.data.server_response` and wakes up the Python thread (which should be
- * waiting in the `simulator_signal_semaphore` function) so that it can return
- * the response back to Python.
+ * `c.data.server_response` and wakes up the parent thread (which should be
+ * waiting in the `simulatorSignalSemaphore` function) so that it can return
+ * the response.
  *
  * \param   c               The client that received the response.
  * \param   semaphore_id    The ID of the semaphore that requested to signal.
@@ -959,6 +969,33 @@ void on_remove_semaphore(client<client_data>& c, uint64_t semaphore_id, status r
 void on_signal_semaphore(client<client_data>& c, uint64_t semaphore_id, status response) {
   std::unique_lock<std::mutex> lck(c.data.lock);
   c.data.waiting_for_server = false;
+  c.data.server_response = response;
+  c.data.cv.notify_one();
+}
+
+// TODO: Update for Swift.
+/**
+ * The callback invoked when the client receives a get_semaphores response from
+ * the server. This function copies the result into
+ * `c.data.response_data.semaphores` and wakes up the parent thread (which
+ * should be waiting in the `simulatorGetSemaphores` function) so that it can
+ * return the response.
+ *
+ * \param   c               The client that received the response.
+ * \param   response        The response from the server, containing
+ *                          information about any errors.
+ * \param   semaphore_ids   The IDs of the semaphores in the simulation.
+ * \param   signaled        Whether or not each semaphore is signaled.
+ * \param   semaphore_count The number of semaphores in the simulation.
+ */
+void on_get_semaphores(client<client_data>& c, status response,
+  uint64_t* semaphore_ids, bool* signaled, size_t semaphore_count)
+{
+  std::unique_lock<std::mutex> lck(c.data.lock);
+  c.data.waiting_for_server = false;
+  c.data.response_data.semaphores.ids = semaphore_ids;
+  c.data.response_data.semaphores.signaled = signaled;
+  c.data.response_data.semaphores.length = semaphore_count;
   c.data.server_response = response;
   c.data.cv.notify_one();
 }
@@ -1577,6 +1614,64 @@ void simulatorSignalSemaphore(
       JBW_SetJBWStatusFromStatus(status, client_handle->data.server_response);
       return;
     }
+  }
+}
+
+
+SemaphoreList simulatorGetSemaphores(
+  void* simulatorHandle,
+  void* clientHandle,
+  JBW_Status* status
+) {
+  if (clientHandle == nullptr) {
+    /* the simulation is local, so call get_semaphores directly */
+    simulator<simulator_data>* sim_handle = (simulator<simulator_data>*) simulatorHandle;
+    array<pair<uint64_t, bool>> semaphores(64);
+    auto result = sim_handle->get_semaphores(semaphores);
+    if (result != status::OK) {
+      JBW_SetJBWStatusFromStatus(status, result);
+      return EMPTY_SEMAPHORE_LIST;
+    }
+    SemaphoreList list;
+    list.length = (unsigned int) semaphores.length;
+    list.semaphoreIds = (uint64_t*) malloc(max((size_t) 1, sizeof(uint64_t) * semaphores.length));
+    list.signaled = (bool*) malloc(max((size_t) 1, sizeof(bool) * semaphores.length));
+    if (list.semaphoreIds == nullptr || list.signaled == nullptr) {
+      if (list.semaphoreIds != nullptr) free(list.semaphoreIds);
+      status->code = JBW_OUT_OF_MEMORY;
+      return EMPTY_SEMAPHORE_LIST;
+    }
+    for (size_t i = 0; i < semaphores.length; i++) {
+      list.semaphoreIds[i] = semaphores[i].key;
+      list.signaled[i] = semaphores[i].value;
+    }
+    return list;
+  } else {
+    /* this is a client, so send a get_semaphores message to the server */
+    client<client_data>* client_handle = (client<client_data>*) clientHandle;
+    if (!client_handle->client_running) {
+      status->code = JBW_LOST_CONNECTION;
+      return EMPTY_SEMAPHORE_LIST;
+    }
+
+    client_handle->data.waiting_for_server = true;
+    if (!send_get_semaphores(*client_handle)) {
+      status->code = JBW_MPI_ERROR;
+      return EMPTY_SEMAPHORE_LIST;
+    }
+
+    /* wait for response from server */
+    wait_for_server(*client_handle);
+
+    if (client_handle->data.server_response != status::OK) {
+      JBW_SetJBWStatusFromStatus(status, client_handle->data.server_response);
+      return EMPTY_SEMAPHORE_LIST;
+    }
+
+    list.semaphoreIds = client_handle->data.response_data.semaphores.ids;
+    list.signaled = client_handle->data.response_data.semaphores.signaled;
+    list.length = (unsigned int) client_handle->data.response_data.semaphores.length;
+    return list;
   }
 }
 
@@ -2219,4 +2314,13 @@ void simulatorDeleteSimulationMap(SimulationMap map) {
   for (unsigned int i = 0; i < map.numPatches; i++)
     free(map.patches[i]);
   free(map.patches);
+}
+
+void simulatorDeleteAgentIDList(AgentIDList list) {
+  free(list.agentIds);
+}
+
+void simulatorDeleteSemaphoreList(SemaphoreList list) {
+  free(list.semaphoreIds);
+  free(list.signaled);
 }

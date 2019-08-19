@@ -89,7 +89,8 @@ typedef struct Permissions {
   bool getMap;
   bool getAgentIds;
   bool getAgentStates;
-  bool semaphores;
+  bool manageSemaphores;
+  bool getSemaphores;
 } Permissions;
 
 typedef struct Position {
@@ -228,6 +229,12 @@ typedef struct AgentIDList {
   unsigned int numAgents;
 } AgentIDList;
 
+typedef struct SemaphoreList {
+  uint64_t* semaphoreIds;
+  bool* signaled;
+  unsigned int numSemaphore;
+} SemaphoreList;
+
 void* simulatorCreate(
   const SimulatorConfig* config,
   OnStepCallback onStepCallback,
@@ -276,6 +283,11 @@ void simulatorSignalSemaphore(
   void* simulatorHandle,
   void* clientHandle,
   uint64_t semaphoreId,
+  JBW_Status* status);
+
+SemaphoreList simulatorGetSemaphores(
+  void* simulatorHandle,
+  void* clientHandle,
   JBW_Status* status);
 
 void simulatorMoveAgent(
@@ -386,6 +398,12 @@ void simulatorDeleteAgentSimulationState(
 
 void simulatorDeleteSimulationMap(
   SimulationMap map);
+
+void simulatorDeleteAgentIDList(
+  AgentIDList list);
+
+void simulatorDeleteSemaphoreList(
+  AgentIDList list);
 
 #ifdef __cplusplus
 } /* extern "C" */
