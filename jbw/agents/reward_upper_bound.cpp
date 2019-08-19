@@ -581,7 +581,7 @@ inline void compute_optimal_reward_rate(
 	for (float x : reward_rates)
 		variance += (x - mean) * (x - mean);
 	variance /= (reward_rates.length + 1);
-	fprintf(stderr, "Avg reward rate: %f, stddev reward rate: %f, stddev of avg: %f\n", mean, sqrt(variance), sqrt(variance / reward_rates.length));
+	fprintf(stderr, "[n: %lu] Avg reward rate: %f, stddev: %f, stddev of avg: %f\n", reward_rates.length, mean, sqrt(variance), sqrt(variance / reward_rates.length));
 	lock.unlock();
 }
 
