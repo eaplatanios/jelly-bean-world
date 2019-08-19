@@ -221,6 +221,7 @@ class visualizer
 	unsigned long long semaphore_signal_time;
 	unsigned long long semaphore_signal_period;
 	std::thread semaphore_signaler;
+	std::mutex mpi_lock;
 
 	vulkan_renderer renderer;
 	shader background_vertex_shader, background_fragment_shader;
@@ -1167,7 +1168,9 @@ private:
 		sim.data.get_map_bottom = bottom;
 		sim.data.get_map_top = top;
 		sim.data.get_map_render_background = render_background;
+		while (!mpi_lock.try_lock()) { }
 		if (!send_get_map(sim, {(int64_t) left, (int64_t) bottom}, {(int64_t) ceil(right), (int64_t) ceil(top)}, sim.data.get_map_render_background, false)) {
+			mpi_lock.unlock();
 			fprintf(stderr, "visualizer.send_mpi_requests ERROR: Unable to send `get_map` message to server.\n");
 			sim.data.waiting_for_get_map = false;
 			return false;
@@ -1177,11 +1180,14 @@ private:
 			sim.data.waiting_for_get_agent_states = true;
 			sim.data.render_visual_field = render_agent_visual_field;
 			if (!send_get_agent_states(sim, &sim.data.track_agent_id, 1)) {
+				mpi_lock.unlock();
 				fprintf(stderr, "visualizer.send_mpi_requests ERROR: Unable to send `get_agent_states` message to server.\n");
 				sim.data.waiting_for_get_agent_states = false;
 				return false;
 			}
+			mpi_lock.unlock();
 		} else {
+			mpi_lock.unlock();
 			sim.data.waiting_for_get_agent_states = false;
 			sim.data.get_agent_states_response = status::OK;
 		}
@@ -1334,10 +1340,13 @@ private:
 	bool create_semaphore(client<visualizer_client_data>& sim)
 	{
 		sim.data.waiting_for_semaphore_op = true;
+		mpi_lock.lock();
 		if (!send_add_semaphore(sim)) {
+			mpi_lock.unlock();
 			fprintf(stderr, "visualizer.create_semaphore ERROR: Unable to send `add_semaphore` to server.\n");
 			return false;
 		}
+		mpi_lock.unlock();
 
 		/* wait for `add_semaphore` response */
 		while (sim.client_running && sim.data.waiting_for_semaphore_op) { }
@@ -1356,10 +1365,13 @@ private:
 	void delete_semaphore(client<visualizer_client_data>& sim) {
 		if (sim.client_running) return;
 		sim.data.waiting_for_semaphore_op = true;
+		mpi_lock.lock();
 		if (!send_remove_semaphore(sim, semaphore)) {
+			mpi_lock.unlock();
 			fprintf(stderr, "visualizer.delete_semaphore ERROR: Unable to send `remove_semaphore` to server.\n");
 			return;
 		}
+		mpi_lock.unlock();
 
 		/* wait for `add_semaphore` response */
 		while (sim.client_running && sim.data.waiting_for_semaphore_op) { }
@@ -1378,10 +1390,13 @@ private:
 		}
 
 		sim.data.waiting_for_semaphore_op = true;
+		while (!mpi_lock.try_lock()) { }
 		if (!send_signal_semaphore(sim, semaphore)) {
+			mpi_lock.unlock();
 			fprintf(stderr, "visualizer.signal_semaphore ERROR: Unable to send `signal_semaphore` to server.\n");
 			return;
 		}
+		mpi_lock.unlock();
 	}
 
 	bool setup_renderer() {
@@ -1760,10 +1775,7 @@ inline void on_step(
 		status response,
 		const array<uint64_t>& agent_ids,
 		const agent_state* agent_state_array)
-{
-	/*if (c.data.painter != nullptr)
-		send_signal_semaphore(c, c.data.painter->semaphore);*/
-}
+{ }
 
 void on_lost_connection(client<visualizer_client_data>& c) {
 	fprintf(stderr, "Lost connection to the server.\n");
