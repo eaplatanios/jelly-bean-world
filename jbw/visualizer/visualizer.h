@@ -1466,8 +1466,9 @@ private:
 		float corrected_value;
 		if (channel_value <= 0.0031308f) {
 			corrected_value = 12.92f * channel_value;
+		} else {
+			corrected_value = 1.055f * pow(channel_value, 1.0f / 2.4f) - 0.055f;
 		}
-		corrected_value = 1.055f * pow(channel_value, 1.0f / 2.4f) - 0.055f;
 		return max(0.0f, min(1.0f, corrected_value));
 	}
 
@@ -1567,23 +1568,23 @@ private:
 		invert_scent_color_brightness(x, y, z, r, g, b);
 
 		if (is_patch_fixed) {
-			out.r = (uint8_t) 255 * r;
-			out.g = (uint8_t) 255 * g;
-			out.b = (uint8_t) 255 * b;
+			out.r = (uint8_t) (255 * r);
+			out.g = (uint8_t) (255 * g);
+			out.b = (uint8_t) (255 * b);
 		} else {
 			constexpr float black_alpha = 0.2f;
-			out.r = (uint8_t) 255 * ((1 - black_alpha) * r);
-			out.g = (uint8_t) 255 * ((1 - black_alpha) * g);
-			out.b = (uint8_t) 255 * ((1 - black_alpha) * b);
+			out.r = (uint8_t) (255 * ((1 - black_alpha) * r));
+			out.g = (uint8_t) (255 * ((1 - black_alpha) * g));
+			out.b = (uint8_t) (255 * ((1 - black_alpha) * b));
 		}
 	}
 
 	static inline void vision_to_color(const float* cell_vision, pixel& out) {
 		float r, g, b;
 		invert_vision_color_brightness(cell_vision[0], cell_vision[1], cell_vision[2], r, g, b);
-		out.r = (uint8_t) 255 * r;
-		out.g = (uint8_t) 255 * g;
-		out.b = (uint8_t) 255 * b;
+		out.r = (uint8_t) (255 * r);
+		out.g = (uint8_t) (255 * g);
+		out.b = (uint8_t) (255 * b);
 	}
 
 	static inline void cross(float (&out)[3],
