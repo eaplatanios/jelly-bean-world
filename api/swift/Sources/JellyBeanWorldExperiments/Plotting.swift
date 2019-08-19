@@ -22,33 +22,16 @@ fileprivate let sns = Python.import("seaborn")
 fileprivate let redPalette = sns.color_palette("Reds", 4)
 fileprivate let bluePalette = sns.color_palette("Blues_d", 5)
 
-public struct ResultsPlot {
-  public let reward: Reward
-  public let agent: Agent
-  public let observations: [Observation]
-  public let networks: [Network]
-  public let rewardRatePeriod: Int
-  public let resultsDir: URL
-
-  public init(
-    reward: Reward,
-    agent: Agent,
+extension Experiment {
+  public func makePlots(
     observations: [Observation],
     networks: [Network],
-    rewardRatePeriod: Int,
-    resultsDir: URL
-  ) {
-    self.reward = reward
-    self.agent = agent
-    self.observations = observations
-    self.networks = networks
-    self.rewardRatePeriod = rewardRatePeriod
-    self.resultsDir = resultsDir
-      .appendingPathComponent(reward.description)
+    rewardRatePeriod: Int
+  ) throws {
+    let resultsDir = self.resultsDir
+      .appendingPathComponent(description)
       .appendingPathComponent(agent.description)
-  }
 
-  public func plot() throws {
     // Set some plot styling parameters.
     mpl.rcParams["pdf.fonttype"] = 42
     mpl.rcParams["ps.fonttype"] = 42
@@ -87,7 +70,7 @@ public struct ResultsPlot {
 
         // Plot a line for this observation-network combination.
         let colorPalette = network == .plain ? bluePalette : redPalette
-        lines.plotWithStandardDeviation(
+        lines.plotWithStandardError(
           on: ax,
           label: "\(network.description)-\(observation.description)",
           color: colorPalette[observationIndex])
@@ -134,8 +117,8 @@ public struct ResultsPlot {
     plt.legend()
 
     // Save the figure.
-    let observations = self.observations.map { $0.description } .joined(separator: "-")
-    let networks = self.networks.map { $0.description } .joined(separator: "-")
+    let observations = observations.map { $0.description } .joined(separator: "-")
+    let networks = networks.map { $0.description } .joined(separator: "-")
     plt.savefig(
       resultsDir.appendingPathComponent("\(observations)-\(networks).pdf").path,
       bbox_inches: "tight")
@@ -191,7 +174,7 @@ extension Line {
 
 extension Array where Element == Line {
   // TODO: This function can be made much faster.
-  fileprivate func plotWithStandardDeviation(
+  fileprivate func plotWithStandardError(
     on axes: PythonObject,
     label: String,
     color: PythonObject,

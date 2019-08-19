@@ -363,11 +363,13 @@ public final class Simulator {
   internal func map(
     bottomLeft: Position = Position(x: Int64.min, y: Int64.min),
     topRight: Position = Position(x: Int64.max, y: Int64.max),
+    includingVision: Bool = true,
     includingScent: Bool = true
    ) throws -> SimulationMap {
     var status = JBW_Status(code: JBW_OK)
     let cSimulationMap = simulatorMap(
-      handle, clientHandle, bottomLeft.toC(), topRight.toC(), includingScent, &status)
+      handle, clientHandle, bottomLeft.toC(), topRight.toC(),
+      includingVision, includingScent, &status)
     try checkStatus(status)
     defer { simulatorDeleteSimulationMap(cSimulationMap) }
     return SimulationMap(fromC: cSimulationMap, using: configuration)
@@ -685,6 +687,10 @@ public struct Item: Equatable, Hashable {
     self.visualOcclusion = visualOcclusion
     self.energyFunctions = energyFunctions
   }
+}
+
+extension Item: CustomStringConvertible {
+  public var description: String { name }
 }
 
 /// Energy functions for an item that define how instances of that item are distributed in the

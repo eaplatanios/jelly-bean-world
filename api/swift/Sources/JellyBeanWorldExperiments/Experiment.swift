@@ -20,38 +20,58 @@ import TensorFlow
 public struct Experiment {
   public let reward: Reward
   public let agent: Agent
-  public let observation: Observation
-  public let network: Network
+  public let agentFieldOfView: Int
+  public let includeWalls: Bool
+  public let enableVisualOcclusion: Bool
   public let batchSize: Int
   public let stepCount: Int
   public let stepCountPerUpdate: Int
-  public let runID: Int
-  public let resultsFile: URL
+  public let resultsDir: URL
+  public let minimumRunID: Int
   public let serverPorts: [Int]?
+
+  public var description: String {
+    "reward-\(reward.description)" +
+      "-agent-fov-\(agentFieldOfView)" +
+      "\(includeWalls ? "" : "-no-walls")" +
+      "\(enableVisualOcclusion ? "" : "-no-visual-occlusion")"
+  }
 
   public init(
     reward: Reward,
     agent: Agent,
-    observation: Observation,
-    network: Network,
+    agentFieldOfView: Int,
+    includeWalls: Bool,
+    enableVisualOcclusion: Bool,
     batchSize: Int,
     stepCount: Int,
     stepCountPerUpdate: Int,
     resultsDir: URL,
-    minimumRunID: Int,
-    serverPorts: [Int]?
+    minimumRunID: Int = 0,
+    serverPorts: [Int]? = nil
   ) throws {
     self.reward = reward
     self.agent = agent
-    self.observation = observation
-    self.network = network
+    self.agentFieldOfView = agentFieldOfView
+    self.includeWalls = includeWalls
+    self.enableVisualOcclusion = enableVisualOcclusion
     self.batchSize = batchSize
     self.stepCount = stepCount
     self.stepCountPerUpdate = stepCountPerUpdate
-    
+    self.resultsDir = resultsDir
+    self.minimumRunID = minimumRunID
+    self.serverPorts = serverPorts
+  }
+
+  public func run(
+    observation: Observation,
+    network: Network,
+    writeFrequency: Int = 100,
+    logFrequency: Int = 1000
+   ) throws {
     // Create the results file.
-    let resultsDir = resultsDir
-      .appendingPathComponent(reward.description)
+    let resultsDir = self.resultsDir
+      .appendingPathComponent(description)
       .appendingPathComponent(agent.description)
       .appendingPathComponent(observation.description)
       .appendingPathComponent(network.description)
@@ -68,32 +88,41 @@ public struct Experiment {
     }
     var runID = minimumRunID
     while runIDs.contains(runID) { runID += 1 }
-    self.runID = runID
-    self.resultsFile = resultsDir.appendingPathComponent("\(runID).tsv")
+    let resultsFile = resultsDir.appendingPathComponent("\(runID).tsv")
+    let rewardScheduleFile = resultsDir.appendingPathComponent("\(runID)_reward_schedule.tsv")
     FileManager.default.createFile(
-      atPath: self.resultsFile.path,
+      atPath: resultsFile.path,
       contents: "step\treward\n".data(using: .utf8))
-    self.serverPorts = serverPorts
-  }
+    FileManager.default.createFile(
+      atPath: rewardScheduleFile.path,
+      contents: "step\treward\n".data(using: .utf8))
 
-  public func run(writeFrequency: Int = 100, logFrequency: Int = 1000) throws {
+    // Create a Jelly Bean World environment.
+    let configuration = simulatorConfiguration(
+      randomSeed: UInt32(runID),
+      agentFieldOfView: agentFieldOfView,
+      includeWalls: includeWalls,
+      enableVisualOcclusion: enableVisualOcclusion)
     let configurations = (0..<batchSize).map {
       batchIndex -> JellyBeanWorld.Environment.Configuration in
       if let ports = serverPorts, batchIndex < ports.count {
         return JellyBeanWorld.Environment.Configuration(
-          simulatorConfiguration: simulatorConfiguration(randomSeed: UInt32(runID)),
+          simulatorConfiguration: configuration,
           rewardSchedule: reward.schedule,
           serverConfiguration: Simulator.ServerConfiguration(port: UInt32(ports[batchIndex])))
       }
       return JellyBeanWorld.Environment.Configuration(
-        simulatorConfiguration: simulatorConfiguration(randomSeed: UInt32(runID)),
+        simulatorConfiguration: configuration,
         rewardSchedule: reward.schedule)
     }
     var environment = try JellyBeanWorld.Environment(
       configurations: configurations,
       parallelizedBatchProcessing: batchSize > 1)
+
+    // Run the experiment.
     var totalReward = Float(0.0)
     var rewardWriteDeque = Deque<Float>(size: writeFrequency)
+    var currentRewardFunction = environment.currentStep.observation.rewardFunction
     try withRandomSeedForTensorFlow((Int32(runID), Int32(runID))) {
       var agent = self.agent.create(
         in: environment,
@@ -103,6 +132,9 @@ public struct Experiment {
       let resultsFileHandle = try? FileHandle(forWritingTo: resultsFile)
       defer { resultsFileHandle?.closeFile() }
       resultsFileHandle?.seekToEndOfFile()
+      let rewardScheduleFileHandle = try? FileHandle(forWritingTo: rewardScheduleFile)
+      defer { rewardScheduleFileHandle?.closeFile() }
+      rewardScheduleFileHandle?.seekToEndOfFile()
       var environmentStep = 0
       for _ in 0..<(stepCount / stepCountPerUpdate) {
         try agent.update(
@@ -119,6 +151,11 @@ public struct Experiment {
             if environmentStep % writeFrequency == 0 {
               let reward = rewardWriteDeque.sum()
               resultsFileHandle?.write("\(environmentStep)\t\(reward)\n".data(using: .utf8)!)
+            }
+            if trajectory.observation.rewardFunction != currentRewardFunction {
+              currentRewardFunction = trajectory.observation.rewardFunction
+              rewardScheduleFileHandle?.write(
+                "\(environmentStep)\t\(currentRewardFunction!.description)\n".data(using: .utf8)!)
             }
             environmentStep += 1
           }])
