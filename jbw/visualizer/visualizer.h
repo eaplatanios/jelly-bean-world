@@ -1534,9 +1534,9 @@ private:
 		const float scent_x = cell_scent[0];
 		const float scent_y = cell_scent[1];
 		const float scent_z = cell_scent[2];
-		float x = max(0.0f, min(1.0f, pow(scent_x / max_scent, 0.25f)));
-		float y = max(0.0f, min(1.0f, pow(scent_y / max_scent, 0.25f)));
-		float z = max(0.0f, min(1.0f, pow(scent_z / max_scent, 0.25f)));
+		float x = max(0.0f, min(1.0f, pow(scent_x / max_scent, 0.4f)));
+		float y = max(0.0f, min(1.0f, pow(scent_y / max_scent, 0.4f)));
+		float z = max(0.0f, min(1.0f, pow(scent_z / max_scent, 0.4f)));
 
 		const float r = gamma_correction(1 - x);
 		const float g = gamma_correction(1 - y);
