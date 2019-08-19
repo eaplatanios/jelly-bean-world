@@ -209,7 +209,7 @@ bool run_locally(
 	config.scent_dimension = 3;
 	config.color_dimension = 3;
 	config.vision_range = 5;
-	config.agent_field_of_view = 2 * M_PI;
+	config.agent_field_of_view = 4.19f;
 	config.allowed_movement_directions[0] = action_policy::ALLOWED;
 	config.allowed_movement_directions[1] = action_policy::DISALLOWED;
 	config.allowed_movement_directions[2] = action_policy::DISALLOWED;
@@ -220,7 +220,7 @@ bool run_locally(
 	config.allowed_rotations[3] = action_policy::ALLOWED;
 	config.no_op_allowed = false;
 	config.patch_size = 32;
-	config.mcmc_iterations = 4000;
+	config.mcmc_iterations = 10000;
 	config.agent_color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.agent_color[2] = 1.0f;
 	config.collision_policy = movement_conflict_policy::FIRST_COME_FIRST_SERVED;
@@ -320,13 +320,13 @@ bool run_locally(
 	config.item_types[3].intensity_fn.fn = constant_intensity_fn;
 	config.item_types[3].intensity_fn.arg_count = 1;
 	config.item_types[3].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[3].intensity_fn.args[0] = -13.0f;
+	config.item_types[3].intensity_fn.args[0] = -10.0f;
 	config.item_types[3].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 	config.item_types[4].intensity_fn.fn = constant_intensity_fn;
 	config.item_types[4].intensity_fn.arg_count = 1;
 	config.item_types[4].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[4].intensity_fn.args[0] = -10.0f;
+	config.item_types[4].intensity_fn.args[0] = 2.0f;
 	config.item_types[4].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 
@@ -351,7 +351,7 @@ bool run_locally(
 	set_interaction_args(config.item_types.data, 3, 0, zero_interaction_fn, {});
 	set_interaction_args(config.item_types.data, 3, 1, zero_interaction_fn, {});
 	set_interaction_args(config.item_types.data, 3, 2, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 3, 3, cross_interaction_fn, {10.0f, 15.0f, 30.0f, -200.0f, -30.0f, 1.0f});
+	set_interaction_args(config.item_types.data, 3, 3, cross_interaction_fn, {5.0f, 10.0f, 30.0f, -200.0f, -30.0f, 1.0f});
 	set_interaction_args(config.item_types.data, 3, 4, piecewise_box_interaction_fn, {100.0f, 200.0f, -10.0f, 0.0f});
 
 	set_interaction_args(config.item_types.data, 4, 0, zero_interaction_fn, {});
