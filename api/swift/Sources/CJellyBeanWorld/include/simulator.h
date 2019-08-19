@@ -403,7 +403,7 @@ void simulatorDeleteAgentIDList(
   AgentIDList list);
 
 void simulatorDeleteSemaphoreList(
-  AgentIDList list);
+  SemaphoreList list);
 
 #ifdef __cplusplus
 } /* extern "C" */
