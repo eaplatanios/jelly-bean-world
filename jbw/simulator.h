@@ -924,7 +924,7 @@ struct agent_state {
                 const float cell_angle = abs(cell_left_angle - cell_right_angle);
 
                 /* Check if this cell is outside the agent's field of view. */
-                if (config.agent_field_of_view < 2 * M_PI) {
+                if (config.agent_field_of_view < 2 * M_PI - 1e-3f) {
                     float overlap = angle_overlap(
                         fov_left_angle, fov_right_angle,
                         cell_left_angle, cell_right_angle);

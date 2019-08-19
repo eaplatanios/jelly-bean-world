@@ -208,7 +208,7 @@ bool run_locally(
 	config.max_steps_per_movement = 1;
 	config.scent_dimension = 3;
 	config.color_dimension = 3;
-	config.vision_range = 5;
+	config.vision_range = 10;
 	config.agent_field_of_view = 4.19f;
 	config.allowed_movement_directions[0] = action_policy::ALLOWED;
 	config.allowed_movement_directions[1] = action_policy::DISALLOWED;
@@ -219,7 +219,7 @@ bool run_locally(
 	config.allowed_rotations[2] = action_policy::ALLOWED;
 	config.allowed_rotations[3] = action_policy::ALLOWED;
 	config.no_op_allowed = false;
-	config.patch_size = 32;
+	config.patch_size = 64;
 	config.mcmc_iterations = 10000;
 	config.agent_color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.agent_color[2] = 1.0f;
@@ -236,9 +236,9 @@ bool run_locally(
 	config.item_types[0].color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.item_types[0].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
 	config.item_types[0].required_item_costs = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
-	config.item_types[0].scent[0] = 0.96f;
-	config.item_types[0].scent[1] = 0.88f;
-	config.item_types[0].scent[2] = 0.20f;
+	config.item_types[0].scent[0] = 2.0f * 0.96f;
+	config.item_types[0].scent[1] = 2.0f * 0.88f;
+	config.item_types[0].scent[2] = 2.0f * 0.20f;
 	config.item_types[0].color[0] = 0.96f;
 	config.item_types[0].color[1] = 0.88f;
 	config.item_types[0].color[2] = 0.20f;
@@ -264,9 +264,9 @@ bool run_locally(
 	config.item_types[2].color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.item_types[2].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
 	config.item_types[2].required_item_costs = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
-	config.item_types[2].scent[0] = 0.82f;
-	config.item_types[2].scent[1] = 0.27f;
-	config.item_types[2].scent[2] = 0.20f;
+	config.item_types[2].scent[0] = 2.0f * 0.82f;
+	config.item_types[2].scent[1] = 2.0f * 0.27f;
+	config.item_types[2].scent[2] = 2.0f * 0.20f;
 	config.item_types[2].color[0] = 0.82f;
 	config.item_types[2].color[1] = 0.27f;
 	config.item_types[2].color[2] = 0.20f;
@@ -302,9 +302,9 @@ bool run_locally(
 	config.item_types[5].color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.item_types[5].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
 	config.item_types[5].required_item_costs = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
-	config.item_types[5].scent[0] = 0.42f;
-	config.item_types[5].scent[1] = 0.24f;
-	config.item_types[5].scent[2] = 0.13f;
+	config.item_types[5].scent[0] = 20.0f * 0.42f;
+	config.item_types[5].scent[1] = 20.0f * 0.24f;
+	config.item_types[5].scent[2] = 20.0f * 0.13f;
 	config.item_types[5].color[0] = 0.42f;
 	config.item_types[5].color[1] = 0.24f;
 	config.item_types[5].color[2] = 0.13f;
