@@ -31,6 +31,7 @@ public struct AgentTransition {
 public enum Reward: Equatable {
   case action(value: Float)
   case collect(item: Item, value: Float)
+  case explore(value: Float)
   indirect case combined(Reward, Reward)
 
   /// Adds two reward functions. The resulting reward will be equal to the sum of the rewards
@@ -53,6 +54,14 @@ public enum Reward: Equatable {
         let currentItemCount = transition.currentState.items[item] ?? 0
         let previousItemCount = transition.previousState.items[item] ?? 0
         return Float(currentItemCount - previousItemCount) * value
+      case let .explore(value):
+        let x = Float(transition.currentState.position.x)
+        let y = Float(transition.currentState.position.y)
+        let previousX = Float(transition.previousState.position.x)
+        let previousY = Float(transition.previousState.position.y)
+        let distance = (x * x + y * y).squareRoot()
+        let previousDistance = (previousX * previousX + previousY * previousY).squareRoot()
+        return distance > previousDistance ? value : 0.0
       case let .combined(reward1, reward2):
         return reward1(for: transition) + reward2(for: transition)
     }
@@ -66,6 +75,8 @@ extension Reward: CustomStringConvertible {
       return "Action[\(String(format: "%.2f", value))]"
     case let .collect(item, value):
       return "Collect[\(item.description), \(String(format: "%.2f", value))]"
+    case let .explore(value):
+      return "Explore[\(String(format: "%.2f", value))]"
     case let .combined(reward1, reward2):
       return "\(reward1.description) ∧ \(reward2.description)"
     }

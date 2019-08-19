@@ -164,7 +164,9 @@ extension JellyBeanWorldExperiments.Reward {
   public var schedule: RewardSchedule {
     switch self {
     case .collectJellyBeans:
-      return FixedReward(JellyBeanWorld.Reward.collect(item: jellyBean, value: 1.0))
+      return FixedReward(JellyBeanWorld.Reward.combined(
+        JellyBeanWorld.Reward.collect(item: jellyBean, value: 1.0),
+        JellyBeanWorld.Reward.explore(value: 0.01)))
     }
   }
 }
