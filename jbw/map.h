@@ -239,10 +239,8 @@ struct map
 
 public:
 	map(unsigned int n, unsigned int mcmc_iterations, const ItemType* item_types, unsigned int item_type_count, uint_fast32_t seed) :
-		patches(32), n(n), mcmc_iterations(mcmc_iterations), initial_seed(seed), cache(item_types, item_type_count, n)
-	{
-		rng.seed(seed);
-	}
+		patches(32), n(n), mcmc_iterations(mcmc_iterations), rng(seed), initial_seed(seed), cache(item_types, item_type_count, n)
+	{ }
 
 	map(unsigned int n, unsigned int mcmc_iterations, const ItemType* item_types, unsigned int item_type_count) :
 		map(n, mcmc_iterations, item_types, item_type_count,
@@ -346,171 +344,171 @@ public:
 			fixed_top_right = false;
 		}
 
-	int64_t start_x[4];
-	uint_fast8_t column_counts[4];
-	if (fixed_bottom_left) {
-		if (fixed_bottom_right) {
-			if (fixed_top_left) {
-				if (fixed_top_right) {
-					column_counts[0] = 0;
-					column_counts[1] = 0;
-					column_counts[2] = 0;
-					column_counts[3] = 0;
+		int64_t start_x[4];
+		uint_fast8_t column_counts[4];
+		if (fixed_bottom_left) {
+			if (fixed_bottom_right) {
+				if (fixed_top_left) {
+					if (fixed_top_right) {
+						column_counts[0] = 0;
+						column_counts[1] = 0;
+						column_counts[2] = 0;
+						column_counts[3] = 0;
+					} else {
+						column_counts[0] = 0;
+						column_counts[1] = 3;
+						column_counts[2] = 3;
+						column_counts[3] = 3;
+						start_x[1] = min_x;
+						start_x[2] = min_x;
+						start_x[3] = min_x;
+					}
 				} else {
-					column_counts[0] = 0;
-					column_counts[1] = 3;
-					column_counts[2] = 3;
-					column_counts[3] = 3;
-					start_x[1] = min_x;
-					start_x[2] = min_x;
-					start_x[3] = min_x;
+					if (fixed_top_right) {
+						column_counts[0] = 0;
+						column_counts[1] = 3;
+						column_counts[2] = 3;
+						column_counts[3] = 3;
+						start_x[1] = min_x - 1;
+						start_x[2] = min_x - 1;
+						start_x[3] = min_x - 1;
+					} else {
+						column_counts[0] = 0;
+						column_counts[1] = 4;
+						column_counts[2] = 4;
+						column_counts[3] = 4;
+						start_x[1] = min_x - 1;
+						start_x[2] = min_x - 1;
+						start_x[3] = min_x - 1;
+					}
 				}
 			} else {
-				if (fixed_top_right) {
-					column_counts[0] = 0;
-					column_counts[1] = 3;
-					column_counts[2] = 3;
-					column_counts[3] = 3;
-					start_x[1] = min_x - 1;
-					start_x[2] = min_x - 1;
-					start_x[3] = min_x - 1;
+				if (fixed_top_left) {
+					if (fixed_top_right) {
+						column_counts[0] = 3;
+						column_counts[1] = 3;
+						column_counts[2] = 3;
+						column_counts[3] = 0;
+						start_x[0] = min_x;
+						start_x[1] = min_x;
+						start_x[2] = min_x;
+					} else {
+						column_counts[0] = 3;
+						column_counts[1] = 3;
+						column_counts[2] = 3;
+						column_counts[3] = 3;
+						start_x[0] = min_x;
+						start_x[1] = min_x;
+						start_x[2] = min_x;
+						start_x[3] = min_x;
+					}
 				} else {
-					column_counts[0] = 0;
-					column_counts[1] = 4;
-					column_counts[2] = 4;
-					column_counts[3] = 4;
-					start_x[1] = min_x - 1;
-					start_x[2] = min_x - 1;
-					start_x[3] = min_x - 1;
+					if (fixed_top_right) {
+						column_counts[0] = 3;
+						column_counts[1] = 4;
+						column_counts[2] = 4;
+						column_counts[3] = 3;
+						start_x[0] = min_x;
+						start_x[1] = min_x - 1;
+						start_x[2] = min_x - 1;
+						start_x[3] = min_x - 1;
+					} else {
+						column_counts[0] = 3;
+						column_counts[1] = 4;
+						column_counts[2] = 4;
+						column_counts[3] = 4;
+						start_x[0] = min_x;
+						start_x[1] = min_x - 1;
+						start_x[2] = min_x - 1;
+						start_x[3] = min_x - 1;
+					}
 				}
 			}
 		} else {
-			if (fixed_top_left) {
-				if (fixed_top_right) {
-					column_counts[0] = 3;
-					column_counts[1] = 3;
-					column_counts[2] = 3;
-					column_counts[3] = 0;
-					start_x[0] = min_x;
-					start_x[1] = min_x;
-					start_x[2] = min_x;
+			if (fixed_bottom_right) {
+				if (fixed_top_left) {
+					if (fixed_top_right) {
+						column_counts[0] = 3;
+						column_counts[1] = 3;
+						column_counts[2] = 3;
+						column_counts[3] = 0;
+						start_x[0] = min_x - 1;
+						start_x[1] = min_x - 1;
+						start_x[2] = min_x - 1;
+					} else {
+						column_counts[0] = 3;
+						column_counts[1] = 4;
+						column_counts[2] = 4;
+						column_counts[3] = 3;
+						start_x[0] = min_x - 1;
+						start_x[1] = min_x - 1;
+						start_x[2] = min_x - 1;
+						start_x[3] = min_x;
+					}
 				} else {
-					column_counts[0] = 3;
-					column_counts[1] = 3;
-					column_counts[2] = 3;
-					column_counts[3] = 3;
-					start_x[0] = min_x;
-					start_x[1] = min_x;
-					start_x[2] = min_x;
-					start_x[3] = min_x;
+					if (fixed_top_right) {
+						column_counts[0] = 3;
+						column_counts[1] = 3;
+						column_counts[2] = 3;
+						column_counts[3] = 3;
+						start_x[0] = min_x - 1;
+						start_x[1] = min_x - 1;
+						start_x[2] = min_x - 1;
+						start_x[3] = min_x - 1;
+					} else {
+						column_counts[0] = 3;
+						column_counts[1] = 4;
+						column_counts[2] = 4;
+						column_counts[3] = 4;
+						start_x[0] = min_x - 1;
+						start_x[1] = min_x - 1;
+						start_x[2] = min_x - 1;
+						start_x[3] = min_x - 1;
+					}
 				}
 			} else {
-				if (fixed_top_right) {
-					column_counts[0] = 3;
-					column_counts[1] = 4;
-					column_counts[2] = 4;
-					column_counts[3] = 3;
-					start_x[0] = min_x;
-					start_x[1] = min_x - 1;
-					start_x[2] = min_x - 1;
-					start_x[3] = min_x - 1;
+				if (fixed_top_left) {
+					if (fixed_top_right) {
+						column_counts[0] = 4;
+						column_counts[1] = 4;
+						column_counts[2] = 4;
+						column_counts[3] = 0;
+						start_x[0] = min_x - 1;
+						start_x[1] = min_x - 1;
+						start_x[2] = min_x - 1;
+					} else {
+						column_counts[0] = 4;
+						column_counts[1] = 4;
+						column_counts[2] = 4;
+						column_counts[3] = 3;
+						start_x[0] = min_x - 1;
+						start_x[1] = min_x - 1;
+						start_x[2] = min_x - 1;
+						start_x[3] = min_x;
+					}
 				} else {
-					column_counts[0] = 3;
-					column_counts[1] = 4;
-					column_counts[2] = 4;
-					column_counts[3] = 4;
-					start_x[0] = min_x;
-					start_x[1] = min_x - 1;
-					start_x[2] = min_x - 1;
-					start_x[3] = min_x - 1;
+					if (fixed_top_right) {
+						column_counts[0] = 4;
+						column_counts[1] = 4;
+						column_counts[2] = 4;
+						column_counts[3] = 3;
+						start_x[0] = min_x - 1;
+						start_x[1] = min_x - 1;
+						start_x[2] = min_x - 1;
+						start_x[3] = min_x - 1;
+					} else {
+						column_counts[0] = 4;
+						column_counts[1] = 4;
+						column_counts[2] = 4;
+						column_counts[3] = 4;
+						start_x[0] = min_x - 1;
+						start_x[1] = min_x - 1;
+						start_x[2] = min_x - 1;
+						start_x[3] = min_x - 1;
+					}
 				}
 			}
 		}
-	} else {
-		if (fixed_bottom_right) {
-			if (fixed_top_left) {
-				if (fixed_top_right) {
-					column_counts[0] = 3;
-					column_counts[1] = 3;
-					column_counts[2] = 3;
-					column_counts[3] = 0;
-					start_x[0] = min_x - 1;
-					start_x[1] = min_x - 1;
-					start_x[2] = min_x - 1;
-				} else {
-					column_counts[0] = 3;
-					column_counts[1] = 4;
-					column_counts[2] = 4;
-					column_counts[3] = 3;
-					start_x[0] = min_x - 1;
-					start_x[1] = min_x - 1;
-					start_x[2] = min_x - 1;
-					start_x[3] = min_x;
-				}
-			} else {
-				if (fixed_top_right) {
-					column_counts[0] = 3;
-					column_counts[1] = 3;
-					column_counts[2] = 3;
-					column_counts[3] = 3;
-					start_x[0] = min_x - 1;
-					start_x[1] = min_x - 1;
-					start_x[2] = min_x - 1;
-					start_x[3] = min_x - 1;
-				} else {
-					column_counts[0] = 3;
-					column_counts[1] = 4;
-					column_counts[2] = 4;
-					column_counts[3] = 4;
-					start_x[0] = min_x - 1;
-					start_x[1] = min_x - 1;
-					start_x[2] = min_x - 1;
-					start_x[3] = min_x - 1;
-				}
-			}
-		} else {
-			if (fixed_top_left) {
-				if (fixed_top_right) {
-					column_counts[0] = 4;
-					column_counts[1] = 4;
-					column_counts[2] = 4;
-					column_counts[3] = 0;
-					start_x[0] = min_x - 1;
-					start_x[1] = min_x - 1;
-					start_x[2] = min_x - 1;
-				} else {
-					column_counts[0] = 4;
-					column_counts[1] = 4;
-					column_counts[2] = 4;
-					column_counts[3] = 3;
-					start_x[0] = min_x - 1;
-					start_x[1] = min_x - 1;
-					start_x[2] = min_x - 1;
-					start_x[3] = min_x;
-				}
-			} else {
-				if (fixed_top_right) {
-					column_counts[0] = 4;
-					column_counts[1] = 4;
-					column_counts[2] = 4;
-					column_counts[3] = 3;
-					start_x[0] = min_x - 1;
-					start_x[1] = min_x - 1;
-					start_x[2] = min_x - 1;
-					start_x[3] = min_x - 1;
-				} else {
-					column_counts[0] = 4;
-					column_counts[1] = 4;
-					column_counts[2] = 4;
-					column_counts[3] = 4;
-					start_x[0] = min_x - 1;
-					start_x[1] = min_x - 1;
-					start_x[2] = min_x - 1;
-					start_x[3] = min_x - 1;
-				}
-			}
-		}
-	}
 
 		int64_t start_y;
 		uint_fast8_t row_count;
@@ -688,10 +686,9 @@ private:
 		/* uniformly sample an existing patch to initialize the new patch */
 		if (patches.size > 0) {
 			/* copy the items from the existing patch into the new patch */
-			unsigned int i;
-			do {
-				i = rng() % patches.size;
-			} while (patches.values[i].size == 0);
+			unsigned int i = rng() % patches.size;
+			while (patches.values[i].size == 0)
+				i = (i + 1) % patches.size;
 
 			const array_map<int64_t, patch_type>& sampled_row = patches.values[i];
 			unsigned int j = rng() % sampled_row.size;

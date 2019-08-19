@@ -12,7 +12,6 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-import matplotlib
 import jbw
 from timeit import default_timer
 from math import pi
