@@ -30,7 +30,6 @@ public let banana = Item(
       .piecewiseBox(itemId: 0,  10.0, 200.0,  0.0,  -6.0),
       .piecewiseBox(itemId: 1, 200.0,   0.0, -6.0,  -6.0),
       .piecewiseBox(itemId: 2,  10.0, 200.0, 2.0, -100.0)]))
-
 public let onion = Item(
   name: "Onion",
   scent: ShapedArray([1.0, 0.0, 0.0]),
@@ -44,7 +43,6 @@ public let onion = Item(
     interactionFns: [
       .piecewiseBox(itemId: 0, 200.0, 0.0,   -6.0,   -6.0),
       .piecewiseBox(itemId: 2, 200.0, 0.0, -100.0, -100.0)]))
-
 public let jellyBean = Item(
   name: "JellyBean",
   scent: ShapedArray([0.0, 0.0, 1.0]),
@@ -60,24 +58,30 @@ public let jellyBean = Item(
       .piecewiseBox(itemId: 1, 200.0,   0.0, -100.0, -100.0),
       .piecewiseBox(itemId: 2,  10.0, 200.0,  0.0,   -6.0)]))
 
-public let wall = Item(
-  name: "Wall",
-  scent: ShapedArray([0.0, 0.0, 0.0]),
-  color: ShapedArray([0.5, 0.5, 0.5]),
-  requiredItemCounts: [3: 1], // Make walls impossible to collect.
-  requiredItemCosts: [:],
-  blocksMovement: true,
-  visualOcclusion: 0.5,
-  energyFunctions: EnergyFunctions(
-    intensityFn: .constant(0.0),
-    interactionFns: [
-      .cross(itemId: 3, 10.0, 15.0, 20.0, -200.0, -20.0, 1.0)]))
-
 public func simulatorConfiguration(
   randomSeed: UInt32,
-  agentFieldOfView: Int
+  agentFieldOfView: Int,
+  includeWalls: Bool,
+  enableVisualOcclusion: Bool
 ) -> Simulator.Configuration {
-  Simulator.Configuration(
+  let wall = Item(
+    name: "Wall",
+    scent: ShapedArray([0.0, 0.0, 0.0]),
+    color: ShapedArray([0.5, 0.5, 0.5]),
+    requiredItemCounts: [3: 1], // Make walls impossible to collect.
+    requiredItemCosts: [:],
+    blocksMovement: true,
+    visualOcclusion: enableVisualOcclusion ? 0.5 : 0.0,
+    energyFunctions: EnergyFunctions(
+      intensityFn: .constant(0.0),
+      interactionFns: [
+        .cross(itemId: 3, 10.0, 15.0, 20.0, -200.0, -20.0, 1.0)]))
+  var items = [banana, onion, jellyBean]
+  if includeWalls {
+    items.append(wall)
+  }
+
+  return Simulator.Configuration(
     randomSeed: randomSeed,
     maxStepsPerMove: 1,
     scentDimensionality: 3,
@@ -88,7 +92,7 @@ public func simulatorConfiguration(
     noOpAllowed: false,
     patchSize: 32,
     mcmcIterations: 4000,
-    items: [banana, onion, jellyBean, wall],
+    items: items,
     agentColor: [0.0, 0.0, 0.0],
     agentFieldOfView: Float(agentFieldOfView) * .pi / 180.0,
     moveConflictPolicy: .firstComeFirstServe,

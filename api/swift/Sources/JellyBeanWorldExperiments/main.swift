@@ -149,6 +149,14 @@ let agentFieldOfViewArg: OptionArgument<Int> = parser.add(
   option: "--agent-field-of-view",
   kind: Int.self,
   usage: "Agents' field of view. Defaults to 360.")
+let noWallsArg: OptionArgument<Bool> = parser.add(
+  option: "--no-walls",
+  kind: Bool.self,
+  usage: "Indicates whether to include walls in the world. Defaults to `false`.")
+let noVisualOcclusionArg: OptionArgument<Bool> = parser.add(
+  option: "--no-visual-occlusion",
+  kind: Bool.self,
+  usage: "Indicates whether to disable visual occlusion. Defaults to `false`.")
 let batchSizeArg: OptionArgument<Int> = parser.add(
   option: "--batch-size",
   kind: Int.self,
@@ -191,6 +199,8 @@ let resultsDir: Foundation.URL = {
 guard let reward = parsedArguments.get(rewardArg) else { throw Error.invalidArgument }
 guard let agent = parsedArguments.get(agentArg) else { throw Error.invalidArgument }
 let agentFieldOfView = parsedArguments.get(agentFieldOfViewArg) ?? 360
+let includeWalls = !(parsedArguments.get(noWallsArg) ?? false)
+let enableVisualOcclusion = !(parsedArguments.get(noVisualOcclusionArg) ?? false)
 let batchSize = parsedArguments.get(batchSizeArg) ?? 32
 let stepCount = parsedArguments.get(stepCountArg) ?? 10_000_000
 let stepCountPerUpdate = parsedArguments.get(stepCountPerUpdateArg) ?? 512
@@ -202,6 +212,8 @@ let experiment = try! Experiment(
   reward: reward,
   agent: agent,
   agentFieldOfView: agentFieldOfView,
+  includeWalls: includeWalls,
+  enableVisualOcclusion: enableVisualOcclusion,
   batchSize: batchSize,
   stepCount: stepCount,
   stepCountPerUpdate: stepCountPerUpdate,

@@ -70,7 +70,7 @@ extension Experiment {
 
         // Plot a line for this observation-network combination.
         let colorPalette = network == .plain ? bluePalette : redPalette
-        lines.plotWithStandardDeviation(
+        lines.plotWithStandardError(
           on: ax,
           label: "\(network.description)-\(observation.description)",
           color: colorPalette[observationIndex])
@@ -174,7 +174,7 @@ extension Line {
 
 extension Array where Element == Line {
   // TODO: This function can be made much faster.
-  fileprivate func plotWithStandardDeviation(
+  fileprivate func plotWithStandardError(
     on axes: PythonObject,
     label: String,
     color: PythonObject,

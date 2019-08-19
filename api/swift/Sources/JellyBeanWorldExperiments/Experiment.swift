@@ -21,6 +21,8 @@ public struct Experiment {
   public let reward: Reward
   public let agent: Agent
   public let agentFieldOfView: Int
+  public let includeWalls: Bool
+  public let enableVisualOcclusion: Bool
   public let batchSize: Int
   public let stepCount: Int
   public let stepCountPerUpdate: Int
@@ -30,13 +32,17 @@ public struct Experiment {
 
   public var description: String {
     "reward-\(reward.description)" +
-      "-agent-fov-\(agentFieldOfView)"
+      "-agent-fov-\(agentFieldOfView)" +
+      "\(includeWalls ? "" : "-no-walls")" +
+      "\(enableVisualOcclusion ? "" : "-no-visual-occlusion")"
   }
 
   public init(
     reward: Reward,
     agent: Agent,
     agentFieldOfView: Int,
+    includeWalls: Bool,
+    enableVisualOcclusion: Bool,
     batchSize: Int,
     stepCount: Int,
     stepCountPerUpdate: Int,
@@ -47,6 +53,8 @@ public struct Experiment {
     self.reward = reward
     self.agent = agent
     self.agentFieldOfView = agentFieldOfView
+    self.includeWalls = includeWalls
+    self.enableVisualOcclusion = enableVisualOcclusion
     self.batchSize = batchSize
     self.stepCount = stepCount
     self.stepCountPerUpdate = stepCountPerUpdate
@@ -92,7 +100,9 @@ public struct Experiment {
     // Create a Jelly Bean World environment.
     let configuration = simulatorConfiguration(
       randomSeed: UInt32(runID),
-      agentFieldOfView: agentFieldOfView)
+      agentFieldOfView: agentFieldOfView,
+      includeWalls: includeWalls,
+      enableVisualOcclusion: enableVisualOcclusion)
     let configurations = (0..<batchSize).map {
       batchIndex -> JellyBeanWorld.Environment.Configuration in
       if let ports = serverPorts, batchIndex < ports.count {
