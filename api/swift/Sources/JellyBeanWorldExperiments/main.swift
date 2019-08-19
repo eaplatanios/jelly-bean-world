@@ -25,14 +25,15 @@ public enum Error: Swift.Error {
 }
 
 public enum Command: String {
-  case run, plot
+  case run, makePlots
 }
 
 extension Command: StringEnumArgument {
   public static var completion: ShellCompletion {
     return .values([
       (Command.run.rawValue, "Runs a Jelly Bean World experiment."),
-      (Command.plot.rawValue, "Plots the results of previously run Jelly Bean World experiments.")
+      (Command.makePlots.rawValue,
+        "Creates plots for the results of previously run Jelly Bean World experiments.")
     ])
   }
 }
@@ -127,7 +128,7 @@ let parser = ArgumentParser(
 let commandArg: PositionalArgument<Command> = parser.add(
   positional: "command",
   kind: Command.self,
-  usage: "Experiment command to invoke. Can be one of: `run` and `plot`.")
+  usage: "Experiment command to invoke. Can be one of: `run` and `makePlots`.")
 let rewardArg: OptionArgument<Reward> = parser.add(
   option: "--reward",
   kind: Reward.self,
@@ -144,10 +145,10 @@ let networkArg: OptionArgument<Network> = parser.add(
   option: "--network",
   kind: Network.self,
   usage: "Network type. Can be one of: `plain` and `contextual`.")
-let agentFieldOfViewArg: OptionArgument<Float> = parser.add(
+let agentFieldOfViewArg: OptionArgument<Int> = parser.add(
   option: "--agent-field-of-view",
-  kind: Float.self,
-  usage: "Agents' field of view. Defaults to 2π.")
+  kind: Int.self,
+  usage: "Agents' field of view. Defaults to 360.")
 let batchSizeArg: OptionArgument<Int> = parser.add(
   option: "--batch-size",
   kind: Int.self,
@@ -189,7 +190,7 @@ let resultsDir: Foundation.URL = {
 }()
 guard let reward = parsedArguments.get(rewardArg) else { throw Error.invalidArgument }
 guard let agent = parsedArguments.get(agentArg) else { throw Error.invalidArgument }
-let agentFieldOfView = parsedArguments.get(agentFieldOfViewArg) ?? 6.3
+let agentFieldOfView = parsedArguments.get(agentFieldOfViewArg) ?? 360
 let batchSize = parsedArguments.get(batchSizeArg) ?? 32
 let stepCount = parsedArguments.get(stepCountArg) ?? 10_000_000
 let stepCountPerUpdate = parsedArguments.get(stepCountPerUpdateArg) ?? 512
@@ -197,31 +198,30 @@ let rewardRatePeriod = parsedArguments.get(rewardRatePeriodArg) ?? 100_000
 let minimumRunID = parsedArguments.get(minimumRunIDArg) ?? 0
 let serverPorts = parsedArguments.get(serverPortsArg)
 
+let experiment = try! Experiment(
+  reward: reward,
+  agent: agent,
+  agentFieldOfView: agentFieldOfView,
+  batchSize: batchSize,
+  stepCount: stepCount,
+  stepCountPerUpdate: stepCountPerUpdate,
+  resultsDir: resultsDir,
+  minimumRunID: minimumRunID,
+  serverPorts: serverPorts)
+
 switch parsedArguments.get(commandArg) {
 case .run:
   guard let observation = parsedArguments.get(observationArg) else { throw Error.invalidArgument }
   guard let network = parsedArguments.get(networkArg) else { throw Error.invalidArgument }
-  let experiment = try! Experiment(
-    reward: reward,
-    agent: agent,
+  try! experiment.run(
     observation: observation,
     network: network,
-    agentFieldOfView: agentFieldOfView,
-    batchSize: batchSize,
-    stepCount: stepCount,
-    stepCountPerUpdate: stepCountPerUpdate,
-    resultsDir: resultsDir,
-    minimumRunID: minimumRunID,
-    serverPorts: serverPorts)
-  try! experiment.run(writeFrequency: 100, logFrequency: 1000)
-case .plot:
-  let resultsPlotter = ResultsPlot(
-    reward: reward,
-    agent: agent,
+    writeFrequency: 100,
+    logFrequency: 1000)
+case .makePlots:
+  try! experiment.makePlots(
     observations: [Observation](Observation.allCases),
     networks: [Network](Network.allCases),
-    rewardRatePeriod: rewardRatePeriod,
-    resultsDir: resultsDir)
-  try! resultsPlotter.plot()
+    rewardRatePeriod: rewardRatePeriod)
 case _: throw Error.invalidCommand
 }

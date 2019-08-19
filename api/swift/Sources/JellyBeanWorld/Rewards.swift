@@ -28,7 +28,7 @@ public struct AgentTransition {
 }
 
 ///  Reward function that scores agent transitions.
-public enum Reward {
+public enum Reward: Equatable {
   case collect(item: Item, value: Float)
   indirect case combined(Reward, Reward)
 
@@ -59,9 +59,9 @@ public enum Reward {
 extension Reward: CustomStringConvertible {
   public var description: String {
     switch self {
-    case .collect(item, value):
+    case let .collect(item, value):
       return "Collect[\(item.description), \(String(format: "%.2f", value))]"
-    case .combined(reward1, reward2):
+    case let .combined(reward1, reward2):
       return "\(reward1.description) ∧ \(reward2.description)"
     }
   }

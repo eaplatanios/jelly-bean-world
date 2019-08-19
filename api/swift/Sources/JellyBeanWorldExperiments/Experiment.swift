@@ -20,23 +20,23 @@ import TensorFlow
 public struct Experiment {
   public let reward: Reward
   public let agent: Agent
-  public let observation: Observation
-  public let network: Network
-  public let agentFieldOfView: Float
+  public let agentFieldOfView: Int
   public let batchSize: Int
   public let stepCount: Int
   public let stepCountPerUpdate: Int
-  public let runID: Int
-  public let resultsFile: URL
-  public let rewardScheduleFile: URL
+  public let resultsDir: URL
+  public let minimumRunID: Int
   public let serverPorts: [Int]?
+
+  public var description: String {
+    "reward-\(reward.description)" +
+      "-agent-fov-\(agentFieldOfView)"
+  }
 
   public init(
     reward: Reward,
     agent: Agent,
-    observation: Observation,
-    network: Network,
-    agentFieldOfView: Float,
+    agentFieldOfView: Int,
     batchSize: Int,
     stepCount: Int,
     stepCountPerUpdate: Int,
@@ -46,16 +46,24 @@ public struct Experiment {
   ) throws {
     self.reward = reward
     self.agent = agent
-    self.observation = observation
-    self.network = network
     self.agentFieldOfView = agentFieldOfView
     self.batchSize = batchSize
     self.stepCount = stepCount
     self.stepCountPerUpdate = stepCountPerUpdate
-    
+    self.resultsDir = resultsDir
+    self.minimumRunID = minimumRunID
+    self.serverPorts = serverPorts
+  }
+
+  public func run(
+    observation: Observation,
+    network: Network,
+    writeFrequency: Int = 100,
+    logFrequency: Int = 1000
+   ) throws {
     // Create the results file.
-    let resultsDir = resultsDir
-      .appendingPathComponent(reward.description)
+    let resultsDir = self.resultsDir
+      .appendingPathComponent(description)
       .appendingPathComponent(agent.description)
       .appendingPathComponent(observation.description)
       .appendingPathComponent(network.description)
@@ -72,19 +80,16 @@ public struct Experiment {
     }
     var runID = minimumRunID
     while runIDs.contains(runID) { runID += 1 }
-    self.runID = runID
-    self.resultsFile = resultsDir.appendingPathComponent("\(runID).tsv")
-    self.rewardScheduleFile = resultsDir.appendingPathComponent("\(runID)_reward_schedule.tsv")
+    let resultsFile = resultsDir.appendingPathComponent("\(runID).tsv")
+    let rewardScheduleFile = resultsDir.appendingPathComponent("\(runID)_reward_schedule.tsv")
     FileManager.default.createFile(
-      atPath: self.resultsFile.path,
+      atPath: resultsFile.path,
       contents: "step\treward\n".data(using: .utf8))
     FileManager.default.createFile(
-      atPath: self.rewardScheduleFile.path,
+      atPath: rewardScheduleFile.path,
       contents: "step\treward\n".data(using: .utf8))
-    self.serverPorts = serverPorts
-  }
 
-  public func run(writeFrequency: Int = 100, logFrequency: Int = 1000) throws {
+    // Create a Jelly Bean World environment.
     let configuration = simulatorConfiguration(
       randomSeed: UInt32(runID),
       agentFieldOfView: agentFieldOfView)
@@ -103,6 +108,8 @@ public struct Experiment {
     var environment = try JellyBeanWorld.Environment(
       configurations: configurations,
       parallelizedBatchProcessing: batchSize > 1)
+
+    // Run the experiment.
     var totalReward = Float(0.0)
     var rewardWriteDeque = Deque<Float>(size: writeFrequency)
     var currentRewardFunction = environment.currentStep.observation.rewardFunction
@@ -138,7 +145,7 @@ public struct Experiment {
             if trajectory.observation.rewardFunction != currentRewardFunction {
               currentRewardFunction = trajectory.observation.rewardFunction
               rewardScheduleFileHandle?.write(
-                "\(environmentStep)\t\(currentRewardFunction.description)\n".data(using: .utf8)!)
+                "\(environmentStep)\t\(currentRewardFunction!.description)\n".data(using: .utf8)!)
             }
             environmentStep += 1
           }])

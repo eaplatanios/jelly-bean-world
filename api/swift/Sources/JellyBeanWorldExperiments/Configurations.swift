@@ -75,7 +75,7 @@ public let wall = Item(
 
 public func simulatorConfiguration(
   randomSeed: UInt32,
-  agentFieldOfView: Float
+  agentFieldOfView: Int
 ) -> Simulator.Configuration {
   Simulator.Configuration(
     randomSeed: randomSeed,
@@ -90,7 +90,7 @@ public func simulatorConfiguration(
     mcmcIterations: 4000,
     items: [banana, onion, jellyBean, wall],
     agentColor: [0.0, 0.0, 0.0],
-    agentFieldOfView: agentFieldOfView,
+    agentFieldOfView: Float(agentFieldOfView) * .pi / 180.0,
     moveConflictPolicy: .firstComeFirstServe,
     scentDecay: 0.4,
     scentDiffusion: 0.14,
