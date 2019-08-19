@@ -64,9 +64,47 @@ extension Experiment {
           includingPropertiesForKeys: nil
         ) else { continue }
         let lines = resultFiles
-          .compactMap { (try? Line(fromFile: $0))?
-          .movingAverage(period: rewardRatePeriod) }
+          .filter { $0.lastPathComponent.hasSuffix("-rewards.tsv") }
+          .compactMap { file -> Line? in
+            guard let fileContent = try? String(contentsOf: file, encoding: .utf8) else {
+              return nil
+            }
+            let rows = fileContent.components(separatedBy: .newlines)
+              .dropFirst()
+              .map { $0.components(separatedBy: "\t") }
+              .filter { $0.count == 2 }
+            if rows.isEmpty { return nil }
+            let x = [Float](unsafeUninitializedCapacity: rows.count) {
+              for i in rows.indices { $0[i] = Float(rows[i][0])! }
+              $1 = rows.count
+            }
+            let y = [Float](unsafeUninitializedCapacity: rows.count) {
+              for i in rows.indices { $0[i] = Float(rows[i][1])! }
+              $1 = rows.count
+            }
+            return Line(x: x, y: y).movingAverage(period: rewardRatePeriod) }
         if lines.isEmpty { continue }
+        let rewardFunctions = resultFiles
+          .filter { $0.lastPathComponent.hasSuffix("-reward-schedule.tsv") }
+          .compactMap { file -> RewardSchedule? in
+            guard let fileContent = try? String(contentsOf: file, encoding: .utf8) else {
+              return nil
+            }
+            let rows = fileContent.components(separatedBy: .newlines)
+              .dropFirst()
+              .map { $0.components(separatedBy: "\t") }
+              .filter { $0.count == 2 }
+            if rows.isEmpty { return nil }
+            let x = [Float](unsafeUninitializedCapacity: rows.count) {
+              for i in rows.indices { $0[i] = Float(rows[i][0])! }
+              $1 = rows.count
+            }
+            let rewardFunctions = [String](unsafeUninitializedCapacity: rows.count) {
+              for i in rows.indices { $0[i] = rows[i][1] }
+              $1 = rows.count
+            }
+            return RewardSchedule(x: x, rewardFunctions: rewardFunctions)
+          }
 
         // Plot a line for this observation-network combination.
         let colorPalette = network == .plain ? bluePalette : redPalette
@@ -74,6 +112,11 @@ extension Experiment {
           on: ax,
           label: "\(network.description)-\(observation.description)",
           color: colorPalette[observationIndex])
+
+        if !rewardFunctions.isEmpty {
+          assert(rewardFunctions.allSatisfy { $0 == rewardFunctions.first! })
+          addVerticalAnnotations(on: ax, rewardSchedule: rewardFunctions.first!)
+        }
       }
     }
 
@@ -125,28 +168,14 @@ extension Experiment {
   }
 }
 
-fileprivate struct Line {
+fileprivate struct Line: Equatable {
   fileprivate let x: [Float]
   fileprivate let y: [Float]
 }
 
-extension Line {
-  fileprivate init?(fromFile file: URL) throws {
-    let rows = try String(contentsOf: file, encoding: .utf8)
-      .components(separatedBy: .newlines)
-      .dropFirst()
-      .map { $0.components(separatedBy: "\t") }
-      .filter { $0.count == 2 }
-    if rows.isEmpty { return nil }
-    self.x = [Float](unsafeUninitializedCapacity: rows.count) { buffer, initializedCount in
-      for i in rows.indices { buffer[i] = Float(rows[i][0])! }
-      initializedCount = rows.count
-    }
-    self.y = [Float](unsafeUninitializedCapacity: rows.count) { buffer, initializedCount in
-      for i in rows.indices { buffer[i] = Float(rows[i][1])! }
-      initializedCount = rows.count
-    }
-  }
+fileprivate struct RewardSchedule: Equatable {
+  fileprivate let x: [Float]
+  fileprivate let rewardFunctions: [String]
 }
 
 extension Line {
@@ -228,5 +257,9 @@ extension Array where Element == Line {
       alpha: 0.1,
       linewidth: 0)
     axes.axhline(y: yMean.max(), linestyle: "dashed", alpha: 0.7, color: color)
+  }
+
+  fileprivate func addVerticalAnnotations(on axes: PythonObject, rewardSchedule: RewardSchedule) {
+    // TODO: !!!!
   }
 }

@@ -21,7 +21,6 @@ public struct Experiment {
   public let reward: Reward
   public let agent: Agent
   public let agentFieldOfView: Int
-  public let includeWalls: Bool
   public let enableVisualOcclusion: Bool
   public let batchSize: Int
   public let stepCount: Int
@@ -33,7 +32,6 @@ public struct Experiment {
   public var description: String {
     "reward-\(reward.description)" +
       "-agent-fov-\(agentFieldOfView)" +
-      "\(includeWalls ? "" : "-no-walls")" +
       "\(enableVisualOcclusion ? "" : "-no-visual-occlusion")"
   }
 
@@ -41,7 +39,6 @@ public struct Experiment {
     reward: Reward,
     agent: Agent,
     agentFieldOfView: Int,
-    includeWalls: Bool,
     enableVisualOcclusion: Bool,
     batchSize: Int,
     stepCount: Int,
@@ -53,7 +50,6 @@ public struct Experiment {
     self.reward = reward
     self.agent = agent
     self.agentFieldOfView = agentFieldOfView
-    self.includeWalls = includeWalls
     self.enableVisualOcclusion = enableVisualOcclusion
     self.batchSize = batchSize
     self.stepCount = stepCount
@@ -84,12 +80,12 @@ public struct Experiment {
       at: resultsDir,
       includingPropertiesForKeys: nil
     ).filter { $0.pathExtension == "tsv" } .compactMap {
-      Int($0.deletingPathExtension().lastPathComponent)
+      $0.lastPathComponent.split(separator: "-").first.flatMap { Int($0) }
     }
     var runID = minimumRunID
     while runIDs.contains(runID) { runID += 1 }
-    let resultsFile = resultsDir.appendingPathComponent("\(runID).tsv")
-    let rewardScheduleFile = resultsDir.appendingPathComponent("\(runID)_reward_schedule.tsv")
+    let resultsFile = resultsDir.appendingPathComponent("\(runID)-rewards.tsv")
+    let rewardScheduleFile = resultsDir.appendingPathComponent("\(runID)-reward-schedule.tsv")
     FileManager.default.createFile(
       atPath: resultsFile.path,
       contents: "step\treward\n".data(using: .utf8))
@@ -101,7 +97,6 @@ public struct Experiment {
     let configuration = simulatorConfiguration(
       randomSeed: UInt32(runID),
       agentFieldOfView: agentFieldOfView,
-      includeWalls: includeWalls,
       enableVisualOcclusion: enableVisualOcclusion)
     let configurations = (0..<batchSize).map {
       batchIndex -> JellyBeanWorld.Environment.Configuration in
@@ -152,8 +147,9 @@ public struct Experiment {
               let reward = rewardWriteDeque.sum()
               resultsFileHandle?.write("\(environmentStep)\t\(reward)\n".data(using: .utf8)!)
             }
-            if trajectory.observation.rewardFunction != currentRewardFunction {
-              currentRewardFunction = trajectory.observation.rewardFunction
+            let rewardFunction = trajectory.observation.rewardFunction
+            if environmentStep == 0 || rewardFunction != currentRewardFunction {
+              currentRewardFunction = rewardFunction
               rewardScheduleFileHandle?.write(
                 "\(environmentStep)\t\(currentRewardFunction!.description)\n".data(using: .utf8)!)
             }

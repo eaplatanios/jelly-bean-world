@@ -29,6 +29,7 @@ public struct AgentTransition {
 
 ///  Reward function that scores agent transitions.
 public enum Reward: Equatable {
+  case action(value: Float)
   case collect(item: Item, value: Float)
   indirect case combined(Reward, Reward)
 
@@ -46,6 +47,8 @@ public enum Reward: Equatable {
   @inlinable
   public func callAsFunction(for transition: AgentTransition) -> Float {
     switch self {
+      case let .action(value):
+        return value
       case let .collect(item, value):
         let currentItemCount = transition.currentState.items[item] ?? 0
         let previousItemCount = transition.previousState.items[item] ?? 0
@@ -59,6 +62,8 @@ public enum Reward: Equatable {
 extension Reward: CustomStringConvertible {
   public var description: String {
     switch self {
+    case let .action(value):
+      return "Action[\(String(format: "%.2f", value))]"
     case let .collect(item, value):
       return "Collect[\(item.description), \(String(format: "%.2f", value))]"
     case let .combined(reward1, reward2):

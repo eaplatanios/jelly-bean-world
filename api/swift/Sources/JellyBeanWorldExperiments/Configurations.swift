@@ -18,81 +18,99 @@ import TensorFlow
 
 public let banana = Item(
   name: "Banana",
-  scent: ShapedArray([0.0, 1.0, 0.0]),
-  color: ShapedArray([0.0, 1.0, 0.0]),
+  scent: ShapedArray([1.92, 1.76, 0.40]),
+  color: ShapedArray([0.96, 0.88, 0.20]),
   requiredItemCounts: [:],
   requiredItemCosts: [:],
   blocksMovement: false,
   visualOcclusion: 0.0,
   energyFunctions: EnergyFunctions(
-    intensityFn: .constant(-5.3),
+    intensityFn: .constant(1.5),
     interactionFns: [
-      .piecewiseBox(itemId: 0,  10.0, 200.0,  0.0,  -6.0),
-      .piecewiseBox(itemId: 1, 200.0,   0.0, -6.0,  -6.0),
-      .piecewiseBox(itemId: 2,  10.0, 200.0, 2.0, -100.0)]))
+      .piecewiseBox(itemId: 0, 10.0,  100.0,  0.0,    -6.0),
+      .piecewiseBox(itemId: 2, 10.0,  100.0,  2.0,  -100.0),
+      .piecewiseBox(itemId: 4, 50.0, 100.0, -100.0, -100.0)]))
 public let onion = Item(
   name: "Onion",
-  scent: ShapedArray([1.0, 0.0, 0.0]),
-  color: ShapedArray([1.0, 0.0, 0.0]),
+  scent: ShapedArray([0.68, 0.01, 0.99]),
+  color: ShapedArray([0.68, 0.01, 0.99]),
   requiredItemCounts: [:],
   requiredItemCosts: [:],
   blocksMovement: false,
   visualOcclusion: 0.0,
   energyFunctions: EnergyFunctions(
-    intensityFn: .constant(-5.0),
-    interactionFns: [
-      .piecewiseBox(itemId: 0, 200.0, 0.0,   -6.0,   -6.0),
-      .piecewiseBox(itemId: 2, 200.0, 0.0, -100.0, -100.0)]))
+    intensityFn: .constant(-3.0),
+    interactionFns: []))
 public let jellyBean = Item(
   name: "JellyBean",
-  scent: ShapedArray([0.0, 0.0, 1.0]),
-  color: ShapedArray([0.0, 0.0, 1.0]),
+  scent: ShapedArray([1.64, 0.54, 0.40]),
+  color: ShapedArray([0.82, 0.27, 0.20]),
   requiredItemCounts: [:],
   requiredItemCosts: [:],
   blocksMovement: false,
   visualOcclusion: 0.0,
   energyFunctions: EnergyFunctions(
-    intensityFn: .constant(-5.3),
+    intensityFn: .constant(1.5),
     interactionFns: [
-      .piecewiseBox(itemId: 0,  10.0, 200.0,    2.0, -100.0),
-      .piecewiseBox(itemId: 1, 200.0,   0.0, -100.0, -100.0),
-      .piecewiseBox(itemId: 2,  10.0, 200.0,  0.0,   -6.0)]))
+      .piecewiseBox(itemId: 0, 10.0,  100.0,  2.0,  -100.0),
+      .piecewiseBox(itemId: 2, 10.0,  100.0,  0.0,    -6.0),
+      .piecewiseBox(itemId: 4, 50.0, 100.0, -100.0, -100.0)]))
+public let truffle = Item(
+  name: "Truffle",
+  scent: ShapedArray([8.40, 4.80, 2.60]),
+  color: ShapedArray([0.42, 0.24, 0.13]),
+  requiredItemCounts: [:],
+  requiredItemCosts: [:],
+  blocksMovement: false,
+  visualOcclusion: 0.0,
+  energyFunctions: EnergyFunctions(
+    intensityFn: .constant(0.0),
+    interactionFns: [
+      .piecewiseBox(itemId: 4,  4.0,  200.0,  2.0,  0.0),
+      .piecewiseBox(itemId: 5, 30.0, 1000.0, -0.3, -1.0)]))
 
 public func simulatorConfiguration(
   randomSeed: UInt32,
   agentFieldOfView: Int,
-  includeWalls: Bool,
   enableVisualOcclusion: Bool
 ) -> Simulator.Configuration {
   let wall = Item(
     name: "Wall",
-    scent: ShapedArray([0.0, 0.0, 0.0]),
-    color: ShapedArray([0.5, 0.5, 0.5]),
+    scent: ShapedArray([0.00, 0.00, 0.00]),
+    color: ShapedArray([0.20, 0.47, 0.67]),
     requiredItemCounts: [3: 1], // Make walls impossible to collect.
     requiredItemCosts: [:],
     blocksMovement: true,
-    visualOcclusion: enableVisualOcclusion ? 0.5 : 0.0,
+    visualOcclusion: enableVisualOcclusion ? 1.0 : 0.0,
     energyFunctions: EnergyFunctions(
-      intensityFn: .constant(0.0),
+      intensityFn: .constant(-12.0),
       interactionFns: [
-        .cross(itemId: 3, 10.0, 15.0, 20.0, -200.0, -20.0, 1.0)]))
-  var items = [banana, onion, jellyBean]
-  if includeWalls {
-    items.append(wall)
-  }
+        .cross(itemId: 3, 20.0, 40.0, 8.0, -1000.0, -1000.0, -1.0)]))
+  let tree = Item(
+    name: "Tree",
+    scent: ShapedArray([0.00, 0.47, 0.06]),
+    color: ShapedArray([0.00, 0.47, 0.06]),
+    requiredItemCounts: [4: 1], // Make trees impossible to collect.
+    requiredItemCosts: [:],
+    blocksMovement: false,
+    visualOcclusion: enableVisualOcclusion ? 0.1 : 0.0,
+    energyFunctions: EnergyFunctions(
+      intensityFn: .constant(2.0),
+      interactionFns: [
+        .piecewiseBox(itemId: 4, 100.0, 500.0, 0.0, -0.1)]))
 
   return Simulator.Configuration(
     randomSeed: randomSeed,
     maxStepsPerMove: 1,
     scentDimensionality: 3,
     colorDimensionality: 3,
-    visionRange: 5,
+    visionRange: 8,
     movePolicies: [.up: .allowed],
     turnPolicies: [.left: .allowed, .right: .allowed],
     noOpAllowed: false,
-    patchSize: 32,
+    patchSize: 64,
     mcmcIterations: 4000,
-    items: items,
+    items: [banana, onion, jellyBean, wall, tree, truffle],
     agentColor: [0.0, 0.0, 0.0],
     agentFieldOfView: Float(agentFieldOfView) * .pi / 180.0,
     moveConflictPolicy: .firstComeFirstServe,
