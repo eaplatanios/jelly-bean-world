@@ -632,7 +632,7 @@ int main(int argc, const char** argv)
 	item_types[3].color[1] = 0.22f;
 	item_types[3].color[2] = 0.16f;
 	item_types[3].required_item_counts[3] = 1;
-	item_types[3].blocks_movement = false;
+	item_types[3].blocks_movement = true;
 	item_types[3].visual_occlusion = 1.0f;
 
 	item_types[0].intensity_fn.fn = constant_intensity_fn;
@@ -702,7 +702,7 @@ int main(int argc, const char** argv)
 	std::minstd_rand rng(seed);
 	std::mutex lock;
 	array<float> reward_rates(512);
-	constexpr unsigned int thread_count = 8;
+	constexpr unsigned int thread_count = 32;
 	std::thread workers[thread_count];
 	for (unsigned int i = 0; i < thread_count; i++)
 		workers[i] = std::thread([&,i]() {
