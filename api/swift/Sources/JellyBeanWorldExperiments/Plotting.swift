@@ -42,7 +42,7 @@ extension Experiment {
 
     // Create a new figure.
     let figure = plt.figure(figsize: [10.0, 6.0])
-    let ax = plt.gca()
+    let axes = plt.gca()
 
     // Plot the curves for all observation-network combinations.
     for observation in observations {
@@ -56,7 +56,7 @@ extension Experiment {
       }()
       for network in networks {
         // Read the results from all saved result files.
-        let resultsDir = self.resultsDir
+        let resultsDir = resultsDir
           .appendingPathComponent(observation.description)
           .appendingPathComponent(network.description)
         guard let resultFiles = try? FileManager.default.contentsOfDirectory(
@@ -109,13 +109,13 @@ extension Experiment {
         // Plot a line for this observation-network combination.
         let colorPalette = network == .plain ? bluePalette : redPalette
         lines.plotWithStandardError(
-          on: ax,
+          on: axes,
           label: "\(network.description)-\(observation.description)",
           color: colorPalette[observationIndex])
 
         if !rewardSchedules.isEmpty {
           assert(rewardSchedules.allSatisfy { $0 == rewardSchedules.first! })
-          rewardSchedules.first!.addVerticalAnnotations(on: ax)
+          rewardSchedules.first!.addVerticalAnnotations(on: axes)
         }
       }
     }
@@ -123,26 +123,26 @@ extension Experiment {
     // Use exponential notation for the x-axis labels.
     let xAxisFormatter = mpl.ticker.ScalarFormatter()
     xAxisFormatter.set_powerlimits([-3, 3])
-    ax.xaxis.set_major_formatter(xAxisFormatter)
+    axes.xaxis.set_major_formatter(xAxisFormatter)
 
     // Add axis labels.
-    ax.set_xlabel(
+    axes.set_xlabel(
       "Time Step",
       color: "grey",
       fontname: "Lato",
       fontsize: 18,
       fontweight: "light")
-    ax.set_ylabel(
+    axes.set_ylabel(
       "Reward Rate (pts/s)",
       color: "grey",
       fontname: "Lato",
       fontsize: 18,
       fontweight: "light")
-    ax.yaxis.set_tick_params(labelbottom: true)
+    axes.yaxis.set_tick_params(labelbottom: true)
 
     // Change the tick label sizes.
-    plt.setp(ax.get_xticklabels(), fontname: "Lato", fontsize: 18, fontweight: "regular")
-    plt.setp(ax.get_yticklabels(), fontname: "Lato", fontsize: 18, fontweight: "regular")
+    plt.setp(axes.get_xticklabels(), fontname: "Lato", fontsize: 18, fontweight: "regular")
+    plt.setp(axes.get_yticklabels(), fontname: "Lato", fontsize: 18, fontweight: "regular")
 
     // Set the figure title.
     figure.suptitle(
@@ -262,6 +262,16 @@ extension Array where Element == Line {
 
 extension RewardSchedule {
   fileprivate func addVerticalAnnotations(on axes: PythonObject) {
-    // TODO: !!!!
+    zip(x, rewardFunctions).forEach { (x, rewardFunction) in
+      axes.axvline(x: x, linestyle: "solid", linewidth: 1.0, color: "#222222", alpha: 0.5)
+      axes.text(
+        x: x + 0.01 * Float(axes.get_xlim()[1])!, y: 0.00,
+        s: rewardFunction
+          .split(separator: "∧")
+          .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+          .joined(separator: "\n"),
+        color: "#222222", alpha: 0.5,
+        fontsize: 18, fontfamily: "DejaVu Sans", fontweight: 400)
+    }
   }
 }
