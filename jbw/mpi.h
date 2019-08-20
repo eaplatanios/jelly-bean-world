@@ -20,6 +20,8 @@
 #include "network.h"
 #include "simulator.h"
 
+#include <signal.h>
+
 namespace jbw {
 
 using namespace core;
@@ -1718,6 +1720,8 @@ bool init_server(async_server& new_server, simulator<SimulatorData>& sim,
 		uint16_t server_port, unsigned int connection_queue_capacity,
 		unsigned int worker_count, const permissions& default_client_permissions)
 {
+	signal(SIGPIPE, SIG_IGN);
+
 	std::condition_variable cv; std::mutex lock;
 	auto dispatch = [&]() {
 		run_server(new_server.server_socket, server_port, connection_queue_capacity,
@@ -1763,6 +1767,8 @@ inline bool init_server(sync_server& new_server, simulator<SimulatorData>& sim,
 		uint16_t server_port, unsigned int connection_queue_capacity,
 		unsigned int worker_count, uint64_t default_client_permissions)
 {
+	signal(SIGPIPE, SIG_IGN);
+
 	socket_type server_socket;
 	server_status dummy = server_status::STARTING;
 	new_server.state.default_client_permissions = default_client_permissions;
@@ -2527,6 +2533,8 @@ uint64_t connect_client(client<ClientData>& new_client,
 		const char* server_address, const char* server_port,
 		uint64_t& client_id)
 {
+	signal(SIGPIPE, SIG_IGN);
+
 	uint64_t simulator_time;
 	auto process_connection = [&](socket_type& connection)
 	{
@@ -2601,6 +2609,8 @@ uint64_t reconnect_client(
 		uint64_t*& agent_ids, agent_state*& agent_states, unsigned int& agent_count,
 		uint64_t*& semaphore_ids, unsigned int& semaphore_count)
 {
+	signal(SIGPIPE, SIG_IGN);
+
 	uint64_t simulator_time;
 	auto process_connection = [&](socket_type& connection)
 	{

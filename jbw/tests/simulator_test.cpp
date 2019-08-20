@@ -22,7 +22,6 @@
 #include <cmath>
 #include <thread>
 #include <condition_variable>
-#include <signal.h>
 
 using namespace core;
 using namespace jbw;
@@ -728,9 +727,6 @@ bool test_mpi(const simulator_config& config)
 
 int main(int argc, const char** argv)
 {
-#if !defined(_WIN32)
-	signal(SIGPIPE, SIG_IGN);
-#endif
 	simulator_config config;
 	config.max_steps_per_movement = 1;
 	config.scent_dimension = 3;
