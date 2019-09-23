@@ -39,11 +39,12 @@ extension Command: StringEnumArgument {
 }
 
 public enum Reward: String, CaseIterable, CustomStringConvertible {
-  case collectJellyBeans
+  case collectJellyBeans, collectJellyBeansAvoidOnions
 
   public var description: String {
     switch self {
     case .collectJellyBeans: return "CollectJellyBeans"
+    case .collectJellyBeansAvoidOnions: return "CollectJellyBeansAvoidOnions"
     }
   }
 }
@@ -52,6 +53,7 @@ extension Reward: StringEnumArgument {
   public static var completion: ShellCompletion {
     return .values([
       (Reward.collectJellyBeans.rawValue, "Each collected jelly bean is worth 1 point.")
+      (Reward.collectJellyBeansAvoidOnions.rawValue, "Each collected jelly bean is worth 1 point and each collected onion -1 point.")
     ])
   }
 }
@@ -182,6 +184,11 @@ let serverPortsArg: OptionArgument<[Int]> = parser.add(
   kind: [Int].self,
   usage: "Ports to use for launching simulation servers.")
 
+try! makePlots(
+  resultsDir: URL(fileURLWithPath: "/Users/eaplatanios/Development/GitHub/jelly-bean-world/temp/results"),
+  rewardRatePeriod: 100000)
+exit(0)
+
 // The first argument is always the executable, and so we drop it.
 let arguments = Array(ProcessInfo.processInfo.arguments.dropFirst())
 let parsedArguments = try parser.parse(arguments)
@@ -195,7 +202,7 @@ let resultsDir: Foundation.URL = {
 guard let reward = parsedArguments.get(rewardArg) else { throw Error.invalidArgument }
 guard let agent = parsedArguments.get(agentArg) else { throw Error.invalidArgument }
 let agentFieldOfView = parsedArguments.get(agentFieldOfViewArg) ?? 360
-let enableVisualOcclusion = !(parsedArguments.get(noVisualOcclusionArg) ?? false)
+let enableVisualOcclusion = !(parsedArguments.get(noVisualOcclusionArg) ?? true)
 let batchSize = parsedArguments.get(batchSizeArg) ?? 32
 let stepCount = parsedArguments.get(stepCountArg) ?? 10_000_000
 let stepCountPerUpdate = parsedArguments.get(stepCountPerUpdateArg) ?? 512

@@ -165,6 +165,10 @@ extension JellyBeanWorldExperiments.Reward {
     switch self {
     case .collectJellyBeans:
       return FixedReward(JellyBeanWorld.Reward.collect(item: jellyBean, value: 1.0))
+    case .collectJellyBeansAvoidOnions:
+      return FixedReward(JellyBeanWorld.Reward.combined(
+        JellyBeanWorld.Reward.collect(item: jellyBean, value: 1.0),
+        JellyBeanWorld.Reward.avoid(item: onion, value: 1.0)))
       // return FixedReward(JellyBeanWorld.Reward.combined(
       //   JellyBeanWorld.Reward.combined(
       //     JellyBeanWorld.Reward.collect(item: jellyBean, value: 1.0),

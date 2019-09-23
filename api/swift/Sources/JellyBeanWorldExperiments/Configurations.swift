@@ -109,7 +109,7 @@ public func simulatorConfiguration(
     turnPolicies: [.left: .allowed, .right: .allowed],
     noOpAllowed: false,
     patchSize: 64,
-    mcmcIterations: 4000,
+    mcmcIterations: 10000,
     items: [banana, onion, jellyBean, wall, tree, truffle],
     agentColor: [0.0, 0.0, 0.0],
     agentFieldOfView: Float(agentFieldOfView) * .pi / 180.0,
