@@ -39,11 +39,12 @@ extension Command: StringEnumArgument {
 }
 
 public enum Reward: String, CaseIterable, CustomStringConvertible {
-  case collectJellyBeans, collectJellyBeansAvoidOnions
+  case collectJellyBeans, collectOnions, collectJellyBeansAvoidOnions
 
   public var description: String {
     switch self {
     case .collectJellyBeans: return "CollectJellyBeans"
+    case .collectOnions: return "CollectOnions"
     case .collectJellyBeansAvoidOnions: return "CollectJellyBeansAvoidOnions"
     }
   }
@@ -52,7 +53,8 @@ public enum Reward: String, CaseIterable, CustomStringConvertible {
 extension Reward: StringEnumArgument {
   public static var completion: ShellCompletion {
     return .values([
-      (Reward.collectJellyBeans.rawValue, "Each collected jelly bean is worth 1 point.")
+      (Reward.collectJellyBeans.rawValue, "Each collected jelly bean is worth 1 point."),
+      (Reward.collectOnions.rawValue, "Each collected onion is worth 1 point."),
       (Reward.collectJellyBeansAvoidOnions.rawValue, "Each collected jelly bean is worth 1 point and each collected onion -1 point.")
     ])
   }
@@ -183,11 +185,6 @@ let serverPortsArg: OptionArgument<[Int]> = parser.add(
   option: "--server-ports",
   kind: [Int].self,
   usage: "Ports to use for launching simulation servers.")
-
-try! makePlots(
-  resultsDir: URL(fileURLWithPath: "/Users/eaplatanios/Development/GitHub/jelly-bean-world/temp/results"),
-  rewardRatePeriod: 100000)
-exit(0)
 
 // The first argument is always the executable, and so we drop it.
 let arguments = Array(ProcessInfo.processInfo.arguments.dropFirst())
