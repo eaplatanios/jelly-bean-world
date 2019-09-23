@@ -171,11 +171,14 @@ extension JellyBeanWorldExperiments.Reward {
       return FixedReward(JellyBeanWorld.Reward.combined(
         JellyBeanWorld.Reward.collect(item: jellyBean, value: 1.0),
         JellyBeanWorld.Reward.avoid(item: onion, value: 1.0)))
-      // return FixedReward(JellyBeanWorld.Reward.combined(
-      //   JellyBeanWorld.Reward.combined(
-      //     JellyBeanWorld.Reward.collect(item: jellyBean, value: 1.0),
-      //     JellyBeanWorld.Reward.avoid(item: onion, value: 1.0)),
-      //   JellyBeanWorld.Reward.explore(value: 0.01)))
+    case .cyclicalJellyBeansOnions:
+      return CyclicalSchedule(
+        [(JellyBeanWorld.Reward.combined(
+            JellyBeanWorld.Reward.collect(item: jellyBean, value: 1.0),
+            JellyBeanWorld.Reward.avoid(item: onion, value: 1.0)), 100000),
+          (JellyBeanWorld.Reward.combined(
+            JellyBeanWorld.Reward.avoid(item: jellyBean, value: 1.0),
+            JellyBeanWorld.Reward.collect(item: onion, value: 1.0)), 100000)])
     }
   }
 }

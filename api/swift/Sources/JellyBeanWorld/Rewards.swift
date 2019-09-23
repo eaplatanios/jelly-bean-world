@@ -109,3 +109,24 @@ public struct FixedReward: RewardSchedule {
     reward
   }
 }
+
+public struct CyclicalSchedule: RewardSchedule {
+  public let rewards: [(Reward, UInt64)]
+  public let cycleDuration: UInt64
+
+  public init(_ rewards: [(Reward, UInt64)]) {
+    precondition(!rewards.isEmpty)
+    self.rewards = rewards
+    self.cycleDuration = rewards.map { $0.1 }.reduce(0, +)
+  }
+
+  public func reward(forStep step: UInt64) -> Reward {
+    let step = step % cycleDuration
+    var cumulativeDuration: UInt64 = 0
+    for reward in rewards {
+      if step < cumulativeDuration + reward.1 { return reward.0 }
+      cumulativeDuration += reward.1
+    }
+    return rewards.last!.0
+  }
+}

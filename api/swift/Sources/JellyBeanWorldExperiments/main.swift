@@ -39,13 +39,14 @@ extension Command: StringEnumArgument {
 }
 
 public enum Reward: String, CaseIterable, CustomStringConvertible {
-  case collectJellyBeans, collectOnions, collectJellyBeansAvoidOnions
+  case collectJellyBeans, collectOnions, collectJellyBeansAvoidOnions, cyclicalJellyBeansOnions
 
   public var description: String {
     switch self {
     case .collectJellyBeans: return "CollectJellyBeans"
     case .collectOnions: return "CollectOnions"
     case .collectJellyBeansAvoidOnions: return "CollectJellyBeansAvoidOnions"
+    case .cyclicalJellyBeansOnions: return "CyclicalJellyBeansOnions"
     }
   }
 }
