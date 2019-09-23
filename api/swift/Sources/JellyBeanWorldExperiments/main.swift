@@ -39,7 +39,12 @@ extension Command: StringEnumArgument {
 }
 
 public enum Reward: String, CaseIterable, CustomStringConvertible {
-  case collectJellyBeans, collectOnions, collectJellyBeansAvoidOnions, collectJellyBeansAvoidOnionsLong, cyclicalJellyBeansOnions
+  case collectJellyBeans,
+    collectOnions,
+    collectJellyBeansAvoidOnions,
+    collectJellyBeansAvoidOnionsLong,
+    collectJellyBeansAndThenAvoidOnions,
+    cyclicalJellyBeansOnions
 
   public var description: String {
     switch self {
@@ -47,6 +52,7 @@ public enum Reward: String, CaseIterable, CustomStringConvertible {
     case .collectOnions: return "CollectOnions"
     case .collectJellyBeansAvoidOnions: return "CollectJellyBeansAvoidOnions"
     case .collectJellyBeansAvoidOnionsLong: return "CollectJellyBeansAvoidOnionsLong"
+    case .collectJellyBeansAndThenAvoidOnions: return "CollectJellyBeansAndThenAvoidOnions"
     case .cyclicalJellyBeansOnions: return "CyclicalJellyBeansOnions"
     }
   }
@@ -59,6 +65,7 @@ extension Reward: StringEnumArgument {
       (Reward.collectOnions.rawValue, "Each collected onion is worth 1 point."),
       (Reward.collectJellyBeansAvoidOnions.rawValue, "Each collected jelly bean is worth 1 point and each collected onion -1 point."),
       (Reward.collectJellyBeansAvoidOnionsLong.rawValue, "Same as 'CollectJellyBeansAvoidOnions'. Only used for organizing experimental results for the paper."),
+      (Reward.collectJellyBeansAndThenAvoidOnions.rawValue, "Same as 'CollectJellyBeansAvoidOnions', but with a curriculum schedule."),
       (Reward.cyclicalJellyBeansOnions.rawValue, "Cycle every 100,000 steps between collecting jelly beans and avoiding onions and the opposite.")
     ])
   }
@@ -203,7 +210,7 @@ let resultsDir: Foundation.URL = {
 guard let reward = parsedArguments.get(rewardArg) else { throw Error.invalidArgument }
 guard let agent = parsedArguments.get(agentArg) else { throw Error.invalidArgument }
 let agentFieldOfView = parsedArguments.get(agentFieldOfViewArg) ?? 360
-let enableVisualOcclusion = !(parsedArguments.get(noVisualOcclusionArg) ?? true)
+let enableVisualOcclusion = !(parsedArguments.get(noVisualOcclusionArg) ?? false)
 let batchSize = parsedArguments.get(batchSizeArg) ?? 32
 let stepCount = parsedArguments.get(stepCountArg) ?? 10_000_000
 let stepCountPerUpdate = parsedArguments.get(stepCountPerUpdateArg) ?? 512
