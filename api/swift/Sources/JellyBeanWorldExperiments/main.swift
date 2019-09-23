@@ -46,6 +46,7 @@ public enum Reward: String, CaseIterable, CustomStringConvertible {
     case .collectJellyBeans: return "CollectJellyBeans"
     case .collectOnions: return "CollectOnions"
     case .collectJellyBeansAvoidOnions: return "CollectJellyBeansAvoidOnions"
+    case .collectJellyBeansAvoidOnionsLong: return "CollectJellyBeansAvoidOnionsLong"
     case .cyclicalJellyBeansOnions: return "CyclicalJellyBeansOnions"
     }
   }
@@ -56,7 +57,9 @@ extension Reward: StringEnumArgument {
     return .values([
       (Reward.collectJellyBeans.rawValue, "Each collected jelly bean is worth 1 point."),
       (Reward.collectOnions.rawValue, "Each collected onion is worth 1 point."),
-      (Reward.collectJellyBeansAvoidOnions.rawValue, "Each collected jelly bean is worth 1 point and each collected onion -1 point.")
+      (Reward.collectJellyBeansAvoidOnions.rawValue, "Each collected jelly bean is worth 1 point and each collected onion -1 point."),
+      (Reward.collectJellyBeansAvoidOnionsLong.rawValue, "Same as 'CollectJellyBeansAvoidOnions'. Only used for organizing experimental results for the paper."),
+      (Reward.cyclicalJellyBeansOnions.rawValue, "Cycle every 100,000 steps between collecting jelly beans and avoiding onions and the opposite.")
     ])
   }
 }
