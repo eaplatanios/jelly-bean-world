@@ -296,7 +296,7 @@ public:
 		target_pixel_density = pixel_density;
 		zoom_start_pixel_density = pixel_density;
 		zoom_animation_start_time = milliseconds();
-		uniform_data = {{0}, {0}, {0}, 0, 0, {0}};
+		uniform_data = {0};
 		make_identity(uniform_data.model);
 
 		size_t vertex_shader_size = 0;
