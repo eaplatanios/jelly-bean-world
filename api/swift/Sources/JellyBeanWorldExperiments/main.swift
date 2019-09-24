@@ -44,6 +44,7 @@ public enum Reward: String, CaseIterable, CustomStringConvertible {
     collectJellyBeansAvoidOnions,
     collectJellyBeansAvoidOnionsLong,
     collectJellyBeansAndThenAvoidOnions,
+    avoidOnionsAndThenCollectJellyBeans,
     cyclicalJellyBeansOnions
 
   public var description: String {
@@ -53,6 +54,7 @@ public enum Reward: String, CaseIterable, CustomStringConvertible {
     case .collectJellyBeansAvoidOnions: return "CollectJellyBeansAvoidOnions"
     case .collectJellyBeansAvoidOnionsLong: return "CollectJellyBeansAvoidOnionsLong"
     case .collectJellyBeansAndThenAvoidOnions: return "CollectJellyBeansAndThenAvoidOnions"
+    case .avoidOnionsAndThenCollectJellyBeans: return "AvoidOnionsAndThenCollectJellyBeans"
     case .cyclicalJellyBeansOnions: return "CyclicalJellyBeansOnions"
     }
   }
@@ -66,6 +68,7 @@ extension Reward: StringEnumArgument {
       (Reward.collectJellyBeansAvoidOnions.rawValue, "Each collected jelly bean is worth 1 point and each collected onion -1 point."),
       (Reward.collectJellyBeansAvoidOnionsLong.rawValue, "Same as 'CollectJellyBeansAvoidOnions'. Only used for organizing experimental results for the paper."),
       (Reward.collectJellyBeansAndThenAvoidOnions.rawValue, "Same as 'CollectJellyBeansAvoidOnions', but with a curriculum schedule."),
+      (Reward.avoidOnionsAndThenCollectJellyBeans.rawValue, "Same as 'CollectJellyBeansAvoidOnions', but with a curriculum schedule."),
       (Reward.cyclicalJellyBeansOnions.rawValue, "Cycle every 100,000 steps between collecting jelly beans and avoiding onions and the opposite.")
     ])
   }

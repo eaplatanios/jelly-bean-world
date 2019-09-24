@@ -181,6 +181,12 @@ extension JellyBeanWorldExperiments.Reward {
           (JellyBeanWorld.Reward.combined(
             JellyBeanWorld.Reward.collect(item: jellyBean, value: 1.0),
             JellyBeanWorld.Reward.avoid(item: onion, value: 1.0)), 10000000)])
+    case .avoidOnionsAndThenCollectJellyBeans:
+      return CyclicalSchedule(
+        [(JellyBeanWorld.Reward.avoid(item: onion, value: 1.0), 100000),
+          (JellyBeanWorld.Reward.combined(
+            JellyBeanWorld.Reward.collect(item: jellyBean, value: 1.0),
+            JellyBeanWorld.Reward.avoid(item: onion, value: 1.0)), 10000000)])
     case .cyclicalJellyBeansOnions:
       return CyclicalSchedule(
         [(JellyBeanWorld.Reward.combined(
