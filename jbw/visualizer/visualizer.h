@@ -124,6 +124,7 @@ struct visualizer_client_data {
 	float get_map_bottom;
 	float get_map_top;
 	bool get_map_render_background = true;
+	float pixel_density;
 
 	status get_map_response = status::OK;
 	array<array<patch_state>>* map = nullptr;
@@ -149,8 +150,8 @@ struct visualizer_client_data {
 		get_map_left(src.get_map_left), get_map_right(src.get_map_right),
 		get_map_bottom(src.get_map_bottom), get_map_top(src.get_map_top),
 		get_map_render_background(src.get_map_render_background),
-		get_map_response(src.get_map_response), map(src.map),
-		track_agent_id(src.track_agent_id),
+		pixel_density(src.pixel_density), get_map_response(src.get_map_response),
+		map(src.map), track_agent_id(src.track_agent_id),
 		get_agent_states_response(src.get_agent_states_response),
 		agent_states(src.agent_states), agent_state_count(src.agent_state_count),
 		render_visual_field(src.render_visual_field), semaphore_id(src.semaphore_id),
@@ -296,7 +297,7 @@ public:
 		target_pixel_density = pixel_density;
 		zoom_start_pixel_density = pixel_density;
 		zoom_animation_start_time = milliseconds();
-		uniform_data = {{0}, {0}, {0}, 0, 0, {0}};
+		uniform_data = {0};
 		make_identity(uniform_data.model);
 
 		size_t vertex_shader_size = 0;
@@ -681,7 +682,9 @@ private:
 			direction agent_direction,
 			const float* agent_visual_field,
 			bool render_background_map,
-			float left, float right, float bottom, float top)
+			float left, float right,
+			float bottom, float top,
+			float pixel_density)
 	{
 		const unsigned int texel_cell_length = (unsigned int) ceil(1 / pixel_density);
 
@@ -723,12 +726,14 @@ private:
 				while (required_item_vertices > new_capacity)
 					new_capacity *= 2;
 				if (!HasLock) while (!scene_lock.try_lock()) { }
+				renderer.wait_until_idle();
 				renderer.delete_dynamic_vertex_buffer(item_quad_buffer);
 				if (!renderer.create_dynamic_vertex_buffer(item_quad_buffer, new_capacity * sizeof(item_vertex))) {
 					fprintf(stderr, "visualizer.prepare_scene_helper ERROR: Unable to expand `item_quad_buffer`.\n");
 					if (!HasLock) scene_lock.unlock();
 					return false;
 				}
+				item_quad_buffer_capacity = new_capacity;
 				if (!HasLock) scene_lock.unlock();
 			}
 
@@ -1062,6 +1067,7 @@ private:
 		float right = camera_position[0] + 0.5f * (width / pixel_density) + 0.01f;
 		float bottom = camera_position[1] - 0.5f * (height / pixel_density) - 0.01f;
 		float top = camera_position[1] + 0.5f * (height / pixel_density) + 0.01f;
+		float current_pixel_density = pixel_density;
 
 		bool render_background_map = render_background;
 		if (render_background_map) {
@@ -1118,7 +1124,7 @@ private:
 		bool result = prepare_scene_helper<HasLock>(
 			patches, agent_position, agent_direction,
 			agent_visual_field, render_background_map,
-			left, right, bottom, top);
+			left, right, bottom, top, current_pixel_density);
 		if (agent_visual_field != nullptr) { free(agent_visual_field); }
 		return result;
 	}
@@ -1168,6 +1174,7 @@ private:
 		sim.data.get_map_bottom = bottom;
 		sim.data.get_map_top = top;
 		sim.data.get_map_render_background = render_background;
+		sim.data.pixel_density = pixel_density;
 		while (!mpi_lock.try_lock()) { }
 		if (!send_get_map(sim, {(int64_t) left, (int64_t) bottom}, {(int64_t) ceil(right), (int64_t) ceil(top)}, sim.data.get_map_render_background, false)) {
 			mpi_lock.unlock();
@@ -1233,7 +1240,8 @@ private:
 				*response.map, agent_position, agent_direction, agent_visual_field,
 				response.get_map_render_background,
 				response.get_map_left, response.get_map_right,
-				response.get_map_bottom, response.get_map_top);
+				response.get_map_bottom, response.get_map_top,
+				response.pixel_density);
 
 			for (array<patch_state>& row : *response.map) {
 				for (patch_state& patch : row) free(patch);
