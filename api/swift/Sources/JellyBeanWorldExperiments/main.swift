@@ -200,6 +200,11 @@ let serverPortsArg: OptionArgument<[Int]> = parser.add(
   kind: [Int].self,
   usage: "Ports to use for launching simulation servers.")
 
+//try! makePlots(
+//  resultsDir: URL(fileURLWithPath: "/Users/eaplatanios/Development/GitHub/jelly-bean-world/temp/results"),
+//  rewardRatePeriod: 100000)
+//exit(0)
+
 // The first argument is always the executable, and so we drop it.
 let arguments = Array(ProcessInfo.processInfo.arguments.dropFirst())
 let parsedArguments = try parser.parse(arguments)
