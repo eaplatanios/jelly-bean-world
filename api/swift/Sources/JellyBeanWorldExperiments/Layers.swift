@@ -25,14 +25,14 @@ public struct VisionLayer: Layer {
   public init(outputSize: Int) {
     conv1 = Conv2D<Float>(filterShape: (3, 3, 3, 16), strides: (2, 2))
     conv2 = Conv2D<Float>(filterShape: (2, 2, 16, 16), strides: (1, 1))
-    dense = Dense<Float>(inputSize: 784, outputSize: outputSize)
+    dense = Dense<Float>(inputSize: rebuttal ? 256 : 784, outputSize: outputSize)
   }
 
   @inlinable
   @differentiable
   public func callAsFunction(_ input: Tensor<Float>) -> Tensor<Float> {
     let c1 = selu(conv1(input))
-    let c2 = selu(conv2(c1)).reshaped(to: [-1, 784])
+    let c2 = selu(conv2(c1)).reshaped(to: [-1, rebuttal ? 256 : 784])
     return dense(c2)
   }
 }
