@@ -63,7 +63,7 @@ public enum Reward: String, CaseIterable, CustomStringConvertible {
 
 extension Reward: StringEnumArgument {
   public static var completion: ShellCompletion {
-    return .values([
+    .values([
       (Reward.collectJellyBeans.rawValue, "Each collected jelly bean is worth 1 point."),
       (Reward.collectOnions.rawValue, "Each collected onion is worth 1 point."),
       (Reward.collectJellyBeansAvoidOnions.rawValue, "Each collected jelly bean is worth 1 point and each collected onion -1 point."),
@@ -113,7 +113,7 @@ public enum Observation: String, CaseIterable, CustomStringConvertible {
 
 extension Observation: StringEnumArgument {
   public static var completion: ShellCompletion {
-    return .values([
+    .values([
       (Observation.vision.rawValue, "Visual field."),
       (Observation.scent.rawValue, "Scent vector at the current cell."),
       (Observation.visionAndScent.rawValue, "Visual field and scent vector at the current cell.")
@@ -134,7 +134,7 @@ public enum Network: String, CaseIterable, CustomStringConvertible {
 
 extension Network: StringEnumArgument {
   public static var completion: ShellCompletion {
-    return .values([
+    .values([
       (Network.plain.rawValue, "Plain network."),
       (Network.contextual.rawValue, "Contextual network.")
     ])
@@ -214,7 +214,7 @@ let resultsDir: Foundation.URL = {
   if let argument = parsedArguments.get(resultsDirArg) {
     return URL(fileURLWithPath: argument.path.pathString)
   }
-  return currentDir.appendingPathComponent("temp/results")
+  return currentDir.appendingPathComponent(rebuttal ? "temp-rebuttal/results" : "temp/results")
 }()
 guard let reward = parsedArguments.get(rewardArg) else { throw Error.invalidArgument }
 guard let agent = parsedArguments.get(agentArg) else { throw Error.invalidArgument }
