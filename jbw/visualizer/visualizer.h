@@ -61,18 +61,18 @@ inline void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 
 	if (action == GLFW_PRESS) {
 		if (key == GLFW_KEY_MINUS) {
-			if (v->target_pixel_density / 1.3 <= 1 / get_config(v->sim).patch_size) {
+			if (v->target_pixel_density / 1.3f <= 1 / get_config(v->sim).patch_size) {
 				/* TODO: handle the case where the pixel density is smaller than 1 (we segfault currently since the texture for the scent visualization could become too small) */
 				fprintf(stderr, "Zoom beyond the point where the pixel density is smaller than 1/patch_size is unsupported.\n");
 			} else {
 				v->zoom_animation_start_time = milliseconds();
 				v->zoom_start_pixel_density = v->pixel_density;
-				v->target_pixel_density /= 1.3;
+				v->target_pixel_density /= 1.3f;
 			}
 		} else if (key == GLFW_KEY_EQUAL) {
 			v->zoom_animation_start_time = milliseconds();
 			v->zoom_start_pixel_density = v->pixel_density;
-			v->target_pixel_density *= 1.3;
+			v->target_pixel_density *= 1.3f;
 		} else if (key == GLFW_KEY_0) {
 			v->tracking_animating = false;
 			v->track_agent_id = 0;
@@ -722,7 +722,7 @@ private:
 			}
 
 			if (required_item_vertices > item_quad_buffer_capacity) {
-				size_t new_capacity = 2 * item_quad_buffer_capacity;
+				uint32_t new_capacity = 2 * item_quad_buffer_capacity;
 				while (required_item_vertices > new_capacity)
 					new_capacity *= 2;
 				if (!HasLock) while (!scene_lock.try_lock()) { }
