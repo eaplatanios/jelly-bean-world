@@ -18,7 +18,8 @@ import Logging
 import ReinforcementLearning
 import SPMUtility
 
-let logger = Logger(label: "Jelly Bean World Experiment")
+@usableFromInline let logger = Logger(label: "Jelly Bean World Experiment")
+@usableFromInline let rebuttal: Bool = true
 
 public enum Error: Swift.Error {
   case invalidCommand, invalidArgument
@@ -30,7 +31,7 @@ public enum Command: String {
 
 extension Command: StringEnumArgument {
   public static var completion: ShellCompletion {
-    return .values([
+    .values([
       (Command.run.rawValue, "Runs a Jelly Bean World experiment."),
       (Command.makePlots.rawValue,
         "Creates plots for the results of previously run Jelly Bean World experiments.")
@@ -62,7 +63,7 @@ public enum Reward: String, CaseIterable, CustomStringConvertible {
 
 extension Reward: StringEnumArgument {
   public static var completion: ShellCompletion {
-    return .values([
+    .values([
       (Reward.collectJellyBeans.rawValue, "Each collected jelly bean is worth 1 point."),
       (Reward.collectOnions.rawValue, "Each collected onion is worth 1 point."),
       (Reward.collectJellyBeansAvoidOnions.rawValue, "Each collected jelly bean is worth 1 point and each collected onion -1 point."),
@@ -112,7 +113,7 @@ public enum Observation: String, CaseIterable, CustomStringConvertible {
 
 extension Observation: StringEnumArgument {
   public static var completion: ShellCompletion {
-    return .values([
+    .values([
       (Observation.vision.rawValue, "Visual field."),
       (Observation.scent.rawValue, "Scent vector at the current cell."),
       (Observation.visionAndScent.rawValue, "Visual field and scent vector at the current cell.")
@@ -133,7 +134,7 @@ public enum Network: String, CaseIterable, CustomStringConvertible {
 
 extension Network: StringEnumArgument {
   public static var completion: ShellCompletion {
-    return .values([
+    .values([
       (Network.plain.rawValue, "Plain network."),
       (Network.contextual.rawValue, "Contextual network.")
     ])
@@ -200,6 +201,11 @@ let serverPortsArg: OptionArgument<[Int]> = parser.add(
   kind: [Int].self,
   usage: "Ports to use for launching simulation servers.")
 
+//try! makePlots(
+//  resultsDir: URL(fileURLWithPath: "/Users/eaplatanios/Development/GitHub/jelly-bean-world/temp/results"),
+//  rewardRatePeriod: 100000)
+//exit(0)
+
 // The first argument is always the executable, and so we drop it.
 let arguments = Array(ProcessInfo.processInfo.arguments.dropFirst())
 let parsedArguments = try parser.parse(arguments)
@@ -208,7 +214,7 @@ let resultsDir: Foundation.URL = {
   if let argument = parsedArguments.get(resultsDirArg) {
     return URL(fileURLWithPath: argument.path.pathString)
   }
-  return currentDir.appendingPathComponent("temp/results")
+  return currentDir.appendingPathComponent(rebuttal ? "temp-rebuttal/results" : "temp/results")
 }()
 guard let reward = parsedArguments.get(rewardArg) else { throw Error.invalidArgument }
 guard let agent = parsedArguments.get(agentArg) else { throw Error.invalidArgument }

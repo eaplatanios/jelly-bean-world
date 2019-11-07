@@ -19,8 +19,159 @@ fileprivate let mpl = Python.import("matplotlib")
 fileprivate let plt = Python.import("matplotlib.pyplot")
 fileprivate let sns = Python.import("seaborn")
 
-fileprivate let redPalette = sns.color_palette("Reds", 4)
+fileprivate let redPalette = sns.color_palette("Reds_d", 4)
 fileprivate let bluePalette = sns.color_palette("Blues_d", 5)
+
+internal func makePlots(resultsDir: URL, rewardRatePeriod: Int) throws {
+  let plotsDir = resultsDir.deletingLastPathComponent().appendingPathComponent("plots")
+  let configurationFiles = try FileManager.default.contentsOfDirectory(
+    at: plotsDir,
+    includingPropertiesForKeys: nil)
+  try configurationFiles
+    .filter { $0.lastPathComponent.hasSuffix(".tsv") }
+    .map { try Plots(configurationFile: $0, resultsDir: resultsDir) }
+    .forEach { try $0.makePlots(rewardRatePeriod: rewardRatePeriod) }
+}
+
+public struct Plots {
+  public let configurationFile: URL
+  public let resultsDir: URL
+  public let title: String
+  public let lineResultDirs: [(String, URL, Int)]
+
+  public init(configurationFile: URL, resultsDir: URL) throws {
+    self.configurationFile = configurationFile
+    self.resultsDir = resultsDir
+    let lines = (try String(contentsOf: configurationFile, encoding: .utf8))
+      .components(separatedBy: .newlines)
+    self.title = lines[0]
+    self.lineResultDirs = lines
+      .dropFirst(2)
+      .map { $0.components(separatedBy: "\t") }
+      .filter { $0.count == 3 }
+      .map { ($0[0], resultsDir.appendingPathComponent($0[1]), Int($0[2])!) }
+  }
+
+  public func makePlots(rewardRatePeriod: Int) throws {
+    // Set some plot styling parameters.
+    mpl.rcParams["pdf.fonttype"] = 42
+    mpl.rcParams["ps.fonttype"] = 42
+    sns.set()
+    sns.set_context("paper")
+    sns.set_style("white")
+    sns.set_style("ticks")
+
+    // Create a new figure.
+    let figure = plt.figure(figsize: [10.0, 6.0])
+    let axes = plt.gca()
+
+    for (plotIndex, (name, resultsDir, color)) in lineResultDirs.enumerated() {
+      // Read the results from all saved result files.
+      guard let resultFiles = try? FileManager.default.contentsOfDirectory(
+        at: resultsDir,
+        includingPropertiesForKeys: nil
+      ) else { continue }
+      let lines = resultFiles
+        .filter { $0.lastPathComponent.hasSuffix("-rewards.tsv") }
+        .compactMap { file -> Line? in
+          guard let fileContent = try? String(contentsOf: file, encoding: .utf8) else {
+            return nil
+          }
+          let rows = fileContent.components(separatedBy: .newlines)
+            .dropFirst()
+            .map { $0.components(separatedBy: "\t") }
+            .filter { $0.count == 2 }
+          if rows.isEmpty { return nil }
+          let x = [Float](unsafeUninitializedCapacity: rows.count) {
+            for i in rows.indices { $0[i] = Float(rows[i][0])! }
+            $1 = rows.count
+          }
+          let y = [Float](unsafeUninitializedCapacity: rows.count) {
+            for i in rows.indices { $0[i] = Float(rows[i][1])! }
+            $1 = rows.count
+          }
+          return Line(x: x, y: y).movingAverage(period: rewardRatePeriod)
+        }
+      if lines.isEmpty { continue }
+      // TODO: !!!
+      // let rewardSchedules = resultFiles
+      //   .filter { $0.lastPathComponent.hasSuffix("-reward-schedule.tsv") }
+      //   .compactMap { file -> RewardSchedule? in
+      //     guard let fileContent = try? String(contentsOf: file, encoding: .utf8) else {
+      //       return nil
+      //     }
+      //     let rows = fileContent.components(separatedBy: .newlines)
+      //       .dropFirst()
+      //       .map { $0.components(separatedBy: "\t") }
+      //       .filter { $0.count == 2 }
+      //     if rows.isEmpty { return nil }
+      //     let x = [Float](unsafeUninitializedCapacity: rows.count) {
+      //       for i in rows.indices { $0[i] = Float(rows[i][0])! }
+      //       $1 = rows.count
+      //     }
+      //     let rewardFunctions = [String](unsafeUninitializedCapacity: rows.count) {
+      //       for i in rows.indices { $0[i] = rows[i][1] }
+      //       $1 = rows.count
+      //     }
+      //     return RewardSchedule(x: x, rewardFunctions: rewardFunctions)
+      //   }
+
+      // Plot a line for this observation-network combination.
+      let colorPalette = color == 0 ? bluePalette : redPalette
+      lines.plotWithStandardError(on: axes, label: name, color: colorPalette[plotIndex])
+
+      // TODO: !!!
+      // if rewardSchedules.count > 1 {
+      //   assert(rewardSchedules.allSatisfy { $0 == rewardSchedules.first! })
+      //   rewardSchedules.first!.addVerticalAnnotations(on: axes)
+      // }
+    }
+
+    // Use exponential notation for the x-axis labels.
+    let xAxisFormatter = mpl.ticker.ScalarFormatter()
+    xAxisFormatter.set_powerlimits([-3, 3])
+    axes.xaxis.set_major_formatter(xAxisFormatter)
+
+    // Add axis labels.
+    axes.set_xlabel(
+      "Time Step",
+      color: "grey",
+      fontname: "Lato",
+      fontsize: 18,
+      fontweight: "light")
+    axes.set_ylabel(
+      "Reward Rate (pts/s)",
+      color: "grey",
+      fontname: "Lato",
+      fontsize: 18,
+      fontweight: "light")
+    axes.yaxis.set_tick_params(labelbottom: true)
+
+    // Change the tick label sizes.
+    plt.setp(axes.get_xticklabels(), fontname: "Lato", fontsize: 18, fontweight: "regular")
+    plt.setp(axes.get_yticklabels(), fontname: "Lato", fontsize: 18, fontweight: "regular")
+
+    // Set the figure title.
+    figure.suptitle(
+      title,
+      x: 0.5,
+      y: 1,
+      fontname: "Lato",
+      fontsize: 22,
+      fontweight: "black")
+
+    // Remove the grid.
+    sns.despine()
+
+    // Add a legend.
+    plt.legend()
+
+    // Save the figure.
+    plt.savefig(
+      configurationFile.deletingPathExtension().appendingPathExtension("pdf").path,
+      bbox_inches: "tight")
+  }
+}
 
 extension Experiment {
   public func makePlots(
@@ -82,7 +233,8 @@ extension Experiment {
               for i in rows.indices { $0[i] = Float(rows[i][1])! }
               $1 = rows.count
             }
-            return Line(x: x, y: y).movingAverage(period: rewardRatePeriod) }
+            return Line(x: x, y: y).movingAverage(period: rewardRatePeriod)
+          }
         if lines.isEmpty { continue }
         let rewardSchedules = resultFiles
           .filter { $0.lastPathComponent.hasSuffix("-reward-schedule.tsv") }
