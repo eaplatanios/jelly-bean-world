@@ -32,7 +32,7 @@ public struct VisionLayer: Layer {
   @differentiable
   public func callAsFunction(_ input: Tensor<Float>) -> Tensor<Float> {
     let c1 = selu(conv1(input))
-    let c2 = selu(conv2(c1)).reshaped(to: [-1, 784])
+    let c2 = selu(conv2(c1)).reshaped(to: [-1, rebuttal ? 256 : 784])
     return dense(c2)
   }
 }

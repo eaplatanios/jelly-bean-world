@@ -31,7 +31,7 @@ public enum Command: String {
 
 extension Command: StringEnumArgument {
   public static var completion: ShellCompletion {
-    return .values([
+    .values([
       (Command.run.rawValue, "Runs a Jelly Bean World experiment."),
       (Command.makePlots.rawValue,
         "Creates plots for the results of previously run Jelly Bean World experiments.")
