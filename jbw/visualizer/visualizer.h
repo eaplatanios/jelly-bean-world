@@ -314,7 +314,7 @@ public:
 
 		glfwInit();
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-		window = glfwCreateWindow(window_width, window_height, "Renderer Test", nullptr, nullptr);
+		window = glfwCreateWindow(window_width, window_height, "JBW Visualizer", nullptr, nullptr);
 		glfwSetWindowUserPointer(window, this);
 		glfwSetCursorPosCallback(window, cursor_position_callback<SimulatorType>);
 		glfwSetKeyCallback(window, key_callback<SimulatorType>);
@@ -1499,19 +1499,10 @@ private:
 			const float x, const float y, const float z,
 			float& r, float& g, float& b
 	) {
-		/* Convert from RGB to CMYK. */
-		float K = 1.0f - max(x, max(y, z));
-		float C = (1.0f - x - K) / (1.0f - K);
-		float M = (1.0f - y - K) / (1.0f - K);
-		float Y = (1.0f - z - K) / (1.0f - K);
-
-		/* Adjust hue and lightness. */
-		K = 1.0f - K;
-
-		/* Convert from CMYK to RGB. */
-		r = (1.0f - C) * (1.0f - K);
-		g = (1.0f - M) * (1.0f - K);
-		b = (1.0f - Y) * (1.0f - K);
+		float m = max(x, max(y, z));
+		r = min(1.0f, x + 1.0f - m);
+		g = min(1.0f, y + 1.0f - m);
+		b = min(1.0f, z + 1.0f - m);
 
 		r = gamma_correction(r);
 		g = gamma_correction(g);
@@ -1583,9 +1574,9 @@ private:
 		const float scent_x = cell_scent[0];
 		const float scent_y = cell_scent[1];
 		const float scent_z = cell_scent[2];
-		float x = max(0.0f, min(1.0f, pow(0.1f * scent_x / max_scent, 0.4f)));
-		float y = max(0.0f, min(1.0f, pow(0.1f * scent_y / max_scent, 0.4f)));
-		float z = max(0.0f, min(1.0f, pow(0.1f * scent_z / max_scent, 0.4f)));
+		float x = max(0.0f, min(1.0f, pow(1.1f * scent_x / max_scent, 0.22f)));
+		float y = max(0.0f, min(1.0f, pow(1.1f * scent_y / max_scent, 0.22f)));
+		float z = max(0.0f, min(1.0f, pow(1.1f * scent_z / max_scent, 0.22f)));
 
 		float r, g, b;
 		invert_scent_color_brightness(x, y, z, r, g, b);
