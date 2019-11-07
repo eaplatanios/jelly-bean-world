@@ -443,7 +443,7 @@ void generate_map(
 		const position& top_right_corner)
 {
 	/* make sure enough of the world is generated */
-	patch<empty_data>* neighborhood[4]; position patch_positions[4];
+	patch<PerPatchData>* neighborhood[4]; position patch_positions[4];
 	for (int64_t x = bottom_left_corner.x; x <= top_right_corner.x; x += world.n) {
 		for (int64_t y = bottom_left_corner.y; y <= top_right_corner.y; y += world.n)
 			world.get_fixed_neighborhood(position(x, y), neighborhood, patch_positions);
