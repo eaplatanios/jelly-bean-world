@@ -227,7 +227,7 @@ bool run_locally(
 	config.scent_dimension = 3;
 	config.color_dimension = 3;
 	config.vision_range = 5;
-	config.agent_field_of_view = 2 * M_PI;
+	config.agent_field_of_view = (float) (2 * M_PI);
 	config.allowed_movement_directions[0] = action_policy::ALLOWED;
 	config.allowed_movement_directions[1] = action_policy::DISALLOWED;
 	config.allowed_movement_directions[2] = action_policy::DISALLOWED;

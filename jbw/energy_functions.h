@@ -51,7 +51,7 @@ inline uint32_t murmurhash32_mix32(uint32_t x) {
     return x;
 }
 
-float hash_function(float x, uint32_t shift, uint32_t scale) {
+float hash_function(uint32_t x, uint32_t shift, uint32_t scale) {
 	return (float) murmurhash32_mix32((x + shift) / scale) / UINT_MAX;
 }
 
@@ -59,11 +59,11 @@ float radial_hash_intensity_fn(const position pos, const float* args) {
 	uint32_t shift = (uint32_t) args[0];
 	uint32_t scale = (uint32_t) args[1];
 
-	uint32_t s = sqrt(pos.squared_length()) + shift;
+	uint32_t s = (uint32_t) sqrt(pos.squared_length()) + shift;
 	float x = 2*hash_function(s, shift, scale) - 1;
 	float x_next = 2*hash_function(s + scale, shift, scale) - 1;
 
-	float t_x = s % scale / scale;
+	float t_x = (float) (s % scale) / scale;
 	if (t_x < 0) t_x += 1;
 	return args[2] + (x * (1 - t_x) + x_next * t_x) * args[3];
 }
@@ -146,9 +146,9 @@ float cross_interaction_fn(const position pos1, const position pos2, const float
 float cross_hash_interaction_fn(const position pos1, const position pos2, const float* args)
 {
 	uint32_t scale = (uint32_t) args[0];
-	float x = hash_function(pos1.x, 0, scale);
-	float x_next = hash_function(pos1.x + scale, 0, scale);
-	float t_x = (uint32_t) pos1.x % scale / scale;
+	float x = hash_function((uint32_t) pos1.x, 0, scale);
+	float x_next = hash_function((uint32_t) pos1.x + scale, 0, scale);
+	float t_x = (float) ((uint32_t) pos1.x % scale) / scale;
 	if (t_x < 0) t_x += 1;
 
 	float d = 25*(x * (1 - t_x) + x_next * t_x) + args[1];
