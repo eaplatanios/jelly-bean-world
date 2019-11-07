@@ -25,7 +25,7 @@ public struct VisionLayer: Layer {
   public init(outputSize: Int) {
     conv1 = Conv2D<Float>(filterShape: (3, 3, 3, 16), strides: (2, 2))
     conv2 = Conv2D<Float>(filterShape: (2, 2, 16, 16), strides: (1, 1))
-    dense = Dense<Float>(inputSize: 784, outputSize: outputSize)
+    dense = Dense<Float>(inputSize: rebuttal ? 256 : 784, outputSize: outputSize)
   }
 
   @inlinable

@@ -19,6 +19,7 @@ import ReinforcementLearning
 import SPMUtility
 
 let logger = Logger(label: "Jelly Bean World Experiment")
+let rebuttal: Bool = true
 
 public enum Error: Swift.Error {
   case invalidCommand, invalidArgument

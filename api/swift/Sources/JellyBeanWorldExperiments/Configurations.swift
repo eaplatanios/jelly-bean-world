@@ -16,8 +16,6 @@ import JellyBeanWorld
 import ReinforcementLearning
 import TensorFlow
 
-fileprivate let rebuttal: Bool = true
-
 public let banana = Item(
   name: "Banana",
   scent: rebuttal ? ShapedArray([0.0, 1.0, 0.0]) : ShapedArray([1.92, 1.76, 0.40]),
