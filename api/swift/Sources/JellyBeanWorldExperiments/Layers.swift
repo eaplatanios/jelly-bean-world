@@ -31,8 +31,8 @@ public struct VisionLayer: Layer {
   @inlinable
   @differentiable
   public func callAsFunction(_ input: Tensor<Float>) -> Tensor<Float> {
-    let c1 = selu(conv1(input))
-    let c2 = selu(conv2(c1)).reshaped(to: [-1, rebuttal ? 256 : 784])
+    let c1 = gelu(conv1(input))
+    let c2 = gelu(conv2(c1)).reshaped(to: [-1, rebuttal ? 256 : 784])
     return dense(c2)
   }
 }
@@ -50,7 +50,7 @@ public struct ScentLayer: Layer {
   @inlinable
   @differentiable
   public func callAsFunction(_ input: Tensor<Float>) -> Tensor<Float> {
-    dense2(selu(dense1(input)))
+    dense2(gelu(dense1(input)))
   }
 }
 
@@ -162,7 +162,7 @@ public struct VisionActorCritic: Module {
     let moved = 2 * observation.moved.flattenedBatch(
       outerDimCount: outerDimCount
     ).expandingShape(at: -1) - 1
-    let hidden = selu(visionLayer(vision)).concatenated(with: moved, alongAxis: -1)
+    let hidden = gelu(visionLayer(vision)).concatenated(with: moved, alongAxis: -1)
     let state = withoutDerivative(at: input.state).flattenedBatch(outerDimCount: outerDimCount)
     let hiddenLSTMOutput = hiddenLSTMCell(LSTMCell<Float>.Value(value: hidden, state: state))
     let hiddenConcatenated = hidden.concatenated(with: hiddenLSTMOutput.value, alongAxis: -1)
@@ -207,7 +207,7 @@ public struct ScentActorCritic: Module {
     let moved = 2 * observation.moved.flattenedBatch(
       outerDimCount: outerDimCount
     ).expandingShape(at: -1) - 1
-    let hidden = selu(scentLayer(scent)).concatenated(with: moved, alongAxis: -1)
+    let hidden = gelu(scentLayer(scent)).concatenated(with: moved, alongAxis: -1)
     let state = withoutDerivative(at: input.state).flattenedBatch(outerDimCount: outerDimCount)
     let hiddenLSTMOutput = hiddenLSTMCell(LSTMCell<Float>.Value(value: hidden, state: state))
     let hiddenConcatenated = hidden.concatenated(with: hiddenLSTMOutput.value, alongAxis: -1)
@@ -252,11 +252,11 @@ public struct VisionAndScentActorCritic: Module {
     let outerDims = [Int](observation.vision.shape.dimensions[0..<outerDimCount])
     let vision = observation.vision.flattenedBatch(outerDimCount: outerDimCount)
     let scent = observation.scent.flattenedBatch(outerDimCount: outerDimCount)
-    let visionHidden = selu(visionLayer(vision))
-    let scentHidden = selu(scentLayer(scent))
-    let moved = 2 * observation.moved.flattenedBatch(
+    let visionHidden = gelu(visionLayer(vision))
+    let scentHidden = gelu(scentLayer(scent))
+    let moved = gelu(2 * observation.moved.flattenedBatch(
       outerDimCount: outerDimCount
-    ).expandingShape(at: -1) - 1
+    ).expandingShape(at: -1) - 1)
     let hidden = visionHidden
       .concatenated(with: scentHidden, alongAxis: -1)
       .concatenated(with: moved, alongAxis: -1)

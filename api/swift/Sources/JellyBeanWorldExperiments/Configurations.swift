@@ -126,7 +126,7 @@ public func simulatorConfiguration(
     patchSize: rebuttal ? 32 : 64,
     mcmcIterations: rebuttal ? 4000 : 10000,
     items: rebuttal ?
-      [banana, onion, jellyBean, wall] :
+      [banana, onion, jellyBean] :
       [banana, onion, jellyBean, wall, tree, truffle],
     agentColor: [0.0, 0.0, 0.0],
     agentFieldOfView: Float(agentFieldOfView) * .pi / 180.0,
