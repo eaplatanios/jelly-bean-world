@@ -61,18 +61,18 @@ inline void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 
 	if (action == GLFW_PRESS) {
 		if (key == GLFW_KEY_MINUS) {
-			if (v->target_pixel_density / 1.3 <= 1 / get_config(v->sim).patch_size) {
+			if (v->target_pixel_density / 1.3f <= 1 / get_config(v->sim).patch_size) {
 				/* TODO: handle the case where the pixel density is smaller than 1 (we segfault currently since the texture for the scent visualization could become too small) */
 				fprintf(stderr, "Zoom beyond the point where the pixel density is smaller than 1/patch_size is unsupported.\n");
 			} else {
 				v->zoom_animation_start_time = milliseconds();
 				v->zoom_start_pixel_density = v->pixel_density;
-				v->target_pixel_density /= 1.3;
+				v->target_pixel_density /= 1.3f;
 			}
 		} else if (key == GLFW_KEY_EQUAL) {
 			v->zoom_animation_start_time = milliseconds();
 			v->zoom_start_pixel_density = v->pixel_density;
-			v->target_pixel_density *= 1.3;
+			v->target_pixel_density *= 1.3f;
 		} else if (key == GLFW_KEY_0) {
 			v->tracking_animating = false;
 			v->track_agent_id = 0;
@@ -314,7 +314,7 @@ public:
 
 		glfwInit();
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-		window = glfwCreateWindow(window_width, window_height, "Renderer Test", nullptr, nullptr);
+		window = glfwCreateWindow(window_width, window_height, "JBW Visualizer", nullptr, nullptr);
 		glfwSetWindowUserPointer(window, this);
 		glfwSetCursorPosCallback(window, cursor_position_callback<SimulatorType>);
 		glfwSetKeyCallback(window, key_callback<SimulatorType>);
@@ -722,7 +722,7 @@ private:
 			}
 
 			if (required_item_vertices > item_quad_buffer_capacity) {
-				size_t new_capacity = 2 * item_quad_buffer_capacity;
+				uint32_t new_capacity = 2 * item_quad_buffer_capacity;
 				while (required_item_vertices > new_capacity)
 					new_capacity *= 2;
 				if (!HasLock) while (!scene_lock.try_lock()) { }
@@ -1499,19 +1499,10 @@ private:
 			const float x, const float y, const float z,
 			float& r, float& g, float& b
 	) {
-		/* Convert from RGB to CMYK. */
-		float K = 1.0f - max(x, max(y, z));
-		float C = (1.0f - x - K) / (1.0f - K);
-		float M = (1.0f - y - K) / (1.0f - K);
-		float Y = (1.0f - z - K) / (1.0f - K);
-
-		/* Adjust hue and lightness. */
-		K = 1.0f - K;
-
-		/* Convert from CMYK to RGB. */
-		r = (1.0f - C) * (1.0f - K);
-		g = (1.0f - M) * (1.0f - K);
-		b = (1.0f - Y) * (1.0f - K);
+		float m = max(x, max(y, z));
+		r = min(1.0f, x + 1.0f - m);
+		g = min(1.0f, y + 1.0f - m);
+		b = min(1.0f, z + 1.0f - m);
 
 		r = gamma_correction(r);
 		g = gamma_correction(g);
@@ -1583,9 +1574,9 @@ private:
 		const float scent_x = cell_scent[0];
 		const float scent_y = cell_scent[1];
 		const float scent_z = cell_scent[2];
-		float x = max(0.0f, min(1.0f, pow(0.1f * scent_x / max_scent, 0.4f)));
-		float y = max(0.0f, min(1.0f, pow(0.1f * scent_y / max_scent, 0.4f)));
-		float z = max(0.0f, min(1.0f, pow(0.1f * scent_z / max_scent, 0.4f)));
+		float x = max(0.0f, min(1.0f, pow(1.1f * scent_x / max_scent, 0.22f)));
+		float y = max(0.0f, min(1.0f, pow(1.1f * scent_y / max_scent, 0.22f)));
+		float z = max(0.0f, min(1.0f, pow(1.1f * scent_z / max_scent, 0.22f)));
 
 		float r, g, b;
 		invert_scent_color_brightness(x, y, z, r, g, b);

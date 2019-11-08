@@ -17,6 +17,8 @@
 #ifndef JBW_SIMULATOR_H_
 #define JBW_SIMULATOR_H_
 
+#define _USE_MATH_DEFINES
+
 #include <core/array.h>
 #include <core/utility.h>
 #include <atomic>
@@ -884,16 +886,16 @@ struct agent_state {
         float fov_right_angle = 0.0f;
         switch (current_direction) {
         case direction::UP:
-            fov_left_angle = (M_PI + config.agent_field_of_view) / 2;
-            fov_right_angle = (M_PI - config.agent_field_of_view) / 2;
+            fov_left_angle = ((float) M_PI + config.agent_field_of_view) / 2;
+            fov_right_angle = ((float) M_PI - config.agent_field_of_view) / 2;
             break;
         case direction::DOWN:
-            fov_left_angle = -(M_PI - config.agent_field_of_view) / 2;
-            fov_right_angle = -(M_PI + config.agent_field_of_view) / 2;
+            fov_left_angle = -((float) M_PI - config.agent_field_of_view) / 2;
+            fov_right_angle = -((float) M_PI + config.agent_field_of_view) / 2;
             break;
         case direction::LEFT:
-            fov_left_angle = -M_PI + config.agent_field_of_view / 2;
-            fov_right_angle = M_PI - config.agent_field_of_view / 2;
+            fov_left_angle = -((float) M_PI) + config.agent_field_of_view / 2;
+            fov_right_angle = (float) M_PI - config.agent_field_of_view / 2;
             break;
         case direction::RIGHT:
             fov_left_angle = config.agent_field_of_view / 2;
@@ -1002,14 +1004,14 @@ struct agent_state {
 
 private:
     static inline float angle_overlap(float al, float ar, float bl, float br) {
-        al = al < 0 ? 2 * M_PI + al : al;
-        ar = ar < 0 ? 2 * M_PI + ar : ar;
-        bl = bl < 0 ? 2 * M_PI + bl : bl;
-        br = br < 0 ? 2 * M_PI + br : br;
+        al = al < 0 ? 2 * (float) M_PI + al : al;
+        ar = ar < 0 ? 2 * (float) M_PI + ar : ar;
+        bl = bl < 0 ? 2 * (float) M_PI + bl : bl;
+        br = br < 0 ? 2 * (float) M_PI + br : br;
         if (al < ar) {
-            return angle_overlap(al, 0.0f, bl, br) + angle_overlap(2 * M_PI, ar, bl, br);
+            return angle_overlap(al, 0.0f, bl, br) + angle_overlap(2 * (float) M_PI, ar, bl, br);
         } else if (bl < br) {
-            return angle_overlap(al, ar, bl, 0.0f) + angle_overlap(al, ar, 2 * M_PI, br);       
+            return angle_overlap(al, ar, bl, 0.0f) + angle_overlap(al, ar, 2 * (float) M_PI, br);
         } else {
             if (al > bl) {
                 if (ar > bl) return 0.0f;

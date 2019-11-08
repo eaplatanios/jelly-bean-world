@@ -1179,7 +1179,7 @@ inline bool receive_get_agent_ids(
 		}
 	}
 
-	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(response) + sizeof(size_t) + sizeof(uint64_t) * agent_ids.length);
+	memory_stream mem_stream = memory_stream((unsigned int) (sizeof(message_type) + sizeof(response) + sizeof(size_t) + sizeof(uint64_t) * agent_ids.length));
 	fixed_width_stream<memory_stream> out(mem_stream);
 	success &= write(message_type::GET_AGENT_IDS_RESPONSE, out) && write(response, out)
 			&& write(agent_ids.length, out) && write(agent_ids.data, out, agent_ids.length);
@@ -1300,7 +1300,7 @@ inline bool receive_get_agent_states(
 		}
 	}
 
-	memory_stream mem_stream = memory_stream(sizeof(message_type) + sizeof(response) + sizeof(size_t) + (sizeof(uint64_t) + sizeof(agent_state)) * agent_state_count);
+	memory_stream mem_stream = memory_stream((unsigned int) (sizeof(message_type) + sizeof(response) + sizeof(size_t) + (sizeof(uint64_t) + sizeof(agent_state)) * agent_state_count));
 	fixed_width_stream<memory_stream> out(mem_stream);
 	success &= write(message_type::GET_AGENT_STATES_RESPONSE, out) && write(response, out)
 			&& (response != status::OK || send_agent_states(out, agent_ids, agent_states, agent_state_count, sim.get_config()));
@@ -1720,7 +1720,9 @@ bool init_server(async_server& new_server, simulator<SimulatorData>& sim,
 		uint16_t server_port, unsigned int connection_queue_capacity,
 		unsigned int worker_count, const permissions& default_client_permissions)
 {
+#if !defined(_WIN32)
 	signal(SIGPIPE, SIG_IGN);
+#endif
 
 	std::condition_variable cv; std::mutex lock;
 	auto dispatch = [&]() {
@@ -1767,7 +1769,9 @@ inline bool init_server(sync_server& new_server, simulator<SimulatorData>& sim,
 		uint16_t server_port, unsigned int connection_queue_capacity,
 		unsigned int worker_count, uint64_t default_client_permissions)
 {
+#if !defined(_WIN32)
 	signal(SIGPIPE, SIG_IGN);
+#endif
 
 	socket_type server_socket;
 	server_status dummy = server_status::STARTING;
@@ -2533,7 +2537,9 @@ uint64_t connect_client(client<ClientData>& new_client,
 		const char* server_address, const char* server_port,
 		uint64_t& client_id)
 {
+#if !defined(_WIN32)
 	signal(SIGPIPE, SIG_IGN);
+#endif
 
 	uint64_t simulator_time;
 	auto process_connection = [&](socket_type& connection)
@@ -2609,7 +2615,9 @@ uint64_t reconnect_client(
 		uint64_t*& agent_ids, agent_state*& agent_states, unsigned int& agent_count,
 		uint64_t*& semaphore_ids, unsigned int& semaphore_count)
 {
+#if !defined(_WIN32)
 	signal(SIGPIPE, SIG_IGN);
+#endif
 
 	uint64_t simulator_time;
 	auto process_connection = [&](socket_type& connection)
