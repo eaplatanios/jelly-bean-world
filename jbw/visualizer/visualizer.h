@@ -43,7 +43,7 @@ inline void cursor_position_callback(GLFWwindow* window, double x, double y)
 	if (!v->left_mouse_button_pressed) {
 		v->left_mouse_button_pressed = true;
 	} else {
-		v->track_agent_id = 0;
+		v->track_agent(0);
 		v->camera_position[0] += (float) (v->last_cursor_x - x) / v->pixel_density;
 		v->camera_position[1] -= (float) (v->last_cursor_y - y) / v->pixel_density;
 		v->translate_start_position[0] = v->camera_position[0];
@@ -74,39 +74,34 @@ inline void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 			v->zoom_start_pixel_density = v->pixel_density;
 			v->target_pixel_density *= 1.3f;
 		} else if (key == GLFW_KEY_0) {
-			v->tracking_animating = false;
-			v->track_agent_id = 0;
+			v->track_agent(0);
 		} else if (key == GLFW_KEY_1) {
-			v->tracking_animating = false;
-			v->track_agent_id = 1;
+			v->track_agent(1);
 		} else if (key == GLFW_KEY_2) {
-			v->tracking_animating = false;
-			v->track_agent_id = 2;
+			v->track_agent(2);
 		} else if (key == GLFW_KEY_3) {
-			v->tracking_animating = false;
-			v->track_agent_id = 3;
+			v->track_agent(3);
 		} else if (key == GLFW_KEY_4) {
-			v->tracking_animating = false;
-			v->track_agent_id = 4;
+			v->track_agent(4);
 		} else if (key == GLFW_KEY_5) {
-			v->tracking_animating = false;
-			v->track_agent_id = 5;
+			v->track_agent(5);
 		} else if (key == GLFW_KEY_6) {
-			v->tracking_animating = false;
-			v->track_agent_id = 6;
+			v->track_agent(6);
 		} else if (key == GLFW_KEY_7) {
-			v->tracking_animating = false;
-			v->track_agent_id = 7;
+			v->track_agent(7);
 		} else if (key == GLFW_KEY_8) {
-			v->tracking_animating = false;
-			v->track_agent_id = 8;
+			v->track_agent(8);
 		} else if (key == GLFW_KEY_9) {
-			v->tracking_animating = false;
-			v->track_agent_id = 9;
+			v->track_agent(9);
 		} else if (key == GLFW_KEY_B) {
 			v->render_background = !v->render_background;
 		} else if (key == GLFW_KEY_V) {
 			v->render_agent_visual_field = !v->render_agent_visual_field;
+		} else if (key == GLFW_KEY_P) {
+			std::unique_lock<std::mutex> lock(v->agent_path_lock);
+			v->render_agent_path = !v->render_agent_path;
+			v->agent_path.clear();
+			v->agent_path_cv.notify_one();
 		} else if (key == GLFW_KEY_LEFT_BRACKET) {
 			v->semaphore_signal_period *= 2;
 		} else if (key == GLFW_KEY_RIGHT_BRACKET) {
@@ -123,7 +118,8 @@ struct visualizer_client_data {
 	float get_map_right;
 	float get_map_bottom;
 	float get_map_top;
-	bool get_map_render_background = true;
+	bool get_map_render_background;
+	bool get_map_render_agent_path;
 	float pixel_density;
 
 	status get_map_response = status::OK;
@@ -150,6 +146,7 @@ struct visualizer_client_data {
 		get_map_left(src.get_map_left), get_map_right(src.get_map_right),
 		get_map_bottom(src.get_map_bottom), get_map_top(src.get_map_top),
 		get_map_render_background(src.get_map_render_background),
+		get_map_render_agent_path(src.get_map_render_agent_path),
 		pixel_density(src.pixel_density), get_map_response(src.get_map_response),
 		map(src.map), track_agent_id(src.track_agent_id),
 		get_agent_states_response(src.get_agent_states_response),
@@ -256,10 +253,10 @@ class visualizer
 	unsigned long long zoom_animation_start_time;
 
 	/* this is zero if we don't want to track anyone */
+	uint64_t track_agent_id;
 	float translate_start_position[2];
 	float translate_end_position[2];
 	unsigned long long translate_animation_start_time;
-	uint64_t track_agent_id;
 	bool tracking_animating;
 
 	/* the thread that calls `get_map` so we don't need to
@@ -272,6 +269,13 @@ class visualizer
 	bool render_background;
 	bool render_agent_visual_field;
 
+	/* list of vertices of the tracked agent's movement path */
+	array<position> agent_path;
+	std::mutex agent_path_lock;
+	std::condition_variable agent_path_cv;
+	bool agent_position_recorded;
+	bool render_agent_path;
+
 public:
 	std::atomic_bool running;
 
@@ -279,13 +283,15 @@ public:
 		uint32_t window_width, uint32_t window_height,
 		uint64_t track_agent_id, float pixels_per_cell,
 		bool draw_scent_map, bool draw_visual_field,
-		float max_steps_per_second) :
+		bool draw_path, float max_steps_per_second) :
 			width(window_width), height(window_height), sim(sim),
 			semaphore(0), semaphore_signal_time(0),
 			background_binding(0, sizeof(vertex)), item_binding(0, sizeof(item_vertex)),
 			track_agent_id(track_agent_id), tracking_animating(false),
 			scene_ready(false), render_background(draw_scent_map),
-			render_agent_visual_field(draw_visual_field), running(true)
+			render_agent_visual_field(draw_visual_field),
+			agent_path(64), agent_position_recorded(false),
+			render_agent_path(draw_path), running(true)
 	{
 		semaphore_signal_period = (unsigned long long) round(1000.0f / max_steps_per_second);
 
@@ -551,7 +557,17 @@ public:
 
 		semaphore_signaler = std::thread([&]() {
 			while (running) {
+				if (render_agent_path && track_agent_id != 0) {
+					/* make sure we don't miss any simulation time steps if we're tracking the agent path */
+					std::unique_lock<std::mutex> lock(agent_path_lock);
+					while (running && render_agent_path && track_agent_id != 0 && !agent_position_recorded)
+						agent_path_cv.wait(lock);
+					agent_position_recorded = false;
+					lock.unlock();
+				}
+
 				signal_semaphore(sim);
+
 				semaphore_signal_time = milliseconds();
 				unsigned long long remaining_time = semaphore_signal_period;
 				while (true) {
@@ -568,6 +584,7 @@ public:
 	~visualizer() {
 		running = false;
 		scene_ready_cv.notify_one();
+		agent_path_cv.notify_one();
 		if (map_retriever.joinable()) {
 			try {
 				map_retriever.join();
@@ -598,7 +615,32 @@ public:
 
 	inline void track_agent(uint64_t agent_id) {
 		tracking_animating = false;
-		track_agent_id = agent_id;
+		if (track_agent_id != agent_id) {
+			agent_path_cv.notify_one();
+			agent_path.clear();
+			track_agent_id = agent_id;
+		}
+	}
+
+	inline bool add_to_agent_path(position agent_position) {
+		if (agent_path.length != 0 && agent_path.last() == agent_position)
+			return true;
+		if (agent_path.length <= 1)
+			return agent_path.add(agent_position);
+
+		/* check if the previous point is redundant */
+		const position& prev = agent_path[agent_path.length - 1];
+		const position& prev_prev = agent_path[agent_path.length - 2];
+		if ((prev_prev.x == prev.x && prev.x == agent_position.x && prev_prev.y <= prev.y && prev.y <= agent_position.y)
+		 || (prev_prev.x == prev.x && prev.x == agent_position.x && prev_prev.y >= prev.y && prev.y >= agent_position.y)
+		 || (prev_prev.y == prev.y && prev.y == agent_position.y && prev_prev.x <= prev.x && prev.x <= agent_position.x)
+		 || (prev_prev.y == prev.y && prev.y == agent_position.y && prev_prev.x >= prev.x && prev.x >= agent_position.x))
+		{
+			agent_path[agent_path.length - 1] = agent_position;
+			return true;
+		} else {
+			return agent_path.add(agent_position);
+		}
 	}
 
 	inline bool is_window_closed() {
@@ -682,6 +724,7 @@ private:
 			direction agent_direction,
 			const float* agent_visual_field,
 			bool render_background_map,
+			unsigned int agent_path_length,
 			float left, float right,
 			float bottom, float top,
 			float pixel_density)
@@ -721,6 +764,9 @@ private:
 				}
 			}
 
+			if (agent_path_length > 1)
+				required_item_vertices += 6 * (agent_path_length - 1);
+
 			if (required_item_vertices > item_quad_buffer_capacity) {
 				uint32_t new_capacity = 2 * item_quad_buffer_capacity;
 				while (required_item_vertices > new_capacity)
@@ -737,11 +783,69 @@ private:
 				if (!HasLock) scene_lock.unlock();
 			}
 
+			item_vertex* item_vertices = (item_vertex*) item_quad_buffer.mapped_memory;
+			if (agent_path_length > 1) {
+				for (unsigned int i = 1; i < agent_path_length; i++) {
+					const position first = agent_path[i - 1];
+					const position second = agent_path[i];
+
+					position forward, right;
+					if (second.x > first.x) {
+						forward = position(1, 0);
+						right = position(0, -1);
+					} else if (second.x < first.x) {
+						forward = position(-1, 0);
+						right = position(0, 1);
+					} else if (second.y > first.y) {
+						forward = position(0, 1);
+						right = position(1, 0);
+					} else {
+						forward = position(0, -1);
+						right = position(-1, 0);
+					}
+
+					item_vertices[new_item_vertex_count].position[0] = first.x + 0.5f + 0.13f * (right.x - forward.x);
+					item_vertices[new_item_vertex_count].position[1] = first.y + 0.5f + 0.13f * (right.y - forward.y);
+					item_vertices[new_item_vertex_count].color[0] = 1.0f + 2.0f;
+					item_vertices[new_item_vertex_count].color[1] = 0.0f + 2.0f;
+					item_vertices[new_item_vertex_count++].color[2] = 0.0f + 2.0f;
+
+					item_vertices[new_item_vertex_count].position[0] = first.x + 0.5f + 0.13f * (-right.x - forward.x);
+					item_vertices[new_item_vertex_count].position[1] = first.y + 0.5f + 0.13f * (-right.y - forward.y);
+					item_vertices[new_item_vertex_count].color[0] = 1.0f + 2.0f;
+					item_vertices[new_item_vertex_count].color[1] = 0.0f + 2.0f;
+					item_vertices[new_item_vertex_count++].color[2] = 0.0f + 2.0f;
+
+					item_vertices[new_item_vertex_count].position[0] = second.x + 0.5f + 0.13f * (-right.x + forward.x);
+					item_vertices[new_item_vertex_count].position[1] = second.y + 0.5f + 0.13f * (-right.y + forward.y);
+					item_vertices[new_item_vertex_count].color[0] = 1.0f + 2.0f;
+					item_vertices[new_item_vertex_count].color[1] = 0.0f + 2.0f;
+					item_vertices[new_item_vertex_count++].color[2] = 0.0f + 2.0f;
+
+					item_vertices[new_item_vertex_count].position[0] = second.x + 0.5f + 0.13f * (-right.x + forward.x);
+					item_vertices[new_item_vertex_count].position[1] = second.y + 0.5f + 0.13f * (-right.y + forward.y);
+					item_vertices[new_item_vertex_count].color[0] = 1.0f + 2.0f;
+					item_vertices[new_item_vertex_count].color[1] = 0.0f + 2.0f;
+					item_vertices[new_item_vertex_count++].color[2] = 0.0f + 2.0f;
+
+					item_vertices[new_item_vertex_count].position[0] = second.x + 0.5f + 0.13f * (right.x + forward.x);
+					item_vertices[new_item_vertex_count].position[1] = second.y + 0.5f + 0.13f * (right.y + forward.y);
+					item_vertices[new_item_vertex_count].color[0] = 1.0f + 2.0f;
+					item_vertices[new_item_vertex_count].color[1] = 0.0f + 2.0f;
+					item_vertices[new_item_vertex_count++].color[2] = 0.0f + 2.0f;
+
+					item_vertices[new_item_vertex_count].position[0] = first.x + 0.5f + 0.13f * (right.x - forward.x);
+					item_vertices[new_item_vertex_count].position[1] = first.y + 0.5f + 0.13f * (right.y - forward.y);
+					item_vertices[new_item_vertex_count].color[0] = 1.0f + 2.0f;
+					item_vertices[new_item_vertex_count].color[1] = 0.0f + 2.0f;
+					item_vertices[new_item_vertex_count++].color[2] = 0.0f + 2.0f;
+				}
+			}
+
 			unsigned int texture_width_cells = (unsigned int) (top_right_corner.x - bottom_left_corner.x + 1) * patch_size_texels;
 			unsigned int texture_height_cells = (unsigned int) (top_right_corner.y - bottom_left_corner.y + 1) * patch_size_texels;
 
 			unsigned int y_index = 0;
-			item_vertex* item_vertices = (item_vertex*) item_quad_buffer.mapped_memory;
 			for (int64_t y = bottom_left_corner.y; y <= top_right_corner.y; y++) {
 				if (y_index == patches.length || y != patches[y_index][0].patch_position.y) {
 					/* fill the patches in this row with empty pixels */
@@ -1086,6 +1190,8 @@ private:
 		direction agent_direction = direction::UP;
 		float* agent_visual_field = nullptr;
 		bool render_visual_field = render_agent_visual_field;
+		bool render_path = render_agent_path;
+		unsigned int render_path_length = 0;
 		if (track_agent_id != 0) {
 			agent_state* agent;
 			sim.get_agent_states(&agent, &track_agent_id, 1);
@@ -1102,6 +1208,15 @@ private:
 				float new_target_position[] = {agent->current_position.x + 0.5f, agent->current_position.y + 0.5f};
 				agent->lock.unlock();
 
+				if (render_path) {
+					agent_path_lock.lock();
+					add_to_agent_path(agent_position);
+					agent_position_recorded = true;
+					render_path_length = agent_path.length;
+					agent_path_cv.notify_one();
+					agent_path_lock.unlock();
+				}
+
 				if (new_target_position[0] != translate_end_position[0] || new_target_position[1] != translate_end_position[1]) {
 					translate_start_position[0] = camera_position[0];
 					translate_start_position[1] = camera_position[1];
@@ -1115,7 +1230,7 @@ private:
 				}
 			} else {
 				fprintf(stderr, "Agent with ID %" PRIu64 " does not exist in the simulation.\n", track_agent_id);
-				track_agent_id = 0;
+				track_agent(0);
 			}
 		} else {
 			tracking_animating = false;
@@ -1124,7 +1239,8 @@ private:
 		bool result = prepare_scene_helper<HasLock>(
 			patches, agent_position, agent_direction,
 			agent_visual_field, render_background_map,
-			left, right, bottom, top, current_pixel_density);
+			render_path_length, left, right, bottom, top,
+			current_pixel_density);
 		if (agent_visual_field != nullptr) { free(agent_visual_field); }
 		return result;
 	}
@@ -1174,6 +1290,7 @@ private:
 		sim.data.get_map_bottom = bottom;
 		sim.data.get_map_top = top;
 		sim.data.get_map_render_background = render_background;
+		sim.data.get_map_render_agent_path = render_agent_path;
 		sim.data.pixel_density = pixel_density;
 		while (!mpi_lock.try_lock()) { }
 		if (!send_get_map(sim, {(int64_t) left, (int64_t) bottom}, {(int64_t) ceil(right), (int64_t) ceil(top)}, sim.data.get_map_render_background, false)) {
@@ -1207,12 +1324,22 @@ private:
 		position agent_position = {0, 0};
 		direction agent_direction = direction::UP;
 		float* agent_visual_field = nullptr;
+		unsigned int render_path_length = 0;
 		if (response.get_agent_states_response == status::OK && response.track_agent_id != 0) {
 			if (response.agent_state_count > 0) {
 				agent_position = response.agent_states[0].current_position;
 				agent_direction = response.agent_states[0].current_direction;
 				if (response.render_visual_field)
 					agent_visual_field = response.agent_states[0].current_vision;
+
+				if (response.get_map_render_agent_path) {
+					agent_path_lock.lock();
+					add_to_agent_path(agent_position);
+					agent_position_recorded = true;
+					render_path_length = agent_path.length;
+					agent_path_cv.notify_one();
+					agent_path_lock.unlock();
+				}
 
 				float new_target_position[] = {response.agent_states[0].current_position.x + 0.5f, response.agent_states[0].current_position.y + 0.5f};
 
@@ -1229,7 +1356,7 @@ private:
 				}
 			} else {
 				fprintf(stderr, "Agent with ID %" PRIu64 " does not exist in the simulation.\n", response.track_agent_id);
-				track_agent_id = 0;
+				track_agent(0);
 			}
 		} else {
 			tracking_animating = false;
@@ -1238,7 +1365,7 @@ private:
 		if (response.get_map_response == status::OK) {
 			prepare_scene_helper<HasLock>(
 				*response.map, agent_position, agent_direction, agent_visual_field,
-				response.get_map_render_background,
+				response.get_map_render_background, render_path_length,
 				response.get_map_left, response.get_map_right,
 				response.get_map_bottom, response.get_map_top,
 				response.pixel_density);
@@ -1268,7 +1395,7 @@ private:
 
 		if (sim.data.get_agent_states_response == status::PERMISSION_ERROR) {
 			fprintf(stderr, "ERROR: We don't have permission to call `get_agent_states` on the server. We cannot track agents.\n");
-			track_agent_id = 0;
+			track_agent(0);
 			sim.data.track_agent_id = 0;
 		} else if (sim.data.get_agent_states_response != status::INVALID_AGENT_ID
 				&& sim.data.get_agent_states_response != status::OK)

@@ -138,6 +138,8 @@ void print_usage(Stream&& out) {
 		"  --max-steps-per-sec=NUM  Sets the maximum simulation steps per second.\n"
 		"  --no-scent-map           Disables drawing of the scent map.\n"
 		"  --visual-field           Draws the visual field around the tracked agent.\n"
+		"  --agent-path             Draws the movement path of the tracked agent. Note\n"
+		"                           that this will limit the simulation rate."
 		"  --local                  Starts a simulation locally, rather than connecting\n"
 		"                           to a server (any specified address is ignored).\n"
 		"  --help                   Prints this usage text.\n");
@@ -153,6 +155,7 @@ void print_controls(Stream&& out) {
 		"  ] key: Increase max simulation steps per second.\n"
 		"  b key: Toggle drawing of the scent map.\n"
 		"  v key: Toggle drawing of the agent's visual field.\n"
+		"  p key: Toggle drawing of the agent's path.\n"
 		"  1 key: Track agent with ID 1.\n"
 		"  2 key: Track agent with ID 2.\n"
 		"  3 key: Track agent with ID 3.\n"
@@ -220,6 +223,7 @@ bool run_locally(
 		float pixels_per_cell,
 		bool draw_scent_map,
 		bool draw_visual_field,
+		bool draw_agent_path,
 		float max_steps_per_second)
 {
 	simulator_config config;
@@ -227,7 +231,7 @@ bool run_locally(
 	config.scent_dimension = 3;
 	config.color_dimension = 3;
 	config.vision_range = 5;
-	config.agent_field_of_view = (float) (2 * M_PI);
+	config.agent_field_of_view = 2 * M_PI;
 	config.allowed_movement_directions[0] = action_policy::ALLOWED;
 	config.allowed_movement_directions[1] = action_policy::DISALLOWED;
 	config.allowed_movement_directions[2] = action_policy::DISALLOWED;
@@ -291,13 +295,10 @@ bool run_locally(
 	config.item_types[3].visual_occlusion = 0.0;
 	config.item_types.length = item_type_count;
 
-	config.item_types[0].intensity_fn.fn = radial_hash_intensity_fn;
-	config.item_types[0].intensity_fn.arg_count = 4;
-	config.item_types[0].intensity_fn.args = (float*) malloc(sizeof(float) * 4);
-	config.item_types[0].intensity_fn.args[0] = 500.0f;
-	config.item_types[0].intensity_fn.args[1] = 60.0f;
-	config.item_types[0].intensity_fn.args[2] = -7.2f;
-	config.item_types[0].intensity_fn.args[3] = 4.0f;
+	config.item_types[0].intensity_fn.fn = constant_intensity_fn;
+	config.item_types[0].intensity_fn.arg_count = 1;
+	config.item_types[0].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
+	config.item_types[0].intensity_fn.args[0] = -5.3f;
 	config.item_types[0].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 	config.item_types[1].intensity_fn.fn = constant_intensity_fn;
@@ -306,13 +307,10 @@ bool run_locally(
 	config.item_types[1].intensity_fn.args[0] = -5.0f;
 	config.item_types[1].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
-	config.item_types[2].intensity_fn.fn = radial_hash_intensity_fn;
-	config.item_types[2].intensity_fn.arg_count = 4;
-	config.item_types[2].intensity_fn.args = (float*) malloc(sizeof(float) * 4);
-	config.item_types[2].intensity_fn.args[0] = 500.0f;
-	config.item_types[2].intensity_fn.args[1] = 60.0f;
-	config.item_types[2].intensity_fn.args[2] = -7.2f;
-	config.item_types[2].intensity_fn.args[3] = 4.0f;
+	config.item_types[2].intensity_fn.fn = constant_intensity_fn;
+	config.item_types[2].intensity_fn.arg_count = 1;
+	config.item_types[2].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
+	config.item_types[2].intensity_fn.args[0] = -5.3f;
 	config.item_types[2].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 	config.item_types[3].intensity_fn.fn = constant_intensity_fn;
@@ -337,8 +335,7 @@ bool run_locally(
 	set_interaction_args(config.item_types.data, 3, 0, zero_interaction_fn, {});
 	set_interaction_args(config.item_types.data, 3, 1, zero_interaction_fn, {});
 	set_interaction_args(config.item_types.data, 3, 2, zero_interaction_fn, {});
-	//set_interaction_args(config.item_types.data, 3, 3, cross_interaction_fn, {10.0f, 15.0f, 20.0f, -200.0f, -20.0f, 1.0f});
-	set_interaction_args(config.item_types.data, 3, 3, cross_hash_interaction_fn, {60.0f, 4.0f, 20.0f, -200.0f, -20.0f, 1.0f});
+	set_interaction_args(config.item_types.data, 3, 3, cross_interaction_fn, {10.0f, 15.0f, 20.0f, -200.0f, -20.0f, 1.0f});
 
 	simulator<visualizer_data> sim(config, visualizer_data());
 
@@ -348,12 +345,10 @@ bool run_locally(
 		return false;
 	}
 
-	generate_map(sim.get_world(), {-1000, -1000}, {1000, 1000});
-
 	print_controls(stdout); fflush(stdout);
 	simulation_running = true;
 	visualizer<simulator<visualizer_data>> visualizer(sim, 800, 800, track_agent_id,
-			pixels_per_cell, draw_scent_map, draw_visual_field, max_steps_per_second);
+			pixels_per_cell, draw_scent_map, draw_visual_field, draw_agent_path, max_steps_per_second);
 
 	unsigned int move_count = 0;
 	std::thread simulation_worker = std::thread([&]() {
@@ -417,6 +412,7 @@ bool run(
 		float pixels_per_cell,
 		bool draw_scent_map,
 		bool draw_visual_field,
+		bool draw_agent_path,
 		float max_steps_per_second)
 {
 	uint64_t client_id;
@@ -431,7 +427,7 @@ bool run(
 	print_controls(stdout); fflush(stdout);
 
 	visualizer<client<visualizer_client_data>> visualizer(sim, 800, 800, track_agent_id,
-			pixels_per_cell, draw_scent_map, draw_visual_field, max_steps_per_second);
+			pixels_per_cell, draw_scent_map, draw_visual_field, draw_agent_path, max_steps_per_second);
 	visualizer_running = &visualizer.running;
 	while (simulation_running && sim.client_running) {
 		if (visualizer.is_window_closed())
@@ -466,6 +462,7 @@ int main(int argc, const char** argv)
 	bool local = false;
 	bool draw_scent_map = true;
 	bool draw_visual_field = false;
+	bool draw_agent_path = false;
 
 	/* parse command-line arguments */
 	bool fail = false;
@@ -477,6 +474,7 @@ int main(int argc, const char** argv)
 		if (parse_option(argv[i], fail, "--local")) { local = true; continue; }
 		if (parse_option(argv[i], fail, "--no-scent-map")) { draw_scent_map = false; continue; }
 		if (parse_option(argv[i], fail, "--visual-field")) { draw_visual_field = true; continue; }
+		if (parse_option(argv[i], fail, "--agent-path")) { draw_agent_path = true; continue; }
 		if (parse_option(argv[i], fail, "--help")) {
 			print_usage(stdout);
 			fflush(stdout);
@@ -505,7 +503,7 @@ int main(int argc, const char** argv)
 			free(server_address);
 			server_address = nullptr;
 		}
-		if (!run_locally(track_agent_id, pixels_per_cell, draw_scent_map, draw_visual_field, max_steps_per_second))
+		if (!run_locally(track_agent_id, pixels_per_cell, draw_scent_map, draw_visual_field, draw_agent_path, max_steps_per_second))
 			return EXIT_FAILURE;
 	} else {
 		if (server_address == nullptr || server_port == nullptr) {
@@ -513,7 +511,7 @@ int main(int argc, const char** argv)
 			return EXIT_FAILURE;
 		}
 
-		if (!run(server_address, server_port, track_agent_id, pixels_per_cell, draw_scent_map, draw_visual_field, max_steps_per_second)) {
+		if (!run(server_address, server_port, track_agent_id, pixels_per_cell, draw_scent_map, draw_visual_field, draw_agent_path, max_steps_per_second)) {
 			free(server_address);
 			return EXIT_FAILURE;
 		}
