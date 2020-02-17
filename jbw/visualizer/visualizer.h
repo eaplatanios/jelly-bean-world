@@ -1135,17 +1135,17 @@ public:
 				bool draw_visual_field_grid)
 		{
 			bool success = (fprintf(out,
-					"<svg width=\"%u\" height=\"%u\" viewBox=\"%f %f %f %f\" xmlns=\"http://www.w3.org/2000/svg\">",
+					"<svg width=\"%u\" height=\"%u\" viewBox=\"%.2f %.2f %.2f %.2f\" xmlns=\"http://www.w3.org/2000/svg\">",
 					width, height, left, bottom, right - left, top - bottom) > 0);
-			success &= (fprintf(out, "<g transform=\"translate(0,%f) scale(1,-1)\">", top + bottom) > 0);
+			success &= (fprintf(out, "<g transform=\"translate(0,%.2f) scale(1,-1)\">", top + bottom) > 0);
 			success &= (fprintf(out,
-					"<rect x=\"%f\" y=\"%f\" width=\"%f\" height=\"%f\" fill=\"#%02x%02x%02x\"/>",
+					"<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"#%02x%02x%02x\"/>",
 					left, bottom, right - left, top - bottom,
 					BACKGROUND_COLOR.r, BACKGROUND_COLOR.g, BACKGROUND_COLOR.b) > 0);
 
 			/* draw the background "heatmap" */
 			constexpr float grid_line_width = 0.05f;
-			success &= (fprintf(out, "<g stroke-width=\"%f\">", grid_line_width) > 0);
+			success &= (fprintf(out, "<g stroke-width=\"%.2f\">", grid_line_width) > 0);
 			for (const rectangle& r : background_grid_cells) {
 				/* get the opacity value for this patch */
 				unsigned int patch_x = r.bottom_left.x / patch_size;
@@ -1155,13 +1155,13 @@ public:
 				uint8_t border_g = (uint8_t) round(r.color[1] * opacity);
 				uint8_t border_b = (uint8_t) round(r.color[2] * opacity);
 
-				float bottom_left_x = max(r.bottom_left.x + background_grid_bottom_left_x - 0.02f, background_grid_bottom_left_x);
-				float bottom_left_y = max(r.bottom_left.y + background_grid_bottom_left_y - 0.02f, background_grid_bottom_left_y);
+				float bottom_left_x = max(r.bottom_left.x + background_grid_bottom_left_x - 0.01f, background_grid_bottom_left_x);
+				float bottom_left_y = max(r.bottom_left.y + background_grid_bottom_left_y - 0.01f, background_grid_bottom_left_y);
 				success &= (fprintf(out,
-						"<rect x=\"%f\" y=\"%f\" width=\"%f\" height=\"%f\" fill=\"#%02x%02x%02x\"/>",
+						"<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"#%02x%02x%02x\"/>",
 						bottom_left_x, bottom_left_y,
-						min(r.top_right.x - r.bottom_left.x + 0.04f, background_grid_top_right_x - bottom_left_x),
-						min(r.top_right.y - r.bottom_left.y + 0.04f, background_grid_top_right_y - bottom_left_y),
+						min(r.top_right.x - r.bottom_left.x + 0.02f, background_grid_top_right_x - bottom_left_x),
+						min(r.top_right.y - r.bottom_left.y + 0.02f, background_grid_top_right_y - bottom_left_y),
 						border_r, border_g, border_b) > 0);
 			} for (const rectangle& r : background_grid_cells) {
 				/* get the opacity value for this patch */
@@ -1175,7 +1175,7 @@ public:
 				float bottom_left_x = r.bottom_left.x + background_grid_bottom_left_x;
 				float bottom_left_y = r.bottom_left.y + background_grid_bottom_left_y;
 				success &= (fprintf(out,
-						"<rect x=\"%f\" y=\"%f\" width=\"%f\" height=\"%f\" stroke=\"#%02x%02x%02x\" fill=\"#%02x%02x%02x\"/>",
+						"<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" stroke=\"#%02x%02x%02x\" fill=\"#%02x%02x%02x\"/>",
 						bottom_left_x + grid_line_width / 2, bottom_left_y + grid_line_width / 2,
 						r.top_right.x - r.bottom_left.x - grid_line_width, r.top_right.y - r.bottom_left.y - grid_line_width,
 						border_r, border_g, border_b, r.color[0], r.color[1], r.color[2]) > 0);
@@ -1185,7 +1185,7 @@ public:
 			if (draw_visual_field_grid) {
 				/* draw the visual field "heatmap" */
 				constexpr float vision_grid_line_width = 0.1f;
-				success &= (fprintf(out, "<g stroke-width=\"%f\">", vision_grid_line_width) > 0);
+				success &= (fprintf(out, "<g stroke-width=\"%.2f\">", vision_grid_line_width) > 0);
 				for (const pair<rectangle, uint8_t>& r : visual_field_grid_cells) {
 					/* get the opacity value for this cell */
 					float opacity = (float) r.value / 255;
@@ -1193,13 +1193,13 @@ public:
 					uint8_t border_g = (uint8_t) round(r.key.color[1] * opacity);
 					uint8_t border_b = (uint8_t) round(r.key.color[2] * opacity);
 
-					float bottom_left_x = max(r.key.bottom_left.x + visual_field_grid_bottom_left_x - 0.02f, visual_field_grid_bottom_left_x);
-					float bottom_left_y = max(r.key.bottom_left.y + visual_field_grid_bottom_left_y - 0.02f, visual_field_grid_bottom_left_y);
+					float bottom_left_x = max(r.key.bottom_left.x + visual_field_grid_bottom_left_x - 0.01f, visual_field_grid_bottom_left_x);
+					float bottom_left_y = max(r.key.bottom_left.y + visual_field_grid_bottom_left_y - 0.01f, visual_field_grid_bottom_left_y);
 					success &= (fprintf(out,
-							"<rect x=\"%f\" y=\"%f\" width=\"%f\" height=\"%f\" fill=\"#%02x%02x%02x\"/>",
+							"<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"#%02x%02x%02x\"/>",
 							bottom_left_x, bottom_left_y,
-							min(r.key.top_right.x - r.key.bottom_left.x + 0.04f, visual_field_grid_top_right_x - bottom_left_x),
-							min(r.key.top_right.y - r.key.bottom_left.y + 0.04f, visual_field_grid_top_right_y - bottom_left_y),
+							min(r.key.top_right.x - r.key.bottom_left.x + 0.02f, visual_field_grid_top_right_x - bottom_left_x),
+							min(r.key.top_right.y - r.key.bottom_left.y + 0.02f, visual_field_grid_top_right_y - bottom_left_y),
 							border_r, border_g, border_b) > 0);
 				} for (const pair<rectangle, uint8_t>& r : visual_field_grid_cells) {
 					/* get the opacity value for this cell */
@@ -1211,7 +1211,7 @@ public:
 					float bottom_left_x = r.key.bottom_left.x + visual_field_grid_bottom_left_x;
 					float bottom_left_y = r.key.bottom_left.y + visual_field_grid_bottom_left_y;
 					success &= (fprintf(out,
-							"<rect x=\"%f\" y=\"%f\" width=\"%f\" height=\"%f\" stroke=\"#%02x%02x%02x\" fill=\"#%02x%02x%02x\"/>",
+							"<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" stroke=\"#%02x%02x%02x\" fill=\"#%02x%02x%02x\"/>",
 							bottom_left_x + vision_grid_line_width / 2, bottom_left_y + vision_grid_line_width / 2,
 							r.key.top_right.x - r.key.bottom_left.x - vision_grid_line_width,
 							r.key.top_right.y - r.key.bottom_left.y - vision_grid_line_width,
@@ -1222,7 +1222,7 @@ public:
 				/* draw the visual field border */
 				const float border_width = 0.01f * (visual_field_grid_top_right_x - visual_field_grid_bottom_left_x);
 				success &= (fprintf(out,
-						"<rect x=\"%f\" y=\"%f\" width=\"%f\" height=\"%f\" stroke=\"#%02x%02x%02x\" fill=\"none\" stroke-width=\"%f\"/>",
+						"<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" stroke=\"#%02x%02x%02x\" fill=\"none\" stroke-width=\"%.2f\"/>",
 						visual_field_grid_bottom_left_x + border_width / 2, visual_field_grid_bottom_left_y + border_width / 2,
 						visual_field_grid_top_right_x - visual_field_grid_bottom_left_x - border_width,
 						visual_field_grid_top_right_y - visual_field_grid_bottom_left_y - border_width,
@@ -1232,17 +1232,17 @@ public:
 			/* draw the polygons and circles (i.e. items and agents) */
 			for (const rectangle& r : rectangles) {
 				success &= (fprintf(out,
-						"<rect x=\"%f\" y=\"%f\" width=\"%f\" height=\"%f\" fill=\"#%02x%02x%02x\"/>",
+						"<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"#%02x%02x%02x\"/>",
 						r.bottom_left.x, r.bottom_left.y, r.top_right.x - r.bottom_left.x, r.top_right.y - r.bottom_left.y,
 						r.color[0], r.color[1], r.color[2]) > 0);
 			} for (const triangle& t : triangles) {
 				success &= (fprintf(out,
-						"<polygon points=\"%f,%f %f,%f %f,%f\" fill=\"#%02x%02x%02x\"/>",
+						"<polygon points=\"%.2f,%.2f %.2f,%.2f %.2f,%.2f\" fill=\"#%02x%02x%02x\"/>",
 						t.vertices[0].x, t.vertices[0].y, t.vertices[1].x, t.vertices[1].y, t.vertices[2].x, t.vertices[2].y,
 						t.color[0], t.color[1], t.color[2]) > 0);
 			} for (const circle& c : circles) {
 				success &= (fprintf(out,
-						"<circle cx=\"%f\" cy=\"%f\" r=\"%f\" fill=\"#%02x%02x%02x\"/>",
+						"<circle cx=\"%.2f\" cy=\"%.2f\" r=\"%.2f\" fill=\"#%02x%02x%02x\"/>",
 						c.center.x, c.center.y, c.radius,
 						c.color[0], c.color[1], c.color[2]) > 0);
 			}
@@ -1254,11 +1254,11 @@ public:
 		{
 			/* just draw a black background */
 			bool success = (fprintf(out,
-					"<svg width=\"%u\" height=\"%u\" viewBox=\"%f %f %f %f\" xmlns=\"http://www.w3.org/2000/svg\">",
+					"<svg width=\"%u\" height=\"%u\" viewBox=\"%.2f %.2f %.2f %.2f\" xmlns=\"http://www.w3.org/2000/svg\">",
 					width, height, left, bottom, right - left, top - bottom) > 0);
-			success &= (fprintf(out, "<g transform=\"translate(0,%f) scale(1,-1)\">", top + bottom) > 0);
+			success &= (fprintf(out, "<g transform=\"translate(0,%.2f) scale(1,-1)\">", top + bottom) > 0);
 			success &= (fprintf(out,
-					"<rect x=\"%f\" y=\"%f\" width=\"%f\" height=\"%f\" fill=\"#%02x%02x%02x\"/></svg>",
+					"<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"#%02x%02x%02x\"/></g></svg>",
 					left, bottom, right - left, top - bottom,
 					BACKGROUND_COLOR.r, BACKGROUND_COLOR.g, BACKGROUND_COLOR.b) > 0);
 			return success;
