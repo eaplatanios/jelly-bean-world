@@ -139,7 +139,7 @@ void print_usage(Stream&& out) {
 		"  --no-scent-map           Disables drawing of the scent map.\n"
 		"  --visual-field           Draws the visual field around the tracked agent.\n"
 		"  --agent-path             Draws the movement path of the tracked agent. Note\n"
-		"                           that this will limit the simulation rate."
+		"                           that this will limit the simulation rate.\n"
 		"  --local                  Starts a simulation locally, rather than connecting\n"
 		"                           to a server (any specified address is ignored).\n"
 		"  --help                   Prints this usage text.\n");
@@ -156,6 +156,8 @@ void print_controls(Stream&& out) {
 		"  b key: Toggle drawing of the scent map.\n"
 		"  v key: Toggle drawing of the agent's visual field.\n"
 		"  p key: Toggle drawing of the agent's path.\n"
+		"  s key: Save screenshot to 'screenshotN.svg' where N is the smallest integer\n"
+		"         such that the file does not already exist in the current directory.\n"
 		"  1 key: Track agent with ID 1.\n"
 		"  2 key: Track agent with ID 2.\n"
 		"  3 key: Track agent with ID 3.\n"
