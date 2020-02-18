@@ -871,6 +871,12 @@ public:
 					return false;
 				}
 			}
+
+			if (!HasLock) {
+				v.scene_ready_cv.notify_one();
+				v.scene_ready = true;
+				v.scene_lock.unlock();
+			}
 			return true;
 		}
 
@@ -1367,7 +1373,7 @@ public:
 	};
 
 private:
-	template<bool HasLock, typename RenderBackend>
+	template<typename RenderBackend>
 	bool prepare_scene_helper(
 			const array<array<patch_state>>& patches,
 			position agent_position,
@@ -1594,12 +1600,6 @@ private:
 			if (!backend.draw_nothing(left, right, bottom, top, patch_size, agent_visual_field != nullptr))
 				return false;
 		}
-
-		if (!HasLock) {
-			scene_ready_cv.notify_one();
-			scene_ready = true;
-			scene_lock.unlock();
-		}
 		return true;
 	}
 
@@ -1644,7 +1644,7 @@ private:
 
 		for (unsigned int i = 0; true; i++) {
 			if (i >= existing_screenshot_ids.length || existing_screenshot_ids[i] != i) {
-				ssize_t size = snprintf(nullptr, 0, "%s%u%s", prefix, i, suffix);
+				int size = snprintf(nullptr, 0, "%s%u%s", prefix, i, suffix);
 				char* filename = (char*) malloc(sizeof(char) * (size + 1));
 				if (filename == nullptr) {
 					fprintf(stderr, "open_next_available_screenshot_file ERROR: Out of memory.\n");
@@ -1736,7 +1736,7 @@ private:
 		}
 
 		vulkan_glfw_backend<HasLock> backend(*this); /* TODO: maybe this should be a class variable */
-		bool result = prepare_scene_helper<HasLock>(
+		bool result = prepare_scene_helper(
 			patches, agent_position, agent_direction,
 			agent_visual_field, render_background_map,
 			render_path_length, left, right, bottom, top,
@@ -1746,7 +1746,7 @@ private:
 			FILE* out = open_next_available_screenshot_file();
 			if (out != nullptr) {
 				svg_backend<FILE*> svg(out, width, height);
-				prepare_scene_helper<HasLock>(
+				prepare_scene_helper(
 					patches, agent_position, agent_direction,
 					agent_visual_field, render_background_map,
 					render_path_length, left, right, bottom, top,
@@ -1878,7 +1878,7 @@ private:
 
 		if (response.get_map_response == status::OK) {
 			vulkan_glfw_backend<HasLock> backend(*this); /* TODO: maybe this should be a class variable */
-			prepare_scene_helper<HasLock>(
+			prepare_scene_helper(
 				*response.map, agent_position, agent_direction, agent_visual_field,
 				response.get_map_render_background, render_path_length,
 				response.get_map_left, response.get_map_right,
@@ -1890,7 +1890,7 @@ private:
 				FILE* out = open_next_available_screenshot_file();
 				if (out != nullptr) {
 					svg_backend<FILE*> svg(out, width, height);
-					prepare_scene_helper<HasLock>(
+					prepare_scene_helper(
 						*response.map, agent_position, agent_direction, agent_visual_field,
 						response.get_map_render_background, render_path_length,
 						response.get_map_left, response.get_map_right,
