@@ -296,8 +296,8 @@ bool run_locally(
 	config.item_types[0].intensity_fn.args = (float*) malloc(sizeof(float) * 4);
 	config.item_types[0].intensity_fn.args[0] = 500.0f;
 	config.item_types[0].intensity_fn.args[1] = 60.0f;
-	config.item_types[0].intensity_fn.args[2] = -7.2f;
-	config.item_types[0].intensity_fn.args[3] = 4.0f;
+	config.item_types[0].intensity_fn.args[2] = -3.0f;
+	config.item_types[0].intensity_fn.args[3] = 14.0f;
 	config.item_types[0].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 	config.item_types[1].intensity_fn.fn = constant_intensity_fn;
@@ -311,8 +311,8 @@ bool run_locally(
 	config.item_types[2].intensity_fn.args = (float*) malloc(sizeof(float) * 4);
 	config.item_types[2].intensity_fn.args[0] = 500.0f;
 	config.item_types[2].intensity_fn.args[1] = 60.0f;
-	config.item_types[2].intensity_fn.args[2] = -7.2f;
-	config.item_types[2].intensity_fn.args[3] = 4.0f;
+	config.item_types[2].intensity_fn.args[2] = -3.0f;
+	config.item_types[2].intensity_fn.args[3] = 14.0f;
 	config.item_types[2].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 	config.item_types[3].intensity_fn.fn = constant_intensity_fn;
@@ -338,7 +338,7 @@ bool run_locally(
 	set_interaction_args(config.item_types.data, 3, 1, zero_interaction_fn, {});
 	set_interaction_args(config.item_types.data, 3, 2, zero_interaction_fn, {});
 	//set_interaction_args(config.item_types.data, 3, 3, cross_interaction_fn, {10.0f, 15.0f, 20.0f, -200.0f, -20.0f, 1.0f});
-	set_interaction_args(config.item_types.data, 3, 3, cross_hash_interaction_fn, {60.0f, 4.0f, 20.0f, -200.0f, -20.0f, 1.0f});
+	set_interaction_args(config.item_types.data, 3, 3, cross_hash_interaction_fn, {60.0f, 4.0f, 25.0f, 2.0f, 20.0f, -200.0f, -20.0f, 1.0f});
 
 	simulator<visualizer_data> sim(config, visualizer_data());
 

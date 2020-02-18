@@ -60,12 +60,12 @@ float radial_hash_intensity_fn(const position pos, const float* args) {
 	uint32_t scale = (uint32_t) args[1];
 
 	uint32_t s = (uint32_t) sqrt(pos.squared_length()) + shift;
-	float x = 2*hash_function(s, shift, scale) - 1;
-	float x_next = 2*hash_function(s + scale, shift, scale) - 1;
+	float x = hash_function(s, shift, scale);
+	float x_next = hash_function(s + scale, shift, scale);
 
 	float t_x = (float) (s % scale) / scale;
 	if (t_x < 0) t_x += 1;
-	return args[2] + (x * (1 - t_x) + x_next * t_x) * args[3];
+	return args[2] - (x * (1 - t_x) + x_next * t_x) * args[3];
 }
 
 intensity_function get_intensity_fn(intensity_fns type, const float* args, unsigned int num_args)
@@ -151,19 +151,19 @@ float cross_hash_interaction_fn(const position pos1, const position pos2, const 
 	float t_x = (float) ((uint32_t) pos1.x % scale) / scale;
 	if (t_x < 0) t_x += 1;
 
-	float d = 25*(x * (1 - t_x) + x_next * t_x) + args[1];
-	float D = d + 2.0f;
+	float d = args[2]*(x * (1 - t_x) + x_next * t_x) + args[1];
+	float D = d + args[3];
 
 	const position diff = pos1 - pos2;
 	uint64_t dist = max(abs(diff.x), abs(diff.y));
 	if (dist <= d) {
 		if (diff.x == 0 || diff.y == 0)
-			return args[2];
-		else return args[4];
+			return args[4];
+		else return args[6];
 	} else if (dist <= D) {
 		if (diff.x == 0 || diff.y == 0)
-			return args[3];
-		else return args[5];
+			return args[5];
+		else return args[7];
 	} else {
 		return 0.0f;
 	}
@@ -191,7 +191,7 @@ interaction_function get_interaction_fn(interaction_fns type, const float* args,
 		}
 		return cross_interaction_fn;
 	case interaction_fns::CROSS_HASH:
-		if (num_args != 6) {
+		if (num_args != 8) {
 			fprintf(stderr, "get_interaction_fn ERROR: A cross-hash integration function requires 6 arguments.");
 			return NULL;
 		}

@@ -75,6 +75,18 @@ class IntensityFunction(Enum):
   """A function that outputs a constant: f_i(x) = c. The arguments for this
   function should be a list of size 1 containing the constant: [c]."""
 
+  RADIAL_HASH = 2
+  """A non-stationary function whose intensity varies as a function of
+  distance to the origin. This function uses a mixing step of a hash function
+  to induce pseudorandomness in this variation of intensity. More precisely:
+    f_i(x) = c - k * M'(||x|| / s + D)
+  where c, k, s, and D are constants, M(.) is the last mixing step of the
+  32-bit MurmurHash function, and M' is the extension of M to real-valued
+  inputs by linear interpolation at the two nearest integers:
+    M'(t) = M(floor(t)) * (1 - t + floor(t)) + M(floor(t) + 1) * (t - floor(t)).
+  The arguments for this function should be
+  [c, k, s, D]."""
+
 
 class InteractionFunction(Enum):
   """Item interaction function used in the Gibbs sampler for map generation.
@@ -117,3 +129,10 @@ class InteractionFunction(Enum):
 
   where d_1, a_1, b_1, d_2, a_2, and b_2 are constants. The arguments for this
   function should be [d_1, d_2, a_1, a_2, b_1, b_2]."""
+
+  CROSS_HASH = 3
+  """This function is identical to `CROSS` except the parameters `d_1` and
+  `d_2` are given by:
+    d_1 = c + M'(x[0] / s) and d_2 = d_1 + \delta,
+  where M' is defined above in the documentation of `RADIAL_HASH`. The
+  arguments for this function should be [s, c, k, \delta, a_1, a_2, b_1, b_2]. """
