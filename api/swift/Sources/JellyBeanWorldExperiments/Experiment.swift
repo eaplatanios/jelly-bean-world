@@ -329,7 +329,63 @@ extension JellyBeanWorldExperiments.Agent {
         valueEstimationLoss: ppoValueEstimationLoss,
         entropyRegularization: ppoEntropyRegularization,
         iterationCountPerUpdate: 4))
-    case (.ppo, .rewardContextual, _): fatalError("Not supported yet.")
+    case (.ppo, .rewardContextual, .vision):
+      // TODO: The configurations are not exactly right.
+      let network = RewardContextualVisionActorCritic(
+        simulatorConfiguration: environment.configurations[0].simulatorConfiguration)
+      return AnyAgent(PPOAgent(
+        for: environment,
+        network: network,
+        initialState: network.initialState(batchSize: batchSize),
+        optimizer: { AMSGrad(for: $0) },
+        learningRate: learningRate,
+        maxGradientNorm: 0.5,
+        advantageFunction: advantageFunction,
+        advantagesNormalizer: nil,
+        useTDLambdaReturn: true,
+        clip: ppoClip,
+        penalty: ppoPenalty,
+        valueEstimationLoss: ppoValueEstimationLoss,
+        entropyRegularization: ppoEntropyRegularization,
+        iterationCountPerUpdate: 4))
+    case (.ppo, .rewardContextual, .scent):
+      // TODO: The configurations are not exactly right.
+      let network = RewardContextualScentActorCritic(
+        simulatorConfiguration: environment.configurations[0].simulatorConfiguration)
+      return AnyAgent(PPOAgent(
+        for: environment,
+        network: network,
+        initialState: network.initialState(batchSize: batchSize),
+        optimizer: { AMSGrad(for: $0) },
+        learningRate: learningRate,
+        maxGradientNorm: 0.5,
+        advantageFunction: advantageFunction,
+        advantagesNormalizer: nil,
+        useTDLambdaReturn: true,
+        clip: ppoClip,
+        penalty: ppoPenalty,
+        valueEstimationLoss: ppoValueEstimationLoss,
+        entropyRegularization: ppoEntropyRegularization,
+        iterationCountPerUpdate: 4))
+    case (.ppo, .rewardContextual, .visionAndScent):
+      // TODO: The configurations are not exactly right.
+      let network = RewardContextualVisionAndScentActorCritic(
+        simulatorConfiguration: environment.configurations[0].simulatorConfiguration)
+      return AnyAgent(PPOAgent(
+        for: environment,
+        network: network,
+        initialState: network.initialState(batchSize: batchSize),
+        optimizer: { AMSGrad(for: $0) },
+        learningRate: learningRate,
+        maxGradientNorm: 0.5,
+        advantageFunction: advantageFunction,
+        advantagesNormalizer: nil,
+        useTDLambdaReturn: true,
+        clip: ppoClip,
+        penalty: ppoPenalty,
+        valueEstimationLoss: ppoValueEstimationLoss,
+        entropyRegularization: ppoEntropyRegularization,
+        iterationCountPerUpdate: 4))
     case (.dqn, _, _): fatalError("Not supported yet.")
     }
   }
