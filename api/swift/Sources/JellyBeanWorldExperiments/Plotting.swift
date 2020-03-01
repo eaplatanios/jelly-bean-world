@@ -24,6 +24,9 @@ fileprivate let bluePalette = sns.color_palette("Blues_d", 5)
 
 internal func makePlots(resultsDir: URL, rewardRatePeriod: Int) throws {
   let plotsDir = resultsDir.deletingLastPathComponent().appendingPathComponent("plots")
+  if !FileManager.default.fileExists(atPath: plotsDir.path) {
+    try FileManager.default.createDirectory(at: plotsDir, withIntermediateDirectories: true)
+  }
   let configurationFiles = try FileManager.default.contentsOfDirectory(
     at: plotsDir,
     includingPropertiesForKeys: nil)

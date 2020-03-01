@@ -58,7 +58,7 @@ public struct Environment: ReinforcementLearning.Environment {
         moved: Tensor<Float>(zeros: []),
         rewardFunction: rewardFunction)
     })
-    self.step =  Step(
+    self.step = Step(
       kind: StepKind.first(batchSize: batchSize),
       observation: observation,
       reward: Tensor<Float>(zeros: [batchSize]))
@@ -172,14 +172,14 @@ extension Environment {
     public var vision: Tensor<Float>
     public var scent: Tensor<Float>
     @noDerivative public var moved: Tensor<Float>
-    @noDerivative public var rewardFunction: Reward?
+    @noDerivative public var rewardFunction: JellyBeanWorld.Reward?
 
     @inlinable
     public init(
       vision: Tensor<Float>,
       scent: Tensor<Float>,
       moved: Tensor<Float>,
-      rewardFunction: Reward?
+      rewardFunction: JellyBeanWorld.Reward?
     ) {
       self.vision = vision
       self.scent = scent
