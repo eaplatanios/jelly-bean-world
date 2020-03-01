@@ -272,6 +272,44 @@ extension JellyBeanWorldExperiments.Agent {
         valueEstimationLoss: ppoValueEstimationLoss,
         entropyRegularization: ppoEntropyRegularization,
         iterationCountPerUpdate: 4))
+    case (.ppo, .rewardAware, .vision):
+      // TODO: The configurations are not exactly right.
+      let network = RewardAwareVisionActorCritic(
+        simulatorConfiguration: environment.configurations[0].simulatorConfiguration)
+      return AnyAgent(PPOAgent(
+        for: environment,
+        network: network,
+        initialState: network.initialState(batchSize: batchSize),
+        optimizer: { AMSGrad(for: $0) },
+        learningRate: learningRate,
+        maxGradientNorm: 0.5,
+        advantageFunction: advantageFunction,
+        advantagesNormalizer: nil,
+        useTDLambdaReturn: true,
+        clip: ppoClip,
+        penalty: ppoPenalty,
+        valueEstimationLoss: ppoValueEstimationLoss,
+        entropyRegularization: ppoEntropyRegularization,
+        iterationCountPerUpdate: 4))
+    case (.ppo, .rewardAware, .scent):
+      // TODO: The configurations are not exactly right.
+      let network = RewardAwareScentActorCritic(
+        simulatorConfiguration: environment.configurations[0].simulatorConfiguration)
+      return AnyAgent(PPOAgent(
+        for: environment,
+        network: network,
+        initialState: network.initialState(batchSize: batchSize),
+        optimizer: { AMSGrad(for: $0) },
+        learningRate: learningRate,
+        maxGradientNorm: 0.5,
+        advantageFunction: advantageFunction,
+        advantagesNormalizer: nil,
+        useTDLambdaReturn: true,
+        clip: ppoClip,
+        penalty: ppoPenalty,
+        valueEstimationLoss: ppoValueEstimationLoss,
+        entropyRegularization: ppoEntropyRegularization,
+        iterationCountPerUpdate: 4))
     case (.ppo, .rewardAware, .visionAndScent):
       // TODO: The configurations are not exactly right.
       let network = RewardAwareVisionAndScentActorCritic(
@@ -291,7 +329,6 @@ extension JellyBeanWorldExperiments.Agent {
         valueEstimationLoss: ppoValueEstimationLoss,
         entropyRegularization: ppoEntropyRegularization,
         iterationCountPerUpdate: 4))
-    case (.ppo, .rewardAware, _): fatalError("Not supported yet.")
     case (.ppo, .rewardContextual, _): fatalError("Not supported yet.")
     case (.dqn, _, _): fatalError("Not supported yet.")
     }

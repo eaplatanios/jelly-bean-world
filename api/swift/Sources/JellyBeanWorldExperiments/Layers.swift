@@ -319,6 +319,128 @@ public struct RewardCompiler: Module {
   }
 }
 
+public struct RewardAwareVisionActorCritic: Module {
+  public var rewardCompiler: RewardCompiler
+  public var visionLayer: VisionLayer
+  public var hiddenLSTMCell: LSTMCell<Float>
+  public var denseAction: Dense<Float>
+  public var denseValue: Dense<Float>
+
+  @inlinable
+  public func initialState(batchSize: Int) -> LSTMCell<Float>.State {
+    hiddenLSTMCell.zeroState(batchSize: batchSize)
+  }
+
+  @inlinable
+  public init(
+    simulatorConfiguration: Simulator.Configuration,
+    hiddenSize: Int = 512,
+    rewardEmbeddingSize: Int = 8
+  ) {
+    rewardCompiler = RewardCompiler(
+      simulatorConfiguration: simulatorConfiguration,
+      embeddingSize: rewardEmbeddingSize)
+    visionLayer = VisionLayer(outputSize: hiddenSize)
+    hiddenLSTMCell = LSTMCell<Float>(
+      inputSize: hiddenSize + 1 + rewardEmbeddingSize,
+      hiddenSize: hiddenSize)
+    denseAction = Dense<Float>(inputSize: 2 * hiddenSize + 1 + rewardEmbeddingSize, outputSize: 3)
+    denseValue = Dense<Float>(inputSize: 2 * hiddenSize + 1 + rewardEmbeddingSize, outputSize: 1)
+  }
+
+  @inlinable
+  @differentiable
+  public func callAsFunction(
+    _ input: AgentInput<JellyBeanWorld.Environment.Observation, LSTMCell<Float>.State>
+  ) -> ActorCriticOutput<Categorical<Int32>, LSTMCell<Float>.State> {
+    let observation = input.observation
+    let outerDimCount = observation.vision.rank - 3
+    let outerDims = [Int](observation.vision.shape.dimensions[0..<outerDimCount])
+    let reward = rewardCompiler(observation.rewardFunction)
+    let vision = observation.vision.flattenedBatch(outerDimCount: outerDimCount)
+    let rewardHidden = reward.expandingShape(at: 0).tiled(
+      multiples: Tensor<Int32>([Int32(vision.shape[0]), 1]))
+    let visionHidden = gelu(visionLayer(vision))
+    let moved = 2 * observation.moved.flattenedBatch(
+      outerDimCount: outerDimCount
+    ).expandingShape(at: -1) - 1
+    let hidden = rewardHidden
+      .concatenated(with: visionHidden, alongAxis: -1)
+      .concatenated(with: moved, alongAxis: -1)
+    let state = withoutDerivative(at: input.state).flattenedBatch(outerDimCount: outerDimCount)
+    let hiddenLSTMOutput = hiddenLSTMCell(LSTMCell<Float>.Value(value: hidden, state: state))
+    let hiddenConcatenated = hidden.concatenated(with: hiddenLSTMOutput.value, alongAxis: -1)
+    let actionLogits = denseAction(hiddenConcatenated)
+    let flattenedValue = denseValue(hiddenConcatenated)
+    let flattenedActionDistribution = Categorical<Int32>(logits: actionLogits)
+    return ActorCriticOutput(
+      actionDistribution: flattenedActionDistribution.unflattenedBatch(outerDims: outerDims),
+      value: flattenedValue.unflattenedBatch(outerDims: outerDims).squeezingShape(at: -1),
+      state: withoutDerivative(at: hiddenLSTMOutput.state).unflattenedBatch(outerDims: outerDims))
+  }
+}
+
+public struct RewardAwareScentActorCritic: Module {
+  public var rewardCompiler: RewardCompiler
+  public var scentLayer: ScentLayer
+  public var hiddenLSTMCell: LSTMCell<Float>
+  public var denseAction: Dense<Float>
+  public var denseValue: Dense<Float>
+
+  @inlinable
+  public func initialState(batchSize: Int) -> LSTMCell<Float>.State {
+    hiddenLSTMCell.zeroState(batchSize: batchSize)
+  }
+
+  @inlinable
+  public init(
+    simulatorConfiguration: Simulator.Configuration,
+    hiddenSize: Int = 512,
+    rewardEmbeddingSize: Int = 8
+  ) {
+    rewardCompiler = RewardCompiler(
+      simulatorConfiguration: simulatorConfiguration,
+      embeddingSize: rewardEmbeddingSize)
+    scentLayer = ScentLayer(outputSize: hiddenSize)
+    hiddenLSTMCell = LSTMCell<Float>(
+      inputSize: hiddenSize + 1 + rewardEmbeddingSize,
+      hiddenSize: hiddenSize)
+    denseAction = Dense<Float>(inputSize: 2 * hiddenSize + 1 + rewardEmbeddingSize, outputSize: 3)
+    denseValue = Dense<Float>(inputSize: 2 * hiddenSize + 1 + rewardEmbeddingSize, outputSize: 1)
+  }
+
+  @inlinable
+  @differentiable
+  public func callAsFunction(
+    _ input: AgentInput<JellyBeanWorld.Environment.Observation, LSTMCell<Float>.State>
+  ) -> ActorCriticOutput<Categorical<Int32>, LSTMCell<Float>.State> {
+    let observation = input.observation
+    let outerDimCount = observation.vision.rank - 3
+    let outerDims = [Int](observation.vision.shape.dimensions[0..<outerDimCount])
+    let reward = rewardCompiler(observation.rewardFunction)
+    let scent = observation.scent.flattenedBatch(outerDimCount: outerDimCount)
+    let rewardHidden = reward.expandingShape(at: 0).tiled(
+      multiples: Tensor<Int32>([Int32(scent.shape[0]), 1]))
+    let scentHidden = gelu(scentLayer(scent))
+    let moved = 2 * observation.moved.flattenedBatch(
+      outerDimCount: outerDimCount
+    ).expandingShape(at: -1) - 1
+    let hidden = rewardHidden
+      .concatenated(with: scentHidden, alongAxis: -1)
+      .concatenated(with: moved, alongAxis: -1)
+    let state = withoutDerivative(at: input.state).flattenedBatch(outerDimCount: outerDimCount)
+    let hiddenLSTMOutput = hiddenLSTMCell(LSTMCell<Float>.Value(value: hidden, state: state))
+    let hiddenConcatenated = hidden.concatenated(with: hiddenLSTMOutput.value, alongAxis: -1)
+    let actionLogits = denseAction(hiddenConcatenated)
+    let flattenedValue = denseValue(hiddenConcatenated)
+    let flattenedActionDistribution = Categorical<Int32>(logits: actionLogits)
+    return ActorCriticOutput(
+      actionDistribution: flattenedActionDistribution.unflattenedBatch(outerDims: outerDims),
+      value: flattenedValue.unflattenedBatch(outerDims: outerDims).squeezingShape(at: -1),
+      state: withoutDerivative(at: hiddenLSTMOutput.state).unflattenedBatch(outerDims: outerDims))
+  }
+}
+
 public struct RewardAwareVisionAndScentActorCritic: Module {
   public var rewardCompiler: RewardCompiler
   public var visionLayer: VisionLayer
