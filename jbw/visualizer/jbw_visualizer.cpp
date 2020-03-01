@@ -138,6 +138,8 @@ void print_usage(Stream&& out) {
 		"  --max-steps-per-sec=NUM  Sets the maximum simulation steps per second.\n"
 		"  --no-scent-map           Disables drawing of the scent map.\n"
 		"  --visual-field           Draws the visual field around the tracked agent.\n"
+		"  --agent-path             Draws the movement path of the tracked agent. Note\n"
+		"                           that this will limit the simulation rate.\n"
 		"  --local                  Starts a simulation locally, rather than connecting\n"
 		"                           to a server (any specified address is ignored).\n"
 		"  --help                   Prints this usage text.\n");
@@ -153,6 +155,9 @@ void print_controls(Stream&& out) {
 		"  ] key: Increase max simulation steps per second.\n"
 		"  b key: Toggle drawing of the scent map.\n"
 		"  v key: Toggle drawing of the agent's visual field.\n"
+		"  p key: Toggle drawing of the agent's path.\n"
+		"  s key: Save screenshot to 'screenshotN.svg' where N is the smallest integer\n"
+		"         such that the file does not already exist in the current directory.\n"
 		"  1 key: Track agent with ID 1.\n"
 		"  2 key: Track agent with ID 2.\n"
 		"  3 key: Track agent with ID 3.\n"
@@ -197,19 +202,38 @@ inline void on_step(simulator<visualizer_data>* sim,
 	data.cv.notify_one();
 }
 
+template<typename PerPatchData, typename ItemType>
+void generate_map(
+		map<PerPatchData, ItemType>& world,
+		const jbw::position& bottom_left_corner,
+		const jbw::position& top_right_corner)
+{
+	/* make sure enough of the world is generated */
+	patch<PerPatchData>* neighborhood[4]; jbw::position patch_positions[4];
+	for (int64_t x = bottom_left_corner.x; x <= top_right_corner.x; x += world.n) {
+		for (int64_t y = bottom_left_corner.y; y <= top_right_corner.y; y += world.n)
+			world.get_fixed_neighborhood(jbw::position(x, y), neighborhood, patch_positions);
+		world.get_fixed_neighborhood(jbw::position(x, top_right_corner.y), neighborhood, patch_positions);
+	}
+	for (int64_t y = bottom_left_corner.y; y <= top_right_corner.y; y += world.n)
+		world.get_fixed_neighborhood(jbw::position(top_right_corner.x, y), neighborhood, patch_positions);
+	world.get_fixed_neighborhood(top_right_corner, neighborhood, patch_positions);
+}
+
 bool run_locally(
 		uint64_t track_agent_id,
 		float pixels_per_cell,
 		bool draw_scent_map,
 		bool draw_visual_field,
+		bool draw_agent_path,
 		float max_steps_per_second)
 {
 	simulator_config config;
 	config.max_steps_per_movement = 1;
 	config.scent_dimension = 3;
 	config.color_dimension = 3;
-	config.vision_range = 10;
-	config.agent_field_of_view = 4.19f;
+	config.vision_range = 5;
+	config.agent_field_of_view = 2 * M_PI;
 	config.allowed_movement_directions[0] = action_policy::ALLOWED;
 	config.allowed_movement_directions[1] = action_policy::DISALLOWED;
 	config.allowed_movement_directions[2] = action_policy::DISALLOWED;
@@ -219,8 +243,8 @@ bool run_locally(
 	config.allowed_rotations[2] = action_policy::ALLOWED;
 	config.allowed_rotations[3] = action_policy::ALLOWED;
 	config.no_op_allowed = false;
-	config.patch_size = 64;
-	config.mcmc_iterations = 10000;
+	config.patch_size = 32;
+	config.mcmc_iterations = 4000;
 	config.agent_color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.agent_color[2] = 1.0f;
 	config.collision_policy = movement_conflict_policy::FIRST_COME_FIRST_SERVED;
@@ -229,19 +253,15 @@ bool run_locally(
 	config.deleted_item_lifetime = 2000;
 
 	/* configure item types */
-	unsigned int item_type_count = 6;
+	unsigned int item_type_count = 4;
 	config.item_types.ensure_capacity(item_type_count);
 	config.item_types[0].name = "banana";
 	config.item_types[0].scent = (float*) calloc(config.scent_dimension, sizeof(float));
 	config.item_types[0].color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.item_types[0].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
 	config.item_types[0].required_item_costs = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
-	config.item_types[0].scent[0] = 2.0f * 0.96f;
-	config.item_types[0].scent[1] = 2.0f * 0.88f;
-	config.item_types[0].scent[2] = 2.0f * 0.20f;
-	config.item_types[0].color[0] = 0.96f;
-	config.item_types[0].color[1] = 0.88f;
-	config.item_types[0].color[2] = 0.20f;
+	config.item_types[0].scent[1] = 1.0f;
+	config.item_types[0].color[1] = 1.0f;
 	config.item_types[0].required_item_counts[0] = 1;
 	config.item_types[0].blocks_movement = false;
 	config.item_types[0].visual_occlusion = 0.0;
@@ -250,12 +270,9 @@ bool run_locally(
 	config.item_types[1].color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.item_types[1].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
 	config.item_types[1].required_item_costs = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
-	config.item_types[1].scent[0] = 0.68f;
-	config.item_types[1].scent[1] = 0.01f;
-	config.item_types[1].scent[2] = 0.99f;
-	config.item_types[1].color[0] = 0.68f;
-	config.item_types[1].color[1] = 0.01f;
-	config.item_types[1].color[2] = 0.99f;
+	config.item_types[1].scent[0] = 1.0f;
+	config.item_types[1].color[0] = 1.0f;
+	config.item_types[1].required_item_counts[1] = 1;
 	config.item_types[1].blocks_movement = false;
 	config.item_types[1].visual_occlusion = 0.0;
 	config.item_types[2].name = "jellybean";
@@ -263,132 +280,64 @@ bool run_locally(
 	config.item_types[2].color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.item_types[2].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
 	config.item_types[2].required_item_costs = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
-	config.item_types[2].scent[0] = 2.0f * 0.82f;
-	config.item_types[2].scent[1] = 2.0f * 0.27f;
-	config.item_types[2].scent[2] = 2.0f * 0.20f;
-	config.item_types[2].color[0] = 0.82f;
-	config.item_types[2].color[1] = 0.27f;
-	config.item_types[2].color[2] = 0.20f;
+	config.item_types[2].scent[2] = 1.0f;
+	config.item_types[2].color[2] = 1.0f;
 	config.item_types[2].blocks_movement = false;
-	config.item_types[2].visual_occlusion = 0.0f;
+	config.item_types[2].visual_occlusion = 0.0;
 	config.item_types[3].name = "wall";
 	config.item_types[3].scent = (float*) calloc(config.scent_dimension, sizeof(float));
 	config.item_types[3].color = (float*) calloc(config.color_dimension, sizeof(float));
 	config.item_types[3].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
 	config.item_types[3].required_item_costs = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
-	config.item_types[3].color[0] = 0.20f;
-	config.item_types[3].color[1] = 0.47f;
-	config.item_types[3].color[2] = 0.67f;
+	config.item_types[3].color[0] = 0.5f;
+	config.item_types[3].color[1] = 0.5f;
+	config.item_types[3].color[2] = 0.5f;
 	config.item_types[3].required_item_counts[3] = 1;
 	config.item_types[3].blocks_movement = true;
-	config.item_types[3].visual_occlusion = 1.0f;
-	config.item_types[4].name = "tree";
-	config.item_types[4].scent = (float*) calloc(config.scent_dimension, sizeof(float));
-	config.item_types[4].color = (float*) calloc(config.color_dimension, sizeof(float));
-	config.item_types[4].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
-	config.item_types[4].required_item_costs = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
-	config.item_types[4].scent[0] = 0.00f;
-	config.item_types[4].scent[1] = 0.47f;
-	config.item_types[4].scent[2] = 0.06f;
-	config.item_types[4].color[0] = 0.00f;
-	config.item_types[4].color[1] = 0.47f;
-	config.item_types[4].color[2] = 0.06f;
-	config.item_types[4].required_item_counts[4] = 1;
-	config.item_types[4].blocks_movement = false;
-	config.item_types[4].visual_occlusion = 0.1f;
-	config.item_types[5].name = "truffle";
-	config.item_types[5].scent = (float*) calloc(config.scent_dimension, sizeof(float));
-	config.item_types[5].color = (float*) calloc(config.color_dimension, sizeof(float));
-	config.item_types[5].required_item_counts = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
-	config.item_types[5].required_item_costs = (unsigned int*) calloc(item_type_count, sizeof(unsigned int));
-	config.item_types[5].scent[0] = 20.0f * 0.42f;
-	config.item_types[5].scent[1] = 20.0f * 0.24f;
-	config.item_types[5].scent[2] = 20.0f * 0.13f;
-	config.item_types[5].color[0] = 0.42f;
-	config.item_types[5].color[1] = 0.24f;
-	config.item_types[5].color[2] = 0.13f;
-	config.item_types[5].blocks_movement = false;
-	config.item_types[5].visual_occlusion = 0.0f;
+	config.item_types[3].visual_occlusion = 0.0;
 	config.item_types.length = item_type_count;
 
 	config.item_types[0].intensity_fn.fn = constant_intensity_fn;
 	config.item_types[0].intensity_fn.arg_count = 1;
 	config.item_types[0].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[0].intensity_fn.args[0] = 1.5f;
+	config.item_types[0].intensity_fn.args[0] = -5.3f;
 	config.item_types[0].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 	config.item_types[1].intensity_fn.fn = constant_intensity_fn;
 	config.item_types[1].intensity_fn.arg_count = 1;
 	config.item_types[1].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[1].intensity_fn.args[0] = -3.0f;
+	config.item_types[1].intensity_fn.args[0] = -5.0f;
 	config.item_types[1].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 	config.item_types[2].intensity_fn.fn = constant_intensity_fn;
 	config.item_types[2].intensity_fn.arg_count = 1;
 	config.item_types[2].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[2].intensity_fn.args[0] = 1.5f;
+	config.item_types[2].intensity_fn.args[0] = -5.3f;
 	config.item_types[2].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 	config.item_types[3].intensity_fn.fn = constant_intensity_fn;
 	config.item_types[3].intensity_fn.arg_count = 1;
 	config.item_types[3].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[3].intensity_fn.args[0] = -12.0f;
+	config.item_types[3].intensity_fn.args[0] = 0.0f;
 	config.item_types[3].interaction_fns = (energy_function<interaction_function>*)
 			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
-	config.item_types[4].intensity_fn.fn = constant_intensity_fn;
-	config.item_types[4].intensity_fn.arg_count = 1;
-	config.item_types[4].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[4].intensity_fn.args[0] = 2.0f;
-	config.item_types[4].interaction_fns = (energy_function<interaction_function>*)
-			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
-	config.item_types[5].intensity_fn.fn = constant_intensity_fn;
-	config.item_types[5].intensity_fn.arg_count = 1;
-	config.item_types[5].intensity_fn.args = (float*) malloc(sizeof(float) * 1);
-	config.item_types[5].intensity_fn.args[0] = -10.0f;
-	config.item_types[5].interaction_fns = (energy_function<interaction_function>*)
-			malloc(sizeof(energy_function<interaction_function>) * config.item_types.length);
 
-	set_interaction_args(config.item_types.data, 0, 0, piecewise_box_interaction_fn, {10.0f, 100.0f, 0.0f, -6.0f});
-	set_interaction_args(config.item_types.data, 0, 1, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 0, 2, piecewise_box_interaction_fn, {10.0f, 100.0f, 2.0f, -100.0f});
+	set_interaction_args(config.item_types.data, 0, 0, piecewise_box_interaction_fn, {10.0f, 200.0f, 0.0f, -6.0f});
+	set_interaction_args(config.item_types.data, 0, 1, piecewise_box_interaction_fn, {200.0f, 0.0f, -6.0f, -6.0f});
+	set_interaction_args(config.item_types.data, 0, 2, piecewise_box_interaction_fn, {10.0f, 200.0f, 2.0f, -100.0f});
 	set_interaction_args(config.item_types.data, 0, 3, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 0, 4, piecewise_box_interaction_fn, {50.0f, 100.0f, -100.0f, -100.0f});
-	set_interaction_args(config.item_types.data, 0, 5, zero_interaction_fn, {});
-
-	set_interaction_args(config.item_types.data, 1, 0, zero_interaction_fn, {});
+	set_interaction_args(config.item_types.data, 1, 0, piecewise_box_interaction_fn, {200.0f, 0.0f, -6.0f, -6.0f});
 	set_interaction_args(config.item_types.data, 1, 1, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 1, 2, zero_interaction_fn, {});
+	set_interaction_args(config.item_types.data, 1, 2, piecewise_box_interaction_fn, {200.0f, 0.0f, -100.0f, -100.0f});
 	set_interaction_args(config.item_types.data, 1, 3, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 1, 4, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 1, 5, zero_interaction_fn, {});
-
-	set_interaction_args(config.item_types.data, 2, 0, piecewise_box_interaction_fn, {10.0f, 100.0f, 2.0f, -100.0f});
-	set_interaction_args(config.item_types.data, 2, 1, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 2, 2, piecewise_box_interaction_fn, {10.0f, 100.0f, 0.0f, -6.0f});
+	set_interaction_args(config.item_types.data, 2, 0, piecewise_box_interaction_fn, {10.0f, 200.0f, 2.0f, -100.0f});
+	set_interaction_args(config.item_types.data, 2, 1, piecewise_box_interaction_fn, {200.0f, 0.0f, -100.0f, -100.0f});
+	set_interaction_args(config.item_types.data, 2, 2, piecewise_box_interaction_fn, {10.0f, 200.0f, 0.0f, -6.0f});
 	set_interaction_args(config.item_types.data, 2, 3, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 2, 4, piecewise_box_interaction_fn, {50.0f, 100.0f, -100.0f, -100.0f});
-	set_interaction_args(config.item_types.data, 2, 5, zero_interaction_fn, {});
-
 	set_interaction_args(config.item_types.data, 3, 0, zero_interaction_fn, {});
 	set_interaction_args(config.item_types.data, 3, 1, zero_interaction_fn, {});
 	set_interaction_args(config.item_types.data, 3, 2, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 3, 3, cross_interaction_fn, {20.0f, 40.0f, 8.0f, -1000.0f, -1000.0f, -1.0f});
-	set_interaction_args(config.item_types.data, 3, 4, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 3, 5, zero_interaction_fn, {});
-
-	set_interaction_args(config.item_types.data, 4, 0, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 4, 1, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 4, 2, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 4, 3, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 4, 4, piecewise_box_interaction_fn, {100.0f, 500.0f, 0.0f, -0.1f});
-	set_interaction_args(config.item_types.data, 4, 5, zero_interaction_fn, {});
-
-	set_interaction_args(config.item_types.data, 5, 0, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 5, 1, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 5, 2, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 5, 3, zero_interaction_fn, {});
-	set_interaction_args(config.item_types.data, 5, 4, piecewise_box_interaction_fn, {4.0f, 200.0f, 2.0f, 0.0f});
-	set_interaction_args(config.item_types.data, 5, 5, piecewise_box_interaction_fn, {30.0f, 1000.0f, -0.3f, -1.0f});
+	set_interaction_args(config.item_types.data, 3, 3, cross_interaction_fn, {10.0f, 15.0f, 20.0f, -200.0f, -20.0f, 1.0f});
 
 	simulator<visualizer_data> sim(config, visualizer_data());
 
@@ -401,7 +350,7 @@ bool run_locally(
 	print_controls(stdout); fflush(stdout);
 	simulation_running = true;
 	visualizer<simulator<visualizer_data>> visualizer(sim, 800, 800, track_agent_id,
-			pixels_per_cell, draw_scent_map, draw_visual_field, max_steps_per_second);
+			pixels_per_cell, draw_scent_map, draw_visual_field, draw_agent_path, max_steps_per_second);
 
 	unsigned int move_count = 0;
 	std::thread simulation_worker = std::thread([&]() {
@@ -465,6 +414,7 @@ bool run(
 		float pixels_per_cell,
 		bool draw_scent_map,
 		bool draw_visual_field,
+		bool draw_agent_path,
 		float max_steps_per_second)
 {
 	uint64_t client_id;
@@ -479,7 +429,7 @@ bool run(
 	print_controls(stdout); fflush(stdout);
 
 	visualizer<client<visualizer_client_data>> visualizer(sim, 800, 800, track_agent_id,
-			pixels_per_cell, draw_scent_map, draw_visual_field, max_steps_per_second);
+			pixels_per_cell, draw_scent_map, draw_visual_field, draw_agent_path, max_steps_per_second);
 	visualizer_running = &visualizer.running;
 	while (simulation_running && sim.client_running) {
 		if (visualizer.is_window_closed())
@@ -514,6 +464,7 @@ int main(int argc, const char** argv)
 	bool local = false;
 	bool draw_scent_map = true;
 	bool draw_visual_field = false;
+	bool draw_agent_path = false;
 
 	/* parse command-line arguments */
 	bool fail = false;
@@ -525,6 +476,7 @@ int main(int argc, const char** argv)
 		if (parse_option(argv[i], fail, "--local")) { local = true; continue; }
 		if (parse_option(argv[i], fail, "--no-scent-map")) { draw_scent_map = false; continue; }
 		if (parse_option(argv[i], fail, "--visual-field")) { draw_visual_field = true; continue; }
+		if (parse_option(argv[i], fail, "--agent-path")) { draw_agent_path = true; continue; }
 		if (parse_option(argv[i], fail, "--help")) {
 			print_usage(stdout);
 			fflush(stdout);
@@ -553,7 +505,7 @@ int main(int argc, const char** argv)
 			free(server_address);
 			server_address = nullptr;
 		}
-		if (!run_locally(track_agent_id, pixels_per_cell, draw_scent_map, draw_visual_field, max_steps_per_second))
+		if (!run_locally(track_agent_id, pixels_per_cell, draw_scent_map, draw_visual_field, draw_agent_path, max_steps_per_second))
 			return EXIT_FAILURE;
 	} else {
 		if (server_address == nullptr || server_port == nullptr) {
@@ -561,7 +513,7 @@ int main(int argc, const char** argv)
 			return EXIT_FAILURE;
 		}
 
-		if (!run(server_address, server_port, track_agent_id, pixels_per_cell, draw_scent_map, draw_visual_field, max_steps_per_second)) {
+		if (!run(server_address, server_port, track_agent_id, pixels_per_cell, draw_scent_map, draw_visual_field, draw_agent_path, max_steps_per_second)) {
 			free(server_address);
 			return EXIT_FAILURE;
 		}

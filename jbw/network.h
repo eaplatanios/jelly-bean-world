@@ -722,6 +722,14 @@ bool run_client(
 		const char* server_address, const char* server_port,
 		ProcessConnectionCallback process_connection)
 {
+#if defined(_WIN32)
+	WSADATA wsa_state;
+	if (WSAStartup(MAKEWORD(2, 2), &wsa_state) != NO_ERROR) {
+		fprintf(stderr, "run_client ERROR: Unable to initialize WinSock.\n");
+		return false;
+	}
+#endif
+
 	addrinfo hints;
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_UNSPEC;

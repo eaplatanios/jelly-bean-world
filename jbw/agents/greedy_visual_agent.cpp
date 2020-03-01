@@ -124,9 +124,9 @@ inline direction turn_right(direction dir) {
 inline bool inside_fov(int x, int y, float fov) {
 	if (x < 0) x = -x;
 	float angle;
-	if (y == 0) angle = M_PI / 2;
+	if (y == 0) angle = (float) M_PI / 2;
 	else if (y > 0) angle = atan((float) x / y);
-	else angle = M_PI + atan((float) x / y);
+	else angle = (float) M_PI + atan((float) x / y);
 	return 2*angle <= fov;
 }
 
@@ -139,7 +139,7 @@ shortest_path_state* shortest_path(
 		const float fov)
 {
 	unsigned int* smallest_costs = (unsigned int*) malloc(sizeof(unsigned int) * (2*vision_range + 1) * (2*vision_range + 1) * 4);
-	for (unsigned int i = 0; i < (2*vision_range + 1) * (2*vision_range + 1) * 4; i++)
+	for (unsigned int i = 0; i < (unsigned int) (2*vision_range + 1) * (2*vision_range + 1) * 4; i++)
 		smallest_costs[i] = UINT_MAX;
 
 	std::multiset<shortest_path_state*, shortest_path_state::less_than> queue;
@@ -253,7 +253,7 @@ int main(int argc, const char** argv)
 	config.scent_dimension = 3;
 	config.color_dimension = 3;
 	config.vision_range = 8;
-	config.agent_field_of_view = 2 * M_PI;
+	config.agent_field_of_view = (float) (2 * M_PI);
 	config.allowed_movement_directions[0] = action_policy::ALLOWED;
 	config.allowed_movement_directions[1] = action_policy::ALLOWED;
 	config.allowed_movement_directions[2] = action_policy::ALLOWED;
@@ -432,9 +432,9 @@ int main(int argc, const char** argv)
 	set_interaction_args(config.item_types.data, 5, 4, piecewise_box_interaction_fn, {4.0f, 200.0f, 2.0f, 0.0f});
 	set_interaction_args(config.item_types.data, 5, 5, piecewise_box_interaction_fn, {30.0f, 1000.0f, -0.3f, -1.0f});
 
-	unsigned int jellybean_index = config.item_types.length;
-	unsigned int onion_index = config.item_types.length;
-	unsigned int wall_index = config.item_types.length;
+	unsigned int jellybean_index = (unsigned int) config.item_types.length;
+	unsigned int onion_index = (unsigned int) config.item_types.length;
+	unsigned int wall_index = (unsigned int) config.item_types.length;
 	for (unsigned int i = 0; i < config.item_types.length; i++) {
 		if (config.item_types[i].name == "jellybean") {
 			jellybean_index = i;
@@ -593,7 +593,8 @@ wall_in_front = item_exists<true>(agent->current_vision, config.vision_range, co
 		lock.unlock();
 
 		if (t % 1000 == 0) {
-			printf("[iteration %u]\n"
+			FILE* out = stdout;
+			fprintf(out, "[iteration %u]\n"
 				"  Agent position: ", t);
 			double reward;
 			if (onion_index < config.item_types.length) {
@@ -601,8 +602,8 @@ wall_in_front = item_exists<true>(agent->current_vision, config.vision_range, co
 			} else {
 				reward = (double) agent->collected_items[jellybean_index] / (t + 1);
 			}
-			print(agent->current_position, stdout); printf("\n  Jellybeans collected: %u\n  Reward rate: %lf\n", agent->collected_items[jellybean_index], reward);
-			fflush(stdout);
+			print(agent->current_position, out); fprintf(out, "\n  Jellybeans collected: %u\n  Reward rate: %lf\n", agent->collected_items[jellybean_index], reward);
+			fflush(out);
 		}
 	}
 
