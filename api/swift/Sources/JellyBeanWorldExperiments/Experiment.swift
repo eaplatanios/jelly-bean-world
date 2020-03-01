@@ -62,6 +62,7 @@ public struct Experiment {
   public func run(
     observation: Observation,
     network: Network,
+    networkHiddenStateSize: Int?,
     writeFrequency: Int = 100,
     logFrequency: Int = 1000
    ) throws {
@@ -122,6 +123,7 @@ public struct Experiment {
       var agent = self.agent.create(
         in: environment,
         network: network,
+        networkHiddenStateSize: networkHiddenStateSize,
         observation: observation,
         batchSize: batchSize)
       let resultsFileHandle = try? FileHandle(forWritingTo: resultsFile)
@@ -203,6 +205,7 @@ extension JellyBeanWorldExperiments.Agent {
   public func create(
     in environment: JellyBeanWorld.Environment,
     network: Network,
+    networkHiddenStateSize: Int?,
     observation: Observation,
     batchSize: Int
    ) -> AnyAgent<JellyBeanWorld.Environment, LSTMCell<Float>.State> {
@@ -222,7 +225,7 @@ extension JellyBeanWorldExperiments.Agent {
     case (.reinforce, _, _): fatalError("Not supported yet.")
     case (.a2c, _, _): fatalError("Not supported yet.")
     case (.ppo, .plain, .vision):
-      let network = VisionActorCritic()
+      let network = VisionActorCritic(hiddenSize: networkHiddenStateSize ?? 512)
       return AnyAgent(PPOAgent(
         for: environment,
         network: network,
@@ -239,7 +242,7 @@ extension JellyBeanWorldExperiments.Agent {
         entropyRegularization: ppoEntropyRegularization,
         iterationCountPerUpdate: 4))
     case (.ppo, .plain, .scent):
-      let network = ScentActorCritic()
+      let network = ScentActorCritic(hiddenSize: networkHiddenStateSize ?? 512)
       return AnyAgent(PPOAgent(
         for: environment,
         network: network,
@@ -256,7 +259,7 @@ extension JellyBeanWorldExperiments.Agent {
         entropyRegularization: ppoEntropyRegularization,
         iterationCountPerUpdate: 4))
     case (.ppo, .plain, .visionAndScent):
-      let network = VisionAndScentActorCritic()
+      let network = VisionAndScentActorCritic(hiddenSize: networkHiddenStateSize ?? 512)
       return AnyAgent(PPOAgent(
         for: environment,
         network: network,
@@ -275,7 +278,8 @@ extension JellyBeanWorldExperiments.Agent {
     case (.ppo, .rewardAware, .vision):
       // TODO: The configurations are not exactly right.
       let network = RewardAwareVisionActorCritic(
-        simulatorConfiguration: environment.configurations[0].simulatorConfiguration)
+        simulatorConfiguration: environment.configurations[0].simulatorConfiguration,
+        hiddenSize: networkHiddenStateSize ?? 630)
       return AnyAgent(PPOAgent(
         for: environment,
         network: network,
@@ -294,7 +298,8 @@ extension JellyBeanWorldExperiments.Agent {
     case (.ppo, .rewardAware, .scent):
       // TODO: The configurations are not exactly right.
       let network = RewardAwareScentActorCritic(
-        simulatorConfiguration: environment.configurations[0].simulatorConfiguration)
+        simulatorConfiguration: environment.configurations[0].simulatorConfiguration,
+        hiddenSize: networkHiddenStateSize ?? 630)
       return AnyAgent(PPOAgent(
         for: environment,
         network: network,
@@ -313,7 +318,8 @@ extension JellyBeanWorldExperiments.Agent {
     case (.ppo, .rewardAware, .visionAndScent):
       // TODO: The configurations are not exactly right.
       let network = RewardAwareVisionAndScentActorCritic(
-        simulatorConfiguration: environment.configurations[0].simulatorConfiguration)
+        simulatorConfiguration: environment.configurations[0].simulatorConfiguration,
+        hiddenSize: networkHiddenStateSize ?? 630)
       return AnyAgent(PPOAgent(
         for: environment,
         network: network,
@@ -332,7 +338,8 @@ extension JellyBeanWorldExperiments.Agent {
     case (.ppo, .rewardContextual, .vision):
       // TODO: The configurations are not exactly right.
       let network = RewardContextualVisionActorCritic(
-        simulatorConfiguration: environment.configurations[0].simulatorConfiguration)
+        simulatorConfiguration: environment.configurations[0].simulatorConfiguration,
+        hiddenSize: networkHiddenStateSize ?? 170)
       return AnyAgent(PPOAgent(
         for: environment,
         network: network,
@@ -351,7 +358,8 @@ extension JellyBeanWorldExperiments.Agent {
     case (.ppo, .rewardContextual, .scent):
       // TODO: The configurations are not exactly right.
       let network = RewardContextualScentActorCritic(
-        simulatorConfiguration: environment.configurations[0].simulatorConfiguration)
+        simulatorConfiguration: environment.configurations[0].simulatorConfiguration,
+        hiddenSize: networkHiddenStateSize ?? 170)
       return AnyAgent(PPOAgent(
         for: environment,
         network: network,
@@ -370,7 +378,8 @@ extension JellyBeanWorldExperiments.Agent {
     case (.ppo, .rewardContextual, .visionAndScent):
       // TODO: The configurations are not exactly right.
       let network = RewardContextualVisionAndScentActorCritic(
-        simulatorConfiguration: environment.configurations[0].simulatorConfiguration)
+        simulatorConfiguration: environment.configurations[0].simulatorConfiguration,
+        hiddenSize: networkHiddenStateSize ?? 170)
       return AnyAgent(PPOAgent(
         for: environment,
         network: network,

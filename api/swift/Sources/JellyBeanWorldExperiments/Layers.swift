@@ -334,7 +334,7 @@ public struct RewardAwareVisionActorCritic: Module {
   @inlinable
   public init(
     simulatorConfiguration: Simulator.Configuration,
-    hiddenSize: Int = 512,
+    hiddenSize: Int = 630,
     rewardEmbeddingSize: Int = 8
   ) {
     rewardCompiler = RewardCompiler(
@@ -395,7 +395,7 @@ public struct RewardAwareScentActorCritic: Module {
   @inlinable
   public init(
     simulatorConfiguration: Simulator.Configuration,
-    hiddenSize: Int = 512,
+    hiddenSize: Int = 630,
     rewardEmbeddingSize: Int = 8
   ) {
     rewardCompiler = RewardCompiler(
@@ -457,7 +457,7 @@ public struct RewardAwareVisionAndScentActorCritic: Module {
   @inlinable
   public init(
     simulatorConfiguration: Simulator.Configuration,
-    hiddenSize: Int = 512,
+    hiddenSize: Int = 630,
     rewardEmbeddingSize: Int = 8
   ) {
     rewardCompiler = RewardCompiler(
@@ -524,7 +524,7 @@ public struct RewardContextualVisionActorCritic: Module {
   @inlinable
   public init(
     simulatorConfiguration: Simulator.Configuration,
-    hiddenSize: Int = 512,
+    hiddenSize: Int = 170,
     rewardEmbeddingSize: Int = 8
   ) {
     rewardCompiler = RewardCompiler(
@@ -587,7 +587,7 @@ public struct RewardContextualScentActorCritic: Module {
   @inlinable
   public init(
     simulatorConfiguration: Simulator.Configuration,
-    hiddenSize: Int = 512,
+    hiddenSize: Int = 170,
     rewardEmbeddingSize: Int = 8
   ) {
     rewardCompiler = RewardCompiler(
@@ -651,7 +651,7 @@ public struct RewardContextualVisionAndScentActorCritic: Module {
   @inlinable
   public init(
     simulatorConfiguration: Simulator.Configuration,
-    hiddenSize: Int = 512,
+    hiddenSize: Int = 170,
     rewardEmbeddingSize: Int = 8
   ) {
     rewardCompiler = RewardCompiler(

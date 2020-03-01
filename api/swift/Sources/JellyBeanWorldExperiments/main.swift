@@ -165,7 +165,11 @@ let observationArg: OptionArgument<Observation> = parser.add(
 let networkArg: OptionArgument<Network> = parser.add(
   option: "--network",
   kind: Network.self,
-  usage: "Network type. Can be one of: `plain` and `contextual`.")
+  usage: "Network type. Can be one of: `plain`, `rewardAware`, and `rewardContextual`.")
+let networkHiddenStateSizeArg: OptionArgument<Int> = parser.add(
+  option: "--network-hidden-state-size",
+  kind: Int.self,
+  usage: "Network hidden state size.")
 let agentFieldOfViewArg: OptionArgument<Int> = parser.add(
   option: "--agent-field-of-view",
   kind: Int.self,
@@ -202,11 +206,6 @@ let serverPortsArg: OptionArgument<[Int]> = parser.add(
   option: "--server-ports",
   kind: [Int].self,
   usage: "Ports to use for launching simulation servers.")
-
-//try! makePlots(
-//  resultsDir: URL(fileURLWithPath: "/Users/eaplatanios/Development/GitHub/jelly-bean-world/temp/results"),
-//  rewardRatePeriod: 100000)
-//exit(0)
 
 // The first argument is always the executable, and so we drop it.
 let arguments = Array(ProcessInfo.processInfo.arguments.dropFirst())
@@ -245,15 +244,18 @@ switch parsedArguments.get(commandArg) {
 case .run:
   guard let observation = parsedArguments.get(observationArg) else { throw Error.invalidArgument }
   guard let network = parsedArguments.get(networkArg) else { throw Error.invalidArgument }
+  let networkHiddenStateSize = parsedArguments.get(networkHiddenStateSizeArg)
   try! experiment.run(
     observation: observation,
     network: network,
+    networkHiddenStateSize: networkHiddenStateSize,
     writeFrequency: 100,
     logFrequency: 1000)
 case .makePlots:
-  try! experiment.makePlots(
-    observations: [Observation](Observation.allCases),
-    networks: [Network](Network.allCases),
-    rewardRatePeriod: rewardRatePeriod)
+  try! makePlots(resultsDir: resultsDir, rewardRatePeriod: 50000)
+//  try! experiment.makePlots(
+//    observations: [Observation](Observation.allCases),
+//    networks: [Network](Network.allCases),
+//    rewardRatePeriod: rewardRatePeriod)
 case _: throw Error.invalidCommand
 }
