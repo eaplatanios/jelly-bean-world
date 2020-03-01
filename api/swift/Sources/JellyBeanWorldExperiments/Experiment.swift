@@ -151,7 +151,7 @@ public struct Experiment {
             if environmentStep == 0 || rewardFunction != currentRewardFunction {
               currentRewardFunction = rewardFunction
               rewardScheduleFileHandle?.write(
-                "\(environmentStep)\t\(currentRewardFunction!.description)\n".data(using: .utf8)!)
+                "\(environmentStep)\t\(currentRewardFunction.description)\n".data(using: .utf8)!)
             }
             environmentStep += 1
           }])
@@ -272,7 +272,27 @@ extension JellyBeanWorldExperiments.Agent {
         valueEstimationLoss: ppoValueEstimationLoss,
         entropyRegularization: ppoEntropyRegularization,
         iterationCountPerUpdate: 4))
-    case (.ppo, .contextual, _): fatalError("Not supported yet.")
+    case (.ppo, .rewardAware, .visionAndScent):
+      // TODO: The configurations are not exactly right.
+      let network = RewardAwareVisionAndScentActorCritic(
+        simulatorConfiguration: environment.configurations[0].simulatorConfiguration)
+      return AnyAgent(PPOAgent(
+        for: environment,
+        network: network,
+        initialState: network.initialState(batchSize: batchSize),
+        optimizer: { AMSGrad(for: $0) },
+        learningRate: learningRate,
+        maxGradientNorm: 0.5,
+        advantageFunction: advantageFunction,
+        advantagesNormalizer: nil,
+        useTDLambdaReturn: true,
+        clip: ppoClip,
+        penalty: ppoPenalty,
+        valueEstimationLoss: ppoValueEstimationLoss,
+        entropyRegularization: ppoEntropyRegularization,
+        iterationCountPerUpdate: 4))
+    case (.ppo, .rewardAware, _): fatalError("Not supported yet.")
+    case (.ppo, .rewardContextual, _): fatalError("Not supported yet.")
     case (.dqn, _, _): fatalError("Not supported yet.")
     }
   }

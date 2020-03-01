@@ -122,12 +122,13 @@ extension Observation: StringEnumArgument {
 }
 
 public enum Network: String, CaseIterable, CustomStringConvertible {
-  case plain, contextual
+  case plain, rewardAware, rewardContextual
 
   public var description: String {
     switch self {
     case .plain: return "Plain"
-    case .contextual: return "Contextual"
+    case .rewardAware: return "RewardAware"
+    case .rewardContextual: return "RewardContextual"
     }
   }
 }
@@ -136,7 +137,8 @@ extension Network: StringEnumArgument {
   public static var completion: ShellCompletion {
     .values([
       (Network.plain.rawValue, "Plain network."),
-      (Network.contextual.rawValue, "Contextual network.")
+      (Network.rewardAware.rawValue, "Reward-aware network."),
+      (Network.rewardContextual.rawValue, "Reward-contextual network.")
     ])
   }
 }

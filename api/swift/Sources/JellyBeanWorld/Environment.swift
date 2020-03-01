@@ -172,14 +172,14 @@ extension Environment {
     public var vision: Tensor<Float>
     public var scent: Tensor<Float>
     @noDerivative public var moved: Tensor<Float>
-    @noDerivative public var rewardFunction: JellyBeanWorld.Reward?
+    @noDerivative public var rewardFunction: JellyBeanWorld.Reward
 
     @inlinable
     public init(
       vision: Tensor<Float>,
       scent: Tensor<Float>,
       moved: Tensor<Float>,
-      rewardFunction: JellyBeanWorld.Reward?
+      rewardFunction: JellyBeanWorld.Reward
     ) {
       self.vision = vision
       self.scent = scent
@@ -275,7 +275,7 @@ extension Environment {
           vision: visionDistribution.mode(),
           scent: scentDistribution.mode(),
           moved: Tensor<Float>(movedDistribution.mode() .> 0),
-          rewardFunction: nil)
+          rewardFunction: .zero)
       }
 
       @inlinable
@@ -284,7 +284,7 @@ extension Environment {
           vision: visionDistribution.sample(),
           scent: scentDistribution.sample(),
           moved: Tensor<Float>(movedDistribution.sample() .> 0),
-          rewardFunction: nil)
+          rewardFunction: .zero)
       }
     }
   }

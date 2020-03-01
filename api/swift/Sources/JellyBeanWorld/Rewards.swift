@@ -29,6 +29,7 @@ public struct AgentTransition {
 
 ///  Reward function that scores agent transitions.
 public enum Reward: Equatable {
+  case zero
   case action(value: Float)
   case collect(item: Item, value: Float)
   case avoid(item: Item, value: Float)
@@ -49,26 +50,28 @@ public enum Reward: Equatable {
   @inlinable
   public func callAsFunction(for transition: AgentTransition) -> Float {
     switch self {
-      case let .action(value):
-        return value
-      case let .collect(item, value):
-        let currentItemCount = transition.currentState.items[item] ?? 0
-        let previousItemCount = transition.previousState.items[item] ?? 0
-        return Float(currentItemCount - previousItemCount) * value
-      case let .avoid(item, value):
-        let currentItemCount = transition.currentState.items[item] ?? 0
-        let previousItemCount = transition.previousState.items[item] ?? 0
-        return Float(previousItemCount - currentItemCount) * value
-      case let .explore(value):
-        let x = Float(transition.currentState.position.x)
-        let y = Float(transition.currentState.position.y)
-        let previousX = Float(transition.previousState.position.x)
-        let previousY = Float(transition.previousState.position.y)
-        let distance = x * x + y * y
-        let previousDistance = previousX * previousX + previousY * previousY
-        return distance > previousDistance ? value : 0.0
-      case let .combined(reward1, reward2):
-        return reward1(for: transition) + reward2(for: transition)
+    case .zero:
+      return 0
+    case let .action(value):
+      return value
+    case let .collect(item, value):
+      let currentItemCount = transition.currentState.items[item] ?? 0
+      let previousItemCount = transition.previousState.items[item] ?? 0
+      return Float(currentItemCount - previousItemCount) * value
+    case let .avoid(item, value):
+      let currentItemCount = transition.currentState.items[item] ?? 0
+      let previousItemCount = transition.previousState.items[item] ?? 0
+      return Float(previousItemCount - currentItemCount) * value
+    case let .explore(value):
+      let x = Float(transition.currentState.position.x)
+      let y = Float(transition.currentState.position.y)
+      let previousX = Float(transition.previousState.position.x)
+      let previousY = Float(transition.previousState.position.y)
+      let distance = x * x + y * y
+      let previousDistance = previousX * previousX + previousY * previousY
+      return distance > previousDistance ? value : 0.0
+    case let .combined(reward1, reward2):
+      return reward1(for: transition) + reward2(for: transition)
     }
   }
 }
@@ -76,6 +79,8 @@ public enum Reward: Equatable {
 extension Reward: CustomStringConvertible {
   public var description: String {
     switch self {
+    case .zero:
+      return "Zero"
     case let .action(value):
       return "Action[\(String(format: "%.2f", value))]"
     case let .collect(item, value):
