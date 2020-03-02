@@ -93,6 +93,7 @@ public struct Plots {
             for i in rows.indices { $0[i] = Float(rows[i][1])! }
             $1 = rows.count
           }
+//          return Line(x: x, y: y).cumulativeSum
           return Line(x: x, y: y).movingAverage(period: rewardRatePeriod)
         }
       if lines.isEmpty { continue }
@@ -403,10 +404,6 @@ extension Array where Element == Line {
       yMean.append(ys.mean)
       yStandardDeviation.append(ys.standardDeviation / Float(count).squareRoot())
     }
-//    for i in yMean.indices {
-//      if i == 0 { continue }
-//      yMean[i] = yMean[i - 1] + yMean[i]
-//    }
     axes.plot(x, yMean, label: label, color: color, linewidth: 2)
     axes.fill_between(
       x,
