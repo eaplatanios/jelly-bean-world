@@ -26,7 +26,7 @@ from .agent import Agent
 from .direction import RelativeDirection
 from .item import *
 from .simulator import *
-from .visualizer import MapVisualizer
+from .visualizer import MapVisualizer, pi
 
 def make_config():
   # specify the item types
@@ -65,8 +65,8 @@ def make_config():
             ]))
   # construct the simulator configuration
   return SimulatorConfig(max_steps_per_movement=1, vision_range=5,
-		allowed_movement_directions=[jbw.ActionPolicy.ALLOWED, jbw.ActionPolicy.DISALLOWED, jbw.ActionPolicy.DISALLOWED, jbw.ActionPolicy.DISALLOWED],
-		allowed_turn_directions=[jbw.ActionPolicy.DISALLOWED, jbw.ActionPolicy.DISALLOWED, jbw.ActionPolicy.ALLOWED, jbw.ActionPolicy.ALLOWED],
+		allowed_movement_directions=[ActionPolicy.ALLOWED, ActionPolicy.DISALLOWED, ActionPolicy.DISALLOWED, ActionPolicy.DISALLOWED],
+		allowed_turn_directions=[ActionPolicy.DISALLOWED, ActionPolicy.DISALLOWED, ActionPolicy.ALLOWED, ActionPolicy.ALLOWED],
 		no_op_allowed=False, patch_size=32, mcmc_num_iter=4000, items=items, agent_color=[0.0, 0.0, 1.0], agent_field_of_view=2*pi,
     collision_policy=MovementConflictPolicy.FIRST_COME_FIRST_SERVED, decay_param=0.4, diffusion_param=0.14, deleted_item_lifetime=2000)
 
