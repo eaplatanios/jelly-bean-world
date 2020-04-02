@@ -106,7 +106,7 @@ of simulators running in server and client modes (using MPI to communicate).
 #### Using with OpenAI Gym
 
 We also provide a JBW environment for OpenAI gym, which is 
-implemented in [api/python/jbw/environment.py](api/python/jbw/environment.py). 
+implemented in [api/python/src/jbw/environment.py](api/python/src/jbw/environment.py). 
 
 The action space consists of three actions:
   - `0`: Move forward.
@@ -145,7 +145,7 @@ for t in range(10000):
 ```
 
 Environments with different configurations can be 
-registered as shown in [api/python/jbw/environments.py](api/python/jbw/environments.py) 
+registered as shown in [api/python/src/jbw/environments.py](api/python/src/jbw/environments.py) 
 and used as shown above.
 
 ### Agent class

@@ -47,7 +47,7 @@ simulator_c = Extension(
   include_dirs = ['../../jbw', '../../jbw/deps', np.get_include()],
   # libraries = ['...'],
   # library_dirs = ['/usr/local/lib'],
-  sources = ['jbw/simulator.cpp'])
+  sources = ['src/jbw/simulator.cpp'])
 
 with open('../../README.md', 'r') as f:
     readme = f.read()
@@ -58,6 +58,7 @@ setup(
   description = 'Jelly Bean World',
   long_description = readme,
   ext_modules = [simulator_c],
-  packages = ['jbw'], 
+  packages = ['jbw'],
+  package_dir = {'': 'src'},
   install_requires = ['enum34'],
   cmdclass = {'build_ext' : build_ext_subclass} )
