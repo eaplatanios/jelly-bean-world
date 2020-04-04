@@ -316,7 +316,7 @@ public:
 		target_pixel_density = pixel_density;
 		zoom_start_pixel_density = pixel_density;
 		zoom_animation_start_time = milliseconds();
-		uniform_data = {0};
+		uniform_data = {{0}};
 		make_identity(uniform_data.model);
 
 		size_t vertex_shader_size = 0;
@@ -1114,7 +1114,7 @@ public:
 				free(background_patch_opacities);
 		}
 
-		inline constexpr unsigned int get_texel_cell_length(float pixel_density) {
+		inline constexpr unsigned int get_texel_cell_length(float pixel_density) const {
 			return 1;
 		}
 
@@ -1443,8 +1443,8 @@ private:
 						top_right_x = second.x + 0.5f + 0.13f * (-right.x + forward.x);
 						top_right_y = second.y + 0.5f + 0.13f * (-right.y + forward.y);
 					} else {
-						constexpr position forward = position(0, 1);
-						constexpr position right = position(1, 0);
+						constexpr position forward = {0, 1};
+						constexpr position right = {1, 0};
 						bottom_left_x = first.x + 0.5f + 0.13f * (-right.x - forward.x);
 						bottom_left_y = first.y + 0.5f + 0.13f * (-right.y - forward.y);
 						top_right_x = second.x + 0.5f + 0.13f * (right.x + forward.x);
