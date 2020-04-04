@@ -1163,12 +1163,14 @@ public:
 
 				float bottom_left_x = max(r.bottom_left.x + background_grid_bottom_left_x - 0.01f, background_grid_bottom_left_x);
 				float bottom_left_y = max(r.bottom_left.y + background_grid_bottom_left_y - 0.01f, background_grid_bottom_left_y);
+				float x = bottom_left_x; float y = bottom_left_y;
+				float w = min(r.top_right.x - r.bottom_left.x + 0.02f, background_grid_top_right_x - bottom_left_x);
+				float h = min(r.top_right.y - r.bottom_left.y + 0.02f, background_grid_top_right_y - bottom_left_y);
+				if (x > right || y > top || x + w < left || y + h < bottom)
+					continue;
 				success &= (fprintf(out,
 						"<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"#%02x%02x%02x\"/>",
-						bottom_left_x, bottom_left_y,
-						min(r.top_right.x - r.bottom_left.x + 0.02f, background_grid_top_right_x - bottom_left_x),
-						min(r.top_right.y - r.bottom_left.y + 0.02f, background_grid_top_right_y - bottom_left_y),
-						border_r, border_g, border_b) > 0);
+						x, y, w, h, border_r, border_g, border_b) > 0);
 			} for (const rectangle& r : background_grid_cells) {
 				/* get the opacity value for this patch */
 				unsigned int patch_x = r.bottom_left.x / patch_size;
@@ -1180,11 +1182,15 @@ public:
 
 				float bottom_left_x = r.bottom_left.x + background_grid_bottom_left_x;
 				float bottom_left_y = r.bottom_left.y + background_grid_bottom_left_y;
+				float x = bottom_left_x + grid_line_width / 2;
+				float y = bottom_left_y + grid_line_width / 2;
+				float w = r.top_right.x - r.bottom_left.x - grid_line_width;
+				float h = r.top_right.y - r.bottom_left.y - grid_line_width;
+				if (x > right || y > top || x + w < left || y + h < bottom)
+					continue;
 				success &= (fprintf(out,
 						"<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" stroke=\"#%02x%02x%02x\" fill=\"#%02x%02x%02x\"/>",
-						bottom_left_x + grid_line_width / 2, bottom_left_y + grid_line_width / 2,
-						r.top_right.x - r.bottom_left.x - grid_line_width, r.top_right.y - r.bottom_left.y - grid_line_width,
-						border_r, border_g, border_b, r.color[0], r.color[1], r.color[2]) > 0);
+						x, y, w, h, border_r, border_g, border_b, r.color[0], r.color[1], r.color[2]) > 0);
 			}
 			success &= (fprintf(out, "</g>") > 0);
 
@@ -1201,12 +1207,14 @@ public:
 
 					float bottom_left_x = max(r.key.bottom_left.x + visual_field_grid_bottom_left_x - 0.01f, visual_field_grid_bottom_left_x);
 					float bottom_left_y = max(r.key.bottom_left.y + visual_field_grid_bottom_left_y - 0.01f, visual_field_grid_bottom_left_y);
+					float x = bottom_left_x; float y = bottom_left_y;
+					float w = min(r.key.top_right.x - r.key.bottom_left.x + 0.02f, visual_field_grid_top_right_x - bottom_left_x);
+					float h = min(r.key.top_right.y - r.key.bottom_left.y + 0.02f, visual_field_grid_top_right_y - bottom_left_y);
+					if (x > right || y > top || x + w < left || y + h < bottom)
+						continue;
 					success &= (fprintf(out,
 							"<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"#%02x%02x%02x\"/>",
-							bottom_left_x, bottom_left_y,
-							min(r.key.top_right.x - r.key.bottom_left.x + 0.02f, visual_field_grid_top_right_x - bottom_left_x),
-							min(r.key.top_right.y - r.key.bottom_left.y + 0.02f, visual_field_grid_top_right_y - bottom_left_y),
-							border_r, border_g, border_b) > 0);
+							x, y, w, h, border_r, border_g, border_b) > 0);
 				} for (const pair<rectangle, uint8_t>& r : visual_field_grid_cells) {
 					/* get the opacity value for this cell */
 					float opacity = (float) r.value / 255;
@@ -1216,12 +1224,15 @@ public:
 
 					float bottom_left_x = r.key.bottom_left.x + visual_field_grid_bottom_left_x;
 					float bottom_left_y = r.key.bottom_left.y + visual_field_grid_bottom_left_y;
+					float x = bottom_left_x + vision_grid_line_width / 2;
+					float y = bottom_left_y + vision_grid_line_width / 2;
+					float w = r.key.top_right.x - r.key.bottom_left.x - vision_grid_line_width;
+					float h = r.key.top_right.y - r.key.bottom_left.y - vision_grid_line_width;
+					if (x > right || y > top || x + w < left || y + h < bottom)
+						continue;
 					success &= (fprintf(out,
 							"<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" stroke=\"#%02x%02x%02x\" fill=\"#%02x%02x%02x\"/>",
-							bottom_left_x + vision_grid_line_width / 2, bottom_left_y + vision_grid_line_width / 2,
-							r.key.top_right.x - r.key.bottom_left.x - vision_grid_line_width,
-							r.key.top_right.y - r.key.bottom_left.y - vision_grid_line_width,
-							border_r, border_g, border_b, r.key.color[0], r.key.color[1], r.key.color[2]) > 0);
+							x, y, w, h, border_r, border_g, border_b, r.key.color[0], r.key.color[1], r.key.color[2]) > 0);
 				}
 				success &= (fprintf(out, "</g>") > 0);
 
@@ -1237,16 +1248,25 @@ public:
 
 			/* draw the polygons and circles (i.e. items and agents) */
 			for (const rectangle& r : rectangles) {
+				if (r.bottom_left.x > right || r.bottom_left.y > top || r.top_right.x < left || r.top_right.y < bottom)
+					continue;
 				success &= (fprintf(out,
 						"<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"#%02x%02x%02x\"/>",
 						r.bottom_left.x, r.bottom_left.y, r.top_right.x - r.bottom_left.x, r.top_right.y - r.bottom_left.y,
 						r.color[0], r.color[1], r.color[2]) > 0);
 			} for (const triangle& t : triangles) {
-				success &= (fprintf(out,
-						"<polygon points=\"%.2f,%.2f %.2f,%.2f %.2f,%.2f\" fill=\"#%02x%02x%02x\"/>",
-						t.vertices[0].x, t.vertices[0].y, t.vertices[1].x, t.vertices[1].y, t.vertices[2].x, t.vertices[2].y,
-						t.color[0], t.color[1], t.color[2]) > 0);
+				if ((t.vertices[0].x >= left && t.vertices[0].x <= right && t.vertices[0].y >= bottom && t.vertices[0].y <= top)
+				 || (t.vertices[1].x >= left && t.vertices[1].x <= right && t.vertices[1].y >= bottom && t.vertices[1].y <= top)
+				 || (t.vertices[2].x >= left && t.vertices[2].x <= right && t.vertices[2].y >= bottom && t.vertices[2].y <= top))
+				{
+					success &= (fprintf(out,
+							"<polygon points=\"%.2f,%.2f %.2f,%.2f %.2f,%.2f\" fill=\"#%02x%02x%02x\"/>",
+							t.vertices[0].x, t.vertices[0].y, t.vertices[1].x, t.vertices[1].y, t.vertices[2].x, t.vertices[2].y,
+							t.color[0], t.color[1], t.color[2]) > 0);
+				}
 			} for (const circle& c : circles) {
+				if (c.center.x - c.radius > right || c.center.y - c.radius > top || c.center.x + c.radius < left || c.center.y + c.radius < bottom)
+					continue;
 				success &= (fprintf(out,
 						"<circle cx=\"%.2f\" cy=\"%.2f\" r=\"%.2f\" fill=\"#%02x%02x%02x\"/>",
 						c.center.x, c.center.y, c.radius,
