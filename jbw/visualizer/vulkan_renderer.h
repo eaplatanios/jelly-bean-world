@@ -1005,7 +1005,11 @@ public:
 			return false;
 		}
 
-		vkMapMemory(logical_device, image.staging_buffer_memory, 0, image_size_in_bytes, 0, &image.mapped_memory);
+		if (vkMapMemory(logical_device, image.staging_buffer_memory, 0, image_size_in_bytes, 0, &image.mapped_memory) != VK_SUCCESS) {
+			fprintf(stderr, "vulkan_renderer.create_texture_image ERROR: Unable to map memory for staging buffer.\n");
+			vkDestroyBuffer(logical_device, image.staging_buffer, nullptr);
+			return false;
+		}
 
 		if (!create_image(image_width, image_height, (VkFormat) format,
 				VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,

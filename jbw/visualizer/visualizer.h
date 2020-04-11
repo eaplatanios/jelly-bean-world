@@ -24,13 +24,25 @@
 #include <condition_variable>
 #include <core/lex.h>
 
+#if defined(RECORD)
+extern uint64_t simulation_time;
+#endif
+
 namespace jbw {
 
 using namespace core;
 using namespace mirage;
 
-/* forward declaration */
+/* forward declarations */
+unsigned long long milliseconds();
 template<typename SimulatorType> class visualizer;
+#if defined(RECORD)
+bool record_key_press(char key);
+bool record_step();
+bool record_collected_items(const unsigned int*, unsigned int);
+void increment_frame_number();
+void write_to_log();
+#endif
 
 template<typename SimulatorType>
 inline void cursor_position_callback(GLFWwindow* window, double x, double y)
@@ -66,14 +78,20 @@ inline void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 				/* TODO: handle the case where the pixel density is smaller than 1 (we segfault currently since the texture for the scent visualization could become too small) */
 				fprintf(stderr, "Zoom beyond the point where the pixel density is smaller than 1/patch_size is unsupported.\n");
 			} else {
-				v->zoom_animation_start_time = milliseconds();
+				v->zoom_animation_start_time = jbw::milliseconds();
 				v->zoom_start_pixel_density = v->pixel_density;
 				v->target_pixel_density /= 1.3f;
+#if defined(RECORD)
+				record_key_press('-');
+#endif
 			}
 		} else if (key == GLFW_KEY_EQUAL) {
-			v->zoom_animation_start_time = milliseconds();
+			v->zoom_animation_start_time = jbw::milliseconds();
 			v->zoom_start_pixel_density = v->pixel_density;
 			v->target_pixel_density *= 1.3f;
+#if defined(RECORD)
+			record_key_press('+');
+#endif
 		} else if (key == GLFW_KEY_0) {
 			v->track_agent(0);
 		} else if (key == GLFW_KEY_1) {
@@ -96,8 +114,14 @@ inline void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 			v->track_agent(9);
 		} else if (key == GLFW_KEY_B) {
 			v->render_background = !v->render_background;
+#if defined(RECORD)
+			record_key_press('b');
+#endif
 		} else if (key == GLFW_KEY_V) {
 			v->render_agent_visual_field = !v->render_agent_visual_field;
+#if defined(RECORD)
+			record_key_press('v');
+#endif
 		} else if (key == GLFW_KEY_P) {
 			std::unique_lock<std::mutex> lock(v->agent_path_lock);
 			if (v->track_agent_id == 0) {
@@ -112,9 +136,15 @@ inline void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 		} else if (key == GLFW_KEY_LEFT_BRACKET) {
 			v->semaphore_signal_period *= 2;
 			fprintf(stderr, "The maximum simulation steps per second is now %f.\n", 1000.0f / v->semaphore_signal_period);
+#if defined(RECORD)
+			record_key_press('[');
+#endif
 		} else if (key == GLFW_KEY_RIGHT_BRACKET) {
 			v->semaphore_signal_period = max(1ull, v->semaphore_signal_period / 2);
 			fprintf(stderr, "The maximum simulation steps per second is now %f.\n", 1000.0f / v->semaphore_signal_period);
+#if defined(RECORD)
+			record_key_press(']');
+#endif
 		}
 	}
 }
@@ -295,7 +325,8 @@ public:
 		uint32_t window_width, uint32_t window_height,
 		uint64_t track_agent_id, float pixels_per_cell,
 		bool draw_scent_map, bool draw_visual_field,
-		bool draw_path, float max_steps_per_second) :
+		bool draw_path, float max_steps_per_second,
+		bool fullscreen) :
 			width(window_width), height(window_height), sim(sim),
 			semaphore(0), semaphore_signal_time(0),
 			background_binding(0, sizeof(vertex)), item_binding(0, sizeof(item_vertex)),
@@ -315,7 +346,7 @@ public:
 		pixel_density = pixels_per_cell;
 		target_pixel_density = pixel_density;
 		zoom_start_pixel_density = pixel_density;
-		zoom_animation_start_time = milliseconds();
+		zoom_animation_start_time = jbw::milliseconds();
 		uniform_data = {{0}};
 		make_identity(uniform_data.model);
 
@@ -333,7 +364,7 @@ public:
 
 		glfwInit();
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-		window = glfwCreateWindow(window_width, window_height, "JBW Visualizer", nullptr, nullptr);
+		window = glfwCreateWindow(window_width, window_height, "JBW Visualizer", fullscreen ? glfwGetPrimaryMonitor() : nullptr, nullptr);
 		glfwSetWindowUserPointer(window, this);
 		glfwSetCursorPosCallback(window, cursor_position_callback<SimulatorType>);
 		glfwSetKeyCallback(window, key_callback<SimulatorType>);
@@ -581,12 +612,12 @@ public:
 
 				signal_semaphore(sim);
 
-				semaphore_signal_time = milliseconds();
+				semaphore_signal_time = jbw::milliseconds();
 				unsigned long long remaining_time = semaphore_signal_period;
 				while (true) {
 					std::this_thread::sleep_for(std::chrono::milliseconds(min(remaining_time, 100ull)));
 					if (!running) return;
-					unsigned long long current_time = milliseconds();
+					unsigned long long current_time = jbw::milliseconds();
 					if (current_time > semaphore_signal_time + semaphore_signal_period) break;
 					remaining_time = semaphore_signal_time + semaphore_signal_period - current_time;
 				}
@@ -668,12 +699,12 @@ public:
 		glfwPollEvents();
 
 		/* compute `pixel_density` according to the zoom animation */
-		float animation_t = max(0.0f, min(1.0f, (milliseconds() - zoom_animation_start_time) / 300.0f));
+		float animation_t = max(0.0f, min(1.0f, (jbw::milliseconds() - zoom_animation_start_time) / 300.0f));
 		float easing = animation_t * (2 - animation_t);
 		pixel_density = easing * target_pixel_density + (1.0f - easing) * zoom_start_pixel_density;
 
 		if (tracking_animating) {
-			float animation_t = max(0.0f, min(1.0f, (milliseconds() - translate_animation_start_time) / 300.0f));
+			float animation_t = max(0.0f, min(1.0f, (jbw::milliseconds() - translate_animation_start_time) / 300.0f));
 			float easing = (animation_t - 1) * (animation_t - 1) * (animation_t - 1) + 1;
 			camera_position[0] = easing * translate_end_position[0] + (1.0f - easing) * translate_start_position[0];
 			camera_position[1] = easing * translate_end_position[1] + (1.0f - easing) * translate_start_position[1];
@@ -1254,6 +1285,13 @@ public:
 						"<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"#%02x%02x%02x\"/>",
 						r.bottom_left.x, r.bottom_left.y, r.top_right.x - r.bottom_left.x, r.top_right.y - r.bottom_left.y,
 						r.color[0], r.color[1], r.color[2]) > 0);
+			} for (const circle& c : circles) {
+				if (c.center.x - c.radius > right || c.center.y - c.radius > top || c.center.x + c.radius < left || c.center.y + c.radius < bottom)
+					continue;
+				success &= (fprintf(out,
+						"<circle cx=\"%.2f\" cy=\"%.2f\" r=\"%.2f\" fill=\"#%02x%02x%02x\"/>",
+						c.center.x, c.center.y, c.radius,
+						c.color[0], c.color[1], c.color[2]) > 0);
 			} for (const triangle& t : triangles) {
 				if ((t.vertices[0].x >= left && t.vertices[0].x <= right && t.vertices[0].y >= bottom && t.vertices[0].y <= top)
 				 || (t.vertices[1].x >= left && t.vertices[1].x <= right && t.vertices[1].y >= bottom && t.vertices[1].y <= top)
@@ -1264,13 +1302,6 @@ public:
 							t.vertices[0].x, t.vertices[0].y, t.vertices[1].x, t.vertices[1].y, t.vertices[2].x, t.vertices[2].y,
 							t.color[0], t.color[1], t.color[2]) > 0);
 				}
-			} for (const circle& c : circles) {
-				if (c.center.x - c.radius > right || c.center.y - c.radius > top || c.center.x + c.radius < left || c.center.y + c.radius < bottom)
-					continue;
-				success &= (fprintf(out,
-						"<circle cx=\"%.2f\" cy=\"%.2f\" r=\"%.2f\" fill=\"#%02x%02x%02x\"/>",
-						c.center.x, c.center.y, c.radius,
-						c.color[0], c.color[1], c.color[2]) > 0);
 			}
 			success &= (fprintf(out, "</g></svg>") > 0);
 			return success;
@@ -1725,6 +1756,9 @@ private:
 					memcpy(agent_visual_field, agent->current_vision, visual_field_size);
 				}
 				float new_target_position[] = {agent->current_position.x + 0.5f, agent->current_position.y + 0.5f};
+#if defined(RECORD)
+				record_collected_items(agent->collected_items, sim.get_config().item_types.length);
+#endif
 				agent->lock.unlock();
 
 				if (render_path) {
@@ -1737,14 +1771,16 @@ private:
 				}
 
 				if (new_target_position[0] != translate_end_position[0] || new_target_position[1] != translate_end_position[1]) {
-					translate_start_position[0] = camera_position[0];
-					translate_start_position[1] = camera_position[1];
+					float animation_t = max(0.0f, min(1.0f, (jbw::milliseconds() - translate_animation_start_time) / 300.0f));
+					float easing = (animation_t - 1) * (animation_t - 1) * (animation_t - 1) + 1;
+					translate_start_position[0] = easing * translate_end_position[0] + (1.0f - easing) * translate_start_position[0];
+					translate_start_position[1] = easing * translate_end_position[1] + (1.0f - easing) * translate_start_position[1];
 					translate_end_position[0] = new_target_position[0];
 					translate_end_position[1] = new_target_position[1];
 					tracking_animating = false;
 				}
 				if (!tracking_animating) {
-					translate_animation_start_time = milliseconds();
+					translate_animation_start_time = jbw::milliseconds();
 					tracking_animating = true;
 				}
 			} else {
@@ -1761,6 +1797,12 @@ private:
 			agent_visual_field, render_background_map,
 			render_path_length, left, right, bottom, top,
 			current_pixel_density, backend);
+#if defined(RECORD)
+		fprintf(stderr, "simulation_time: %lu\n", simulation_time);
+		if (simulation_time >= 0)
+			screenshot_next_frame = true;
+		increment_frame_number();
+#endif
 		if (screenshot_next_frame) {
 			/* pick next available filename to avoid overwrites */
 			FILE* out = open_next_available_screenshot_file();
@@ -1773,7 +1815,11 @@ private:
 					current_pixel_density, svg);
 				fflush(out); fclose(out);
 			}
+#if defined(RECORD)
+			write_to_log();
+#else
 			screenshot_next_frame = false;
+#endif
 		}
 		if (agent_visual_field != nullptr) { free(agent_visual_field); }
 		return result;
@@ -1865,6 +1911,9 @@ private:
 				agent_direction = response.agent_states[0].current_direction;
 				if (response.render_visual_field)
 					agent_visual_field = response.agent_states[0].current_vision;
+#if defined(RECORD)
+				record_collected_items(response.agent_states[0].collected_items, sim.config.item_types.length);
+#endif
 
 				if (response.get_map_render_agent_path) {
 					agent_path_lock.lock();
@@ -1878,14 +1927,16 @@ private:
 				float new_target_position[] = {response.agent_states[0].current_position.x + 0.5f, response.agent_states[0].current_position.y + 0.5f};
 
 				if (new_target_position[0] != translate_end_position[0] || new_target_position[1] != translate_end_position[1]) {
-					translate_start_position[0] = camera_position[0];
-					translate_start_position[1] = camera_position[1];
+					float animation_t = max(0.0f, min(1.0f, (jbw::milliseconds() - translate_animation_start_time) / 300.0f));
+					float easing = (animation_t - 1) * (animation_t - 1) * (animation_t - 1) + 1;
+					translate_start_position[0] = easing * translate_end_position[0] + (1.0f - easing) * translate_start_position[0];
+					translate_start_position[1] = easing * translate_end_position[1] + (1.0f - easing) * translate_start_position[1];
 					translate_end_position[0] = new_target_position[0];
 					translate_end_position[1] = new_target_position[1];
 					tracking_animating = false;
 				}
 				if (!tracking_animating) {
-					translate_animation_start_time = milliseconds();
+					translate_animation_start_time = jbw::milliseconds();
 					tracking_animating = true;
 				}
 			} else {
@@ -1905,6 +1956,12 @@ private:
 				response.get_map_bottom, response.get_map_top,
 				response.pixel_density, backend);
 
+#if defined(RECORD)
+			fprintf(stderr, "simulation_time: %lu\n", simulation_time);
+			if (simulation_time >= 0)
+				screenshot_next_frame = true;
+			increment_frame_number();
+#endif
 			if (screenshot_next_frame) {
 				/* pick next available filename to avoid overwrites */
 				FILE* out = open_next_available_screenshot_file();
@@ -1918,7 +1975,11 @@ private:
 						response.pixel_density, svg);
 					fflush(out); fclose(out);
 				}
+#if defined(RECORD)
+				write_to_log();
+#else
 				screenshot_next_frame = false;
+#endif
 			}
 
 			for (array<patch_state>& row : *response.map) {
@@ -2452,7 +2513,11 @@ inline void on_step(
 		status response,
 		const array<uint64_t>& agent_ids,
 		const agent_state* agent_state_array)
-{ }
+{
+#if defined(RECORD)
+	record_step();
+#endif
+}
 
 void on_lost_connection(client<visualizer_client_data>& c) {
 	fprintf(stderr, "Lost connection to the server.\n");

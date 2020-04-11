@@ -200,6 +200,9 @@ inline void on_step(simulator<visualizer_data>* sim,
 	std::unique_lock<std::mutex> lock(data.lock);
 	data.waiting_for_server = false;
 	data.cv.notify_one();
+#if defined(RECORD)
+	record_step();
+#endif
 }
 
 template<typename PerPatchData, typename ItemType>
@@ -218,6 +221,85 @@ void generate_map(
 	for (int64_t y = bottom_left_corner.y; y <= top_right_corner.y; y += world.n)
 		world.get_fixed_neighborhood(jbw::position(top_right_corner.x, y), neighborhood, patch_positions);
 	world.get_fixed_neighborhood(top_right_corner, neighborhood, patch_positions);
+}
+
+uint64_t simulation_time;
+
+#if defined(RECORD)
+FILE* log_file = nullptr;
+unsigned int frame_number = 0;
+unsigned int total_frame_number = 0;
+unsigned int* collected_items = nullptr;
+unsigned int collected_item_count = 0;
+uint64_t old_simulation_time = UINT64_MAX;
+array<char> key_presses(8);
+bool step;
+
+namespace jbw {
+inline bool record_key_press(char key) {
+	return key_presses.add(key);
+}
+
+inline bool record_step() {
+	step = true;
+	return false;
+}
+
+/* NOTE: this function assumes the number of item types in the environment does not change */
+inline bool record_collected_items(const unsigned int* src, unsigned int count) {
+	if (collected_items == nullptr) {
+		collected_item_count = count;
+		collected_items = (unsigned int*) malloc(sizeof(unsigned int) * count);
+		if (collected_items == nullptr)
+			return false;
+	}
+	for (unsigned int i = 0; i < count; i++)
+		collected_items[i] = src[i];
+	return true;
+}
+
+const char empty_string[] = "";
+const char comma_string[] = ",";
+const char space_string[] = " ";
+
+inline void increment_frame_number() {
+	if (step) {
+		simulation_time++;
+		step = false;
+	}
+	total_frame_number++;
+}
+
+inline void write_to_log() {
+	if (simulation_time != old_simulation_time) {
+		fprintf(log_file, "%u sim_time:%lu", frame_number, simulation_time);
+		core::print<unsigned int, space_string, empty_string, comma_string>(collected_items, collected_item_count, log_file);
+		if (key_presses.length > 0)
+			core::print<char, space_string, empty_string, comma_string>(key_presses, log_file);
+		core::print('\n', log_file); fflush(log_file);
+		key_presses.clear();
+		old_simulation_time = simulation_time;
+	} else if (key_presses.length > 0) {
+		fprintf(log_file, "%u", frame_number);
+		core::print<char, space_string, empty_string, comma_string>(key_presses, log_file);
+		core::print('\n', log_file); fflush(log_file);
+		key_presses.clear();
+	}
+	frame_number++;
+}
+} /* namespace jbw */
+#endif
+
+namespace jbw {
+#if defined(RECORD)
+	inline unsigned long long milliseconds() {
+		return (1000 * total_frame_number) / 60;
+	}
+#else
+	inline unsigned long long milliseconds() {
+		return core::milliseconds();
+	}
+#endif
 }
 
 bool run_locally(
@@ -347,10 +429,18 @@ bool run_locally(
 		return false;
 	}
 
+#if defined(RECORD)
+	log_file = (FILE*) fopen("recording.log", "wb");
+#endif
+
 	print_controls(stdout); fflush(stdout);
 	simulation_running = true;
-	visualizer<simulator<visualizer_data>> visualizer(sim, 800, 800, track_agent_id,
-			pixels_per_cell, draw_scent_map, draw_visual_field, draw_agent_path, max_steps_per_second);
+	bool fullscreen = false;
+#if defined(RECORD)
+	fullscreen = true;
+#endif
+	visualizer<simulator<visualizer_data>> visualizer(sim, 2560, 1440, track_agent_id,
+			pixels_per_cell, draw_scent_map, draw_visual_field, draw_agent_path, max_steps_per_second, fullscreen);
 
 	unsigned int move_count = 0;
 	std::thread simulation_worker = std::thread([&]() {
@@ -404,6 +494,9 @@ bool run_locally(
 			simulation_worker.join();
 		} catch (...) { }
 	}
+#if defined(RECORD)
+	free(collected_items);
+#endif
 	return true;
 }
 
@@ -420,7 +513,7 @@ bool run(
 	uint64_t client_id;
 	client<visualizer_client_data> sim;
 	simulation_running = true;
-	uint64_t simulation_time = connect_client(sim, server_address, server_port, client_id);
+	simulation_time = connect_client(sim, server_address, server_port, client_id);
 	if (simulation_time == UINT64_MAX) {
 		fprintf(stderr, "ERROR: Unable to connect to '%s:%s'.\n", server_address, server_port);
 		return false;
@@ -428,8 +521,16 @@ bool run(
 
 	print_controls(stdout); fflush(stdout);
 
-	visualizer<client<visualizer_client_data>> visualizer(sim, 800, 800, track_agent_id,
-			pixels_per_cell, draw_scent_map, draw_visual_field, draw_agent_path, max_steps_per_second);
+#if defined(RECORD)
+	log_file = (FILE*) fopen("recording.log", "wb");
+#endif
+
+	bool fullscreen = false;
+#if defined(RECORD)
+	fullscreen = true;
+#endif
+	visualizer<client<visualizer_client_data>> visualizer(sim, 2560, 1440, track_agent_id,
+			pixels_per_cell, draw_scent_map, draw_visual_field, draw_agent_path, max_steps_per_second, fullscreen);
 	visualizer_running = &visualizer.running;
 	while (simulation_running && sim.client_running) {
 		if (visualizer.is_window_closed())
@@ -438,6 +539,9 @@ bool run(
 		visualizer.draw_frame();
 	}
 
+#if defined(RECORD)
+	free(collected_items);
+#endif
 	return remove_client(sim);
 }
 
@@ -518,6 +622,11 @@ int main(int argc, const char** argv)
 			return EXIT_FAILURE;
 		}
 	}
+
+#if defined(RECORD)
+	if (log_file != nullptr)
+		fclose(log_file);
+#endif
 
 	if (server_address != nullptr)
 		free(server_address);
