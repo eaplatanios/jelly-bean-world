@@ -1,11 +1,121 @@
 # Jelly Bean World
 
 A framework for experimenting with never-ending learning.
+If you use this framework in your research, please cite as:
+
+```bibtex
+@inproceedings{jbw:2020,
+  title         = {{Jelly Bean World: A Testbed for Never-Ending Learning}},
+  author        = {Emmanouil Antonios Platanios and Abulhair Saparov and Tom Mitchell},
+  booktitle     = {International Conference on Learning Representations (ICLR)},
+  url           = {https://arxiv.org/abs/2002.06306},
+  year          = {2020},
+}
+```
+
+
+This file is split in multiple sections:
+  
+  - [Requirements:](#requirements) Describes the
+    prerequisite software that needs to be installed before
+    you can use the Jelly Bean World.
+  - [Using Swift:](#using-swift) Describes how to setup and
+    use our Swift API, and how to reproduce the experiments
+    we performed for our [paper](https://arxiv.org/abs/2002.06306).
+  - [Using Python:](#using-python) Describes how to setup
+    and use our Python API.
+  - [Using C++:](#using-c) Describes how to setup and use
+    our C++ API.
+  - [Using the Visualizer:](#using-the-visualizer) TODO.
+  - [Design:](#design) Provides a brief description of the
+    Jelly Bean World design. More information can found in
+    our [paper](https://arxiv.org/abs/2002.06306).
+  - [Troubleshooting:](#troubleshooting) Discusses common
+    issues.
 
 ## Requirements
 
 - GCC 4.9+, Clang 5+, or Visual C++ 14+
-- Python 2.7 or 3.5+ and Numpy (for the Python API)
+- **Python API:**
+  - Python 2.7 or 3.5+
+  - Numpy
+- **Swift API:**
+  - Swift for TensorFlow 0.8 toolchain
+
+## Using Swift
+
+### Running Experiments
+
+Assuming you have the Swift for TensorFlow 0.8 toolchain
+installed in your system, you can run Jelly Bean World
+experiments using commands like the following:
+
+```bash
+swift run -c release JellyBeanWorldExperiments run \
+  --reward collectJellyBeans \
+  --agent ppo \
+  --observation vision \
+  --network plain
+```
+
+Specifically, to reproduce the results presented in our
+[paper](https://arxiv.org/abs/2002.06306) you can use 
+the scripts located in the [scripts/experiments](scripts/experiments)
+directory. A good way to start using the Swift API is to
+play around by modifying these scripts and observing how
+the results change.
+
+Files that aggregate the experiments results will be 
+generated in the [temp/results](temp/results) directory.
+
+After running Swift experiments using the aforementioned
+command, you can plot the experiment results using commands
+like the following:
+
+```bash
+swift run -c release JellyBeanWorldExperiments plot \
+  --reward collectJellyBeans \
+  --agent ppo
+```
+
+The plots will (by default) be generated in the
+[temp/results](temp/results) directory.
+
+### Using the Swift API directly
+
+Using the Jelly Bean World Swift API typically consists of
+the following steps:
+
+  1. Create a [simulator configuration](api/swift/Sources/JellyBeanWorld/Simulator.swift#L423).
+     This configuration contains information about the 
+     types of items that exist and their distribution, as
+     well as about the mechanics of the environment (e.g.,
+     vision and scent dimensionality, allowed agent
+     actions, etc.). You can also create multiple 
+     configurations, which will allow you to concurrently
+     run multiple instances of the Jelly Bean World
+     simulator.
+  2. Create a [reward schedule](api/swift/Sources/JellyBeanWorld/Rewards.swift#L100).
+     This schedule defines the reward function that will
+     be used at each point in time. Our library already 
+     provides some pre-existing reward schedules that you
+     can use, but you should feel free to create new ones.
+     The reward schedules that we used for our
+     [paper](https://arxiv.org/abs/2002.06306) can be found
+     in [the experiments module.](api/swift/Sources/JellyBeanWorldExperiments/Experiment.swift#L165).
+  3. Create a Jelly Bean World [environment](api/swift/Sources/JellyBeanWorld/Environment.swift#L19).
+  4. Create an agent. We do not impose any constraints on
+     how you design your agents. They will be the ones
+     interacting with the environment in a similar manner 
+     how agents interact with OpenAI Gym environments.
+     Specifically, the agents mainly interact with the 
+     environment through the
+     [environment step function](api/swift/Sources/JellyBeanWorld/Environment.swift#L71).
+
+A good reference point for starting is the 
+[the experiments module.](api/swift/Sources/JellyBeanWorldExperiments/Experiment.swift#L165)
+that we built and used to run all experiments that were 
+presented in our [paper](https://arxiv.org/abs/2002.06306).
 
 ## Using Python
 
@@ -395,35 +505,9 @@ easy to implement.
 ## Troubleshooting
 
 ### Repository initialization, publickey
+
 If you get the message `Permission denied (publickey).` when initializing the
 repository by calling `git submodule update --init --recursive` make sure you
 have your public key set correctly in https://github.com/settings/keys. You can
 see this example http://zeeelog.blogspot.com/2017/08/the-authenticity-of-host-githubcom.html
 to generate a new one.
-
-<!--
-TODOs:
-- [x] 1. Error handling Swift.
-- [x] 1. Flag in get_map for visualizing scent.
-- [x] 2. Add support for destroying clients.
-- [x] 2.5. Add support for obtaining list of agents from simulator and specific agent positions/states.
-- [x] 3. Visualizer should connect to a simulation server (add CLI support for starting the visualizer).
-- [x] 4. White boundary?
-- [x] 4.5. Black background outside the map (option or default or whatever).
-- [x] 5. Resize window.
-- [x] 6. Zoom/movement.
-- [x] 7. Default to tracking agent 0 (agent always in the center of the window).
-- [x] 8. Track agent at current zoom level (maybe using keyboard numbers).
-
-- [ ] Per-client permissions.
-
-Example command for running a Swift experiment:
-```bash
-swift run -c release JellyBeanWorldExperiments run --reward collectJellyBeans --agent ppo --observation vision --network plain
-```
-
-Example command for plotting experiment results:
-```bash
-swift run -c release JellyBeanWorldExperiments plot --reward collectJellyBeans --agent ppo
-```
--->

@@ -13,7 +13,7 @@
 // the License.
 
 import Foundation
-import Python
+import PythonKit
 
 fileprivate let mpl = Python.import("matplotlib")
 fileprivate let plt = Python.import("matplotlib.pyplot")

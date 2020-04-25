@@ -6,6 +6,7 @@ import PackageDescription
 
 let package = Package(
   name: "JellyBeanWorld",
+  platforms: [.macOS(.v10_13)],
   products: [
     .library(
       name: "JellyBeanWorld",
@@ -14,7 +15,7 @@ let package = Package(
   dependencies: [
     .package(url: "https://github.com/eaplatanios/swift-rl.git", .branch("master")),
     .package(url: "https://github.com/apple/swift-log.git", from: "1.0.0"),
-    .package(url: "https://github.com/apple/swift-package-manager.git", from: "0.5.0"),
+    .package(url: "https://github.com/apple/swift-package-manager.git", "0.5.0"..<"0.6.0"),
   ],
   targets: [
     .target(
@@ -37,7 +38,7 @@ let package = Package(
       path: "api/swift/Sources/JellyBeanWorld"),
     .target(
       name: "JellyBeanWorldExperiments",
-      dependencies: ["JellyBeanWorld", "Logging", "SwiftPM"],
+      dependencies: ["JellyBeanWorld", "Logging", "SPMUtility"],
       path: "api/swift/Sources/JellyBeanWorldExperiments"),
   ]
 )
