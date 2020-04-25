@@ -25,25 +25,30 @@ SIMULATOR_TEST_OBJS=$(SIMULATOR_TEST_CPP_SRCS:%.cpp=$(BIN_DIR)/%.release.o)
 # Compile and link options
 #
 
+CPP=g++
+cc-option = $(shell $(CPP) -Werror $(1) -c -x c /dev/null -o /dev/null 2>/dev/null; echo $$?)
+
 LIBRARY_PKG_LIBS=
 PKG_LIBS=-pthread
 RENDERER_PKG_LIBS=-lvulkan -lglfw
-ifeq '' '$(findstring clang,$(CPP))'
-	PKG_LIBS += -Wl,--no-as-needed
+NO_AS_NEEDED=-Wl,--no-as-needed
+ifeq ($(call cc-option, $(NO_AS_NEEDED)),0)
+	PKG_LIBS += $(NO_AS_NEEDED)
 endif
-GLIBC := $(word 2,$(shell getconf GNU_LIBC_VERSION))
-GLIBC_HAS_RT := $(shell expr $(GLIBC) \>= 2.17)
-ifeq "$(GLIBC_HAS_RT)" "0"
-	LIBRARY_PKG_LIBS += -lrt
-	PKG_LIBS += -lrt
+GLIBC := $(word 2,$(shell getconf GNU_LIBC_VERSION 2>/dev/null))
+ifeq "$(.SHELLSTATUS)" "0"
+	GLIBC_HAS_RT := $(shell expr $(GLIBC) \>= 2.17)
+	ifeq "$(GLIBC_HAS_RT)" "0"
+		LIBRARY_PKG_LIBS += -lrt
+		PKG_LIBS += -lrt
+	endif
 endif
 
-CPP=g++
 WARNING_FLAGS=-Wall -Wpedantic
-override CPPFLAGS_DBG += $(WARNING_FLAGS) -I. -I../../ -I../deps/ -g -march=native -mtune=native -std=c++11 $(PKG_LIBS)
-override CPPFLAGS += $(WARNING_FLAGS) -I. -I../../ -I../deps/ -Ofast -fno-stack-protector -DNDEBUG -march=native -mtune=native -std=c++11 $(PKG_LIBS)
-override LDFLAGS_DBG += -g $(LIB_PATHS)
-override LDFLAGS += $(LIB_PATHS) -fwhole-program
+override CPPFLAGS_DBG += $(WARNING_FLAGS) -I. -I../../ -I../deps/ -g -march=native -mtune=native -std=c++11
+override CPPFLAGS += $(WARNING_FLAGS) -I. -I../../ -I../deps/ -Ofast -fno-stack-protector -DNDEBUG -march=native -mtune=native -std=c++11
+override LDFLAGS_DBG += -g $(LIB_PATHS) $(PKG_LIBS)
+override LDFLAGS += $(LIB_PATHS) -fwhole-program $(PKG_LIBS)
 
 
 #

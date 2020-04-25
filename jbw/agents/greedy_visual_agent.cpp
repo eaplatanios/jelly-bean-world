@@ -447,7 +447,7 @@ int main(int argc, const char** argv)
 
 	if (jellybean_index == config.item_types.length) {
 		fprintf(stderr, "ERROR: There is no item named 'jellybean'.\n");
-		return false;
+		return EXIT_FAILURE;
 	} if (onion_index == config.item_types.length) {
 		fprintf(stderr, "WARNING: There is no item named 'onion'.\n");
 	} if (wall_index == config.item_types.length) {
@@ -476,7 +476,7 @@ int main(int argc, const char** argv)
 	simulator<server_data>& sim = *((simulator<server_data>*) alloca(sizeof(simulator<server_data>)));
 	if (init(sim, config, server_data(), get_seed()) != status::OK) {
 		fprintf(stderr, "ERROR: Unable to initialize simulator.\n");
-		return false;
+		return EXIT_FAILURE;
 	}
 
 	async_server server;

@@ -687,7 +687,7 @@ int main(int argc, const char** argv)
 
 	if (jellybean_index == item_type_count) {
 		fprintf(stderr, "ERROR: There is no item named 'jellybean'.\n");
-		return false;
+		return EXIT_FAILURE;
 	}
 
 	position bottom_left_corner = {0, 0};
