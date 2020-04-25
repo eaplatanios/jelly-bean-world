@@ -102,7 +102,7 @@ the following steps:
      can use, but you should feel free to create new ones.
      The reward schedules that we used for our
      [paper](https://arxiv.org/abs/2002.06306) can be found
-     in [the experiments module.](api/swift/Sources/JellyBeanWorldExperiments/Experiment.swift#L165).
+     in [the experiments module](api/swift/Sources/JellyBeanWorldExperiments/Experiment.swift#L165).
   3. Create a Jelly Bean World [environment](api/swift/Sources/JellyBeanWorld/Environment.swift#L19).
   4. Create an agent. We do not impose any constraints on
      how you design your agents. They will be the ones
