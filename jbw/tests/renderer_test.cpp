@@ -315,7 +315,7 @@ int main(int argc, const char** argv)
 		return EXIT_FAILURE;
 	}
 
-	model_view_matrix transform = { 0 };
+	model_view_matrix transform = {{0}};
 	for (unsigned int i = 0; i < 4; i++)
 		/* set the model matrix to the identity */
 		transform.model[i * 4 + i] = 1.0f;

@@ -3,12 +3,7 @@
 temp/
 
 # Compiled Executables
-jbw/tests/diffusion_test
-jbw/tests/map_test
-jbw/tests/network_test
-jbw/tests/simulator_test
-jbw/tests/renderer_test
-jbw/visualizer/jbw_visualizer
+bin/
 
 # IntelliJ
 **/.idea/**/*

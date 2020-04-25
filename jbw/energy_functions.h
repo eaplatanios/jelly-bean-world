@@ -52,7 +52,7 @@ inline uint32_t murmurhash32_mix32(uint32_t x) {
 }
 
 float hash_function(uint32_t x, uint32_t shift, uint32_t scale) {
-	return (float) murmurhash32_mix32((x + shift) / scale) / UINT_MAX;
+	return (float) murmurhash32_mix32((x + shift) / scale) / (float) UINT_MAX;
 }
 
 float radial_hash_intensity_fn(const position pos, const float* args) {
