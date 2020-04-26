@@ -464,6 +464,7 @@ cd bin
 jbw_visualizer
 ```
 
+#### Instructions:
 Running the visualizer without arguments will print the help output, detailing
 how to use the visualizer. The visualizer connects to a simulation server, as
 specified by an address command-line argument, and begins to render the
