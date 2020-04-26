@@ -418,18 +418,26 @@ invoked, which must be defined by the user.
 ### Greedy Agent
 
 The greedy visual agent is implemented in [jbw/agents/greedy_visual_agent.cpp](jbw/agents/greedy_visual_agent.cpp).
-To build the greedy agent in Mac or Linux, simply run `make greedy_visual_agent`.
-On Windows, build the Visual Studio project in `vs/greedy_visual_agent.vcxproj`.
-The executable will be located in `bin/greedy_visual_agent`. Feel free to modify
-the environment configuration in that source file.
+To build the greedy agent, first make sure the submodules are initialized by
+running `git submodule update --init --recursive`. Next, on Mac or Linux,
+simply run `make greedy_visual_agent`. On Windows, build the Visual Studio
+project in `vs/greedy_visual_agent.vcxproj`. The executable will be located in
+`bin/greedy_visual_agent`. Feel free to modify the environment configuration in
+that source file.
 
 ## Using the Visualizer
 
 We provide a real-time interactive visualizer, located in [jbw/visualizer/jbw_visualizer.cpp](jbw/visualizer/jbw_visualizer.cpp),
-built using Vulkan and GLFW. To compile it in Mac or Linux, run
-`make visualizer`. On Windows, build the Visual Studio project
-`vs/jbw_visualizer.vcxproj`. The executable will be located in
-`bin/jbw_visualizer`. To run the visualizer, simply run:
+built using Vulkan and GLFW. To compile it, first make sure the submodules have
+been initialized by running `git submodule update --init --recursive`. Next, if
+you are on Mac or Linux, run `make visualizer`. On Windows, open the Visual
+Studio project `vs/jbw_visualizer.vcxproj` and make sure the include and
+library paths have the correct Vulkan and GLFW directories on your machine. To
+do so, in the Solution Explorer, right click on the `jbw_visualizer` project
+and select "Properties". Select "C\C++ > General", and modify "Additional
+Include Directories" as needed. For the library paths, select "Linker >
+General" and modify "Additional Library Directories" as needed. The executable
+will be located in `bin/jbw_visualizer`. To run the visualizer, simply run:
 ```bash
 cd bin
 ./jbw_visualizer
