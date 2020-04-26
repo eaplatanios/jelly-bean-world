@@ -384,8 +384,8 @@ int main(int argc, const char** argv) {
 }
 ```
 
-See [jbw/simulator_test.cpp](jbw/simulator_test.cpp) for an example with more
-types of items, as well as a multithreaded example and an MPI example.
+See [jbw/tests/simulator_test.cpp](jbw/tests/simulator_test.cpp) for an example
+with more types of items, as well as a multithreaded example and an MPI example.
 
 To setup an MPI server for a simulator `sim`, the `init_server` function in
 [jbw/mpi.h](jbw/mpi.h) may be used:
@@ -478,8 +478,8 @@ arguments. If a server address is provided to the Simulator constructor, it
 will try to connect to the Simulator running at the specified remote address,
 and all calls to the Simulator class will be issued as commands to the server.
 In C++, [jbw/mpi.h](jbw/mpi.h) provides the functionality to run the server
-and clients. See [jbw/simulator_test.cpp](jbw/simulator_test.cpp) for an
-example.
+and clients. See [jbw/tests/simulator_test.cpp](jbw/tests/simulator_test.cpp)
+for an example.
 
 #### Mechanics
 
