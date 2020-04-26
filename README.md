@@ -21,12 +21,15 @@ This file is split in multiple sections:
     you can use the Jelly Bean World.
   - [Using Swift:](#using-swift) Describes how to setup and
     use our Swift API, and how to reproduce the experiments
-    we performed for our [paper](https://arxiv.org/abs/2002.06306).
+    as detailed in our [paper](https://arxiv.org/abs/2002.06306).
   - [Using Python:](#using-python) Describes how to setup
     and use our Python API.
   - [Using C++:](#using-c) Describes how to setup and use
-    our C++ API.
-  - [Using the Visualizer:](#using-the-visualizer) TODO.
+    our C++ API, and how to run the greedy agent as
+    detailed in our [paper](https://arxiv.org/abs/2002.06306).
+  - [Using the Visualizer:](#using-the-visualizer)
+    Describes how to use build and use the Vulkan-based
+    visualizer.
   - [Design:](#design) Provides a brief description of the
     Jelly Bean World design. More information can found in
     our [paper](https://arxiv.org/abs/2002.06306).
@@ -41,6 +44,11 @@ This file is split in multiple sections:
   - Numpy
 - **Swift API:**
   - Swift for TensorFlow 0.8 toolchain
+- **Visualizer:**
+  - Vulkan
+  - GLFW
+  - Make (for Mac or Linux), or Visual Studio 2017+ (for
+    Windows)
 
 ## Using Swift
 
@@ -376,11 +384,11 @@ int main(int argc, const char** argv) {
 }
 ```
 
-See [core/jbw/simulator_test.cpp](core/jbw/simulator_test.cpp) for an example
-with more types of items, as well as a multithreaded example and an MPI example.
+See [jbw/simulator_test.cpp](jbw/simulator_test.cpp) for an example with more
+types of items, as well as a multithreaded example and an MPI example.
 
 To setup an MPI server for a simulator `sim`, the `init_server` function in
-[core/jbw/mpi.h](jbw/mpi.h) may be used:
+[jbw/mpi.h](jbw/mpi.h) may be used:
 ```c++
   /* NOTE: this blocks during the lifetime of the server */
   sync_server new_server;
@@ -388,14 +396,14 @@ To setup an MPI server for a simulator `sim`, the `init_server` function in
 ```
 
 To set up an asynchronous MPI server (where `init_server` will not block), the
-`async_server` class in [core/jbw/mpi.h](core/jbw/mpi.h) is used:
+`async_server` class in [jbw/mpi.h](jbw/mpi.h) is used:
 ```c++
   async_server new_server;
   if (!init_server(new_server, sim, 54353, 256, 8, permissions::grant_all())) { /* process error */ }
 ```
 
 To connect to an existing server, for example at `localhost:54353`, we use the
-`client` class defined in [core/jbw/mpi.h](core/jbw/mpi.h):
+`client` class defined in [jbw/mpi.h](jbw/mpi.h):
 ```c++
   client<empty_data> new_client;
   uint64_t client_id;
@@ -406,6 +414,31 @@ The commands may be sent to the server using the functions `send_add_agent`,
 `send_move`, `send_turn`, etc. When the client receives responses from the
 server, the functions `on_add_agent`, `on_move`, `on_turn`, etc will be
 invoked, which must be defined by the user.
+
+### Greedy Agent
+
+The greedy visual agent is implemented in [jbw/agents/greedy_visual_agent.cpp](jbw/agents/greedy_visual_agent.cpp).
+To build the greedy agent in Mac or Linux, simply run `make greedy_visual_agent`.
+On Windows, build the Visual Studio project in `vs/greedy_visual_agent.vcxproj`.
+The executable will be located in `bin/greedy_visual_agent`. Feel free to modify
+the environment configuration in that source file.
+
+## Using the Visualizer
+
+We provide a real-time interactive visualizer, located in [jbw/visualizer/jbw_visualizer.cpp](jbw/visualizer/jbw_visualizer.cpp),
+built using Vulkan and GLFW. To compile it in Mac or Linux, run
+`make visualizer`. On Windows, build the Visual Studio project
+`vs/jbw_visualizer.vcxproj`. The executable will be located in
+`bin/jbw_visualizer`. To run the visualizer, simply run:
+```bash
+cd bin
+./jbw_visualizer
+```
+This will print the help output, detailing how to use the visualizer. The
+visualizer connects to a simulation server, as specified by an address and port
+command-line argument, and begins to render the connected simulation. The user
+is able to move the camera in the environment, zoom in and out, increase or
+decrease the simulation update rate, track agents, and take screenshots.
 
 ## Design
 
@@ -444,9 +477,9 @@ Simulator can be constructed as a server with the appropriate constructor
 arguments. If a server address is provided to the Simulator constructor, it
 will try to connect to the Simulator running at the specified remote address,
 and all calls to the Simulator class will be issued as commands to the server.
-In C++, [core/jbw/mpi.h](core/jbw/mpi.h) provides the functionality to run the
-server and clients. See [core/jbw/simulator_test.cpp](core/jbw/simulator_test.cpp)
-for an example.
+In C++, [jbw/mpi.h](jbw/mpi.h) provides the functionality to run the server
+and clients. See [jbw/simulator_test.cpp](jbw/simulator_test.cpp) for an
+example.
 
 #### Mechanics
 

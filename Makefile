@@ -12,6 +12,12 @@ all: agents tests visualizer
 
 debug: agents tests visualizer
 
+greedy_visual_agent:
+	$(MAKE) -C jbw/agents $(MAKECMDGOALS)
+
+greedy_visual_agent_dbg:
+	$(MAKE) -C jbw/agents $(MAKECMDGOALS)
+
 agents:
 	$(MAKE) -C jbw/agents $(MAKECMDGOALS)
 

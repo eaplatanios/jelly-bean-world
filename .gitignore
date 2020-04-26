@@ -11,6 +11,11 @@ bin/
 # VS Code
 **/.vscode/**/*
 
+# Visual Studio
+vs/.vs/
+vs/Win32/
+vs/x64/
+
 # Python API
 **/build/**/*
 **/__pycache__/**/*
