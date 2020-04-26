@@ -451,14 +451,15 @@ cd bin
 ```
 
 #### Windows:
-Open the Visual Studio project `vs/jbw_visualizer.vcxproj` and make sure the
-include and library paths have the correct Vulkan and GLFW directories on your
-machine. To do so, in the Solution Explorer, right click on the
-`jbw_visualizer` project and select "Properties". Select "C\C++ > General", and
-modify "Additional Include Directories" as needed. For the library paths,
-select "Linker > General" and modify "Additional Library Directories" as
-needed. Then build the project. The executable will be located in
-`bin/jbw_visualizer.exe`. To run the visualizer:
+First make sure the submodules are initialized by running
+`git submodule update --init --recursive`. Next, open the Visual Studio project
+`vs/jbw_visualizer.vcxproj` and make sure the include and library paths have
+the correct Vulkan and GLFW directories on your machine. To do so, in the
+Solution Explorer, right click on the `jbw_visualizer` project and select
+"Properties". Select "C\C++ > General", and modify "Additional Include
+Directories" as needed. For the library paths, select "Linker > General" and
+modify "Additional Library Directories" as needed. Then build the project. The
+executable will be located in `bin/jbw_visualizer.exe`. To run the visualizer:
 ```bash
 cd bin
 jbw_visualizer
