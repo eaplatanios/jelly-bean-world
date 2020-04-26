@@ -442,13 +442,14 @@ will be located in `bin/jbw_visualizer`. To run the visualizer, simply run:
 cd bin
 ./jbw_visualizer
 ```
-This will print the help output, detailing how to use the visualizer. The
-visualizer connects to a simulation server, as specified by an address and port
-command-line argument, and begins to render the connected simulation. The user
-is able to move the camera in the environment, zoom in and out, increase or
-decrease the simulation update rate, track agents, and take screenshots. A local
-simulation can be started without needing to connect to a server by running
-`./jbw_visualizer --local`, which uses a hard-coded configuration in [jbw/visualizer/jbw_visualizer.cpp](jbw/visualizer/jbw_visualizer.cpp).
+On Windows, omit the `./` and simply run `jbw_visualizer`. This will print the
+help output, detailing how to use the visualizer. The visualizer connects to a
+simulation server, as specified by an address command-line argument, and begins
+to render the connected simulation. The user is able to move the camera in the
+environment, zoom in and out, increase or decrease the simulation update rate,
+track agents, and take screenshots. A local simulation can be started without
+needing to connect to a server by running `./jbw_visualizer --local`, which
+uses a hard-coded configuration in [jbw/visualizer/jbw_visualizer.cpp](jbw/visualizer/jbw_visualizer.cpp).
 
 ## Design
 
