@@ -438,7 +438,9 @@ This will print the help output, detailing how to use the visualizer. The
 visualizer connects to a simulation server, as specified by an address and port
 command-line argument, and begins to render the connected simulation. The user
 is able to move the camera in the environment, zoom in and out, increase or
-decrease the simulation update rate, track agents, and take screenshots.
+decrease the simulation update rate, track agents, and take screenshots. A local
+simulation can be started without needing to connect to a server by running
+`./jbw_visualizer --local`, which uses a hard-coded configuration in [jbw/visualizer/jbw_visualizer.cpp](jbw/visualizer/jbw_visualizer.cpp).
 
 ## Design
 
@@ -531,9 +533,9 @@ scent (or lack thereof) diffuses correctly.
 ### Implementation
 
 The core library is implemented in **C++** and has no dependencies. It should
-be able to run on Mac, Linux, and Windows. We already provide a **Python** API
-that is quite simple to use and extend. APIs for other languages should also be
-easy to implement.
+be able to run on Mac, Linux, and Windows. We already provide **Python** and
+**Swift** APIs that are quite simple to use and extend. APIs for other languages
+are also easy to implement.
 
 ## Troubleshooting
 
