@@ -161,6 +161,7 @@ that the agent's decision-making logic goes in the `do_next_action` method.
 
 ```python
 import jbw
+from math import pi
 
 class SimpleAgent(jbw.Agent):
   def __init__(self, simulator, load_filepath=None):
@@ -178,7 +179,7 @@ class SimpleAgent(jbw.Agent):
 
 # specify the item types
 items = []
-items.append(jbw.Item("banana", [1.0, 1.0, 0.0], [1.0, 1.0, 0.0], [0], [0], False,
+items.append(jbw.Item("banana", [1.0, 1.0, 0.0], [1.0, 1.0, 0.0], [0], [0], False, 0.0,
         intensity_fn=jbw.IntensityFunction.CONSTANT, intensity_fn_args=[-2.0],
         interaction_fns=[[jbw.InteractionFunction.PIECEWISE_BOX, 40.0, 200.0, 0.0, -40.0]]))
 
@@ -187,7 +188,7 @@ config = jbw.SimulatorConfig(max_steps_per_movement=1, vision_range=1,
   allowed_movement_directions=[jbw.ActionPolicy.ALLOWED, jbw.ActionPolicy.DISALLOWED, jbw.ActionPolicy.DISALLOWED, jbw.ActionPolicy.DISALLOWED],
   allowed_turn_directions=[jbw.ActionPolicy.DISALLOWED, jbw.ActionPolicy.DISALLOWED, jbw.ActionPolicy.ALLOWED, jbw.ActionPolicy.ALLOWED],
   no_op_allowed=False, patch_size=32, mcmc_num_iter=4000, items=items, agent_color=[0.0, 0.0, 1.0],
-  collision_policy=jbw.MovementConflictPolicy.FIRST_COME_FIRST_SERVED,
+  collision_policy=jbw.MovementConflictPolicy.FIRST_COME_FIRST_SERVED, agent_field_of_view=2*pi,
   decay_param=0.4, diffusion_param=0.14, deleted_item_lifetime=2000)
 
 # create a local simulator
@@ -293,8 +294,8 @@ The following is a simple example where a simulator is constructed locally
 (within the same process) and a single agent continuously moves forward.
 
 ```c++
-#include "network.h"
-#include "simulator.h"
+#include <jbw/network.h>
+#include <jbw/simulator.h>
 
 using namespace jbw;
 
@@ -367,15 +368,16 @@ int main(int argc, const char** argv) {
   }
 
   /* add one agent to the simulation */
-  pair<uint64_t, agent_state*> agent = sim.add_agent();
-  if (agent.key == UINT64_MAX) {
+  uint64_t new_agent_id; agent_state* new_agent;
+  status result = sim.add_agent(new_agent_id, new_agent);
+  if (result != status::OK) {
     fprintf(stderr, "ERROR: Unable to add new agent.\n");
     return EXIT_FAILURE;
   }
 
   /* the main simulation loop */
   for (unsigned int t = 0; t < 10000; t++) {
-    if (sim.move(agent.key, direction::UP, 1) != status::OK) {
+    if (sim.move(new_agent_id, direction::UP, 1) != status::OK) {
       fprintf(stderr, "ERROR: Unable to move agent.\n");
       return EXIT_FAILURE;
     }
