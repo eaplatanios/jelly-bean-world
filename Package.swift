@@ -20,13 +20,11 @@ let package = Package(
   targets: [
     .target(
       name: "CJellyBeanWorld",
-      path: "api/swift/Sources/CJellyBeanWorld",
-      sources: [
-        "simulator.cpp",
-        "../../../../jbw/simulator.cpp"],
+      path: "api/c",
+      sources: ["simulator.cpp"],
       cxxSettings: [
-        .headerSearchPath("../../../../jbw"),
-        .headerSearchPath("../../../../jbw/deps"),
+        .headerSearchPath("../../jbw"),
+        .headerSearchPath("../../jbw/deps"),
         .unsafeFlags([
           "-std=c++11", "-Wall", "-Wpedantic", "-Ofast", "-DNDEBUG", 
           "-fno-stack-protector", "-mtune=native", "-march=native",
