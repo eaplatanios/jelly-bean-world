@@ -118,7 +118,7 @@ public struct Experiment {
     // Run the experiment.
     var totalReward = Float(0.0)
     var rewardWriteDeque = Deque<Float>(size: writeFrequency)
-    var currentRewardFunction = environment.currentStep.observation.rewardFunction
+    var currentRewardFunction = environment.currentStep.observation.rewardFunction as! JellyBeanWorld.SimpleReward
     try withRandomSeedForTensorFlow((Int32(runID), Int32(runID))) {
       var agent = self.agent.create(
         in: environment,
@@ -149,7 +149,7 @@ public struct Experiment {
               let reward = rewardWriteDeque.sum()
               resultsFileHandle?.write("\(environmentStep)\t\(reward)\n".data(using: .utf8)!)
             }
-            let rewardFunction = trajectory.observation.rewardFunction
+            let rewardFunction = trajectory.observation.rewardFunction as! JellyBeanWorld.SimpleReward
             if environmentStep == 0 || rewardFunction != currentRewardFunction {
               currentRewardFunction = rewardFunction
               rewardScheduleFileHandle?.write(
@@ -166,37 +166,37 @@ extension JellyBeanWorldExperiments.Reward {
   public var schedule: RewardSchedule {
     switch self {
     case .collectJellyBeans:
-      return FixedReward(JellyBeanWorld.Reward.collect(item: jellyBean, value: 1.0))
+      return FixedReward(JellyBeanWorld.SimpleReward.collect(item: jellyBean, value: 1.0))
     case .collectOnions:
-      return FixedReward(JellyBeanWorld.Reward.collect(item: onion, value: 1.0))
+      return FixedReward(JellyBeanWorld.SimpleReward.collect(item: onion, value: 1.0))
     case .collectJellyBeansAvoidOnions:
-      return FixedReward(JellyBeanWorld.Reward.combined(
-        JellyBeanWorld.Reward.collect(item: jellyBean, value: 1.0),
-        JellyBeanWorld.Reward.avoid(item: onion, value: 1.0)))
+      return FixedReward(JellyBeanWorld.SimpleReward.combined([
+        JellyBeanWorld.SimpleReward.collect(item: jellyBean, value: 1.0),
+        JellyBeanWorld.SimpleReward.avoid(item: onion, value: 1.0)]))
     case .collectJellyBeansAvoidOnionsLong:
-      return FixedReward(JellyBeanWorld.Reward.combined(
-        JellyBeanWorld.Reward.collect(item: jellyBean, value: 1.0),
-        JellyBeanWorld.Reward.avoid(item: onion, value: 1.0)))
+      return FixedReward(JellyBeanWorld.SimpleReward.combined([
+        JellyBeanWorld.SimpleReward.collect(item: jellyBean, value: 1.0),
+        JellyBeanWorld.SimpleReward.avoid(item: onion, value: 1.0)]))
     case .collectJellyBeansAndThenAvoidOnions:
       return CyclicalSchedule(
-        [(JellyBeanWorld.Reward.collect(item: jellyBean, value: 1.0), 100000),
-          (JellyBeanWorld.Reward.combined(
-            JellyBeanWorld.Reward.collect(item: jellyBean, value: 1.0),
-            JellyBeanWorld.Reward.avoid(item: onion, value: 1.0)), 10000000)])
+        [(JellyBeanWorld.SimpleReward.collect(item: jellyBean, value: 1.0), 100000),
+         (JellyBeanWorld.SimpleReward.combined([
+           JellyBeanWorld.SimpleReward.collect(item: jellyBean, value: 1.0),
+           JellyBeanWorld.SimpleReward.avoid(item: onion, value: 1.0)]), 10000000)])
     case .avoidOnionsAndThenCollectJellyBeans:
       return CyclicalSchedule(
-        [(JellyBeanWorld.Reward.avoid(item: onion, value: 1.0), 100000),
-          (JellyBeanWorld.Reward.combined(
-            JellyBeanWorld.Reward.collect(item: jellyBean, value: 1.0),
-            JellyBeanWorld.Reward.avoid(item: onion, value: 1.0)), 10000000)])
+        [(JellyBeanWorld.SimpleReward.avoid(item: onion, value: 1.0), 100000),
+         (JellyBeanWorld.SimpleReward.combined([
+           JellyBeanWorld.SimpleReward.collect(item: jellyBean, value: 1.0),
+           JellyBeanWorld.SimpleReward.avoid(item: onion, value: 1.0)]), 10000000)])
     case .cyclicalJellyBeansOnions:
       return CyclicalSchedule(
-        [(JellyBeanWorld.Reward.combined(
-            JellyBeanWorld.Reward.collect(item: jellyBean, value: 1.0),
-            JellyBeanWorld.Reward.avoid(item: onion, value: 1.0)), 100000),
-          (JellyBeanWorld.Reward.combined(
-            JellyBeanWorld.Reward.avoid(item: jellyBean, value: 1.0),
-            JellyBeanWorld.Reward.collect(item: onion, value: 1.0)), 100000)])
+        [(JellyBeanWorld.SimpleReward.combined([
+          JellyBeanWorld.SimpleReward.collect(item: jellyBean, value: 1.0),
+          JellyBeanWorld.SimpleReward.avoid(item: onion, value: 1.0)]), 100000),
+          (JellyBeanWorld.SimpleReward.combined([
+            JellyBeanWorld.SimpleReward.avoid(item: jellyBean, value: 1.0),
+            JellyBeanWorld.SimpleReward.collect(item: onion, value: 1.0)]), 100000)])
     }
   }
 }

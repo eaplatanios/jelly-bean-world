@@ -275,7 +275,7 @@ extension Environment {
           vision: visionDistribution.mode(),
           scent: scentDistribution.mode(),
           moved: Tensor<Float>(movedDistribution.mode() .> 0),
-          rewardFunction: .zero)
+          rewardFunction: ZeroReward())
       }
 
       @inlinable
@@ -284,7 +284,7 @@ extension Environment {
           vision: visionDistribution.sample(),
           scent: scentDistribution.sample(),
           moved: Tensor<Float>(movedDistribution.sample() .> 0),
-          rewardFunction: .zero)
+          rewardFunction: ZeroReward())
       }
     }
   }

@@ -297,7 +297,7 @@ public struct RewardCompiler: Module {
 
   @inlinable
   @differentiable
-  public func callAsFunction(_ input: JellyBeanWorld.Reward) -> Tensor<Float> {
+  public func callAsFunction(_ input: JellyBeanWorld.SimpleReward) -> Tensor<Float> {
     switch input {
     case .zero:
       return zeroEmbedding
@@ -313,8 +313,12 @@ public struct RewardCompiler: Module {
       return embedding.squeezingShape(at: 0)
     case let .explore(value):
       return gelu(exploreEmbedding * value)
-    case let .combined(reward1, reward2):
-      return gelu(self(reward1) + self(reward2))
+    case let .combined(rewards):
+      var reward = self(rewards[0])
+      for i in 1..<rewards.count {
+        reward = reward + self(rewards[i])
+      }
+      return gelu(reward)
     }
   }
 }
@@ -356,7 +360,7 @@ public struct RewardAwareVisionActorCritic: Module {
     let observation = input.observation
     let outerDimCount = observation.vision.rank - 3
     let outerDims = [Int](observation.vision.shape.dimensions[0..<outerDimCount])
-    let reward = rewardCompiler(observation.rewardFunction)
+    let reward = rewardCompiler(observation.rewardFunction as! JellyBeanWorld.SimpleReward)
     let vision = observation.vision.flattenedBatch(outerDimCount: outerDimCount)
     let rewardHidden = reward.expandingShape(at: 0).tiled(
       multiples: Tensor<Int32>([Int32(vision.shape[0]), 1]))
@@ -417,7 +421,7 @@ public struct RewardAwareScentActorCritic: Module {
     let observation = input.observation
     let outerDimCount = observation.vision.rank - 3
     let outerDims = [Int](observation.vision.shape.dimensions[0..<outerDimCount])
-    let reward = rewardCompiler(observation.rewardFunction)
+    let reward = rewardCompiler(observation.rewardFunction as! JellyBeanWorld.SimpleReward)
     let scent = observation.scent.flattenedBatch(outerDimCount: outerDimCount)
     let rewardHidden = reward.expandingShape(at: 0).tiled(
       multiples: Tensor<Int32>([Int32(scent.shape[0]), 1]))
@@ -480,7 +484,7 @@ public struct RewardAwareVisionAndScentActorCritic: Module {
     let observation = input.observation
     let outerDimCount = observation.vision.rank - 3
     let outerDims = [Int](observation.vision.shape.dimensions[0..<outerDimCount])
-    let reward = rewardCompiler(observation.rewardFunction)
+    let reward = rewardCompiler(observation.rewardFunction as! JellyBeanWorld.SimpleReward)
     let vision = observation.vision.flattenedBatch(outerDimCount: outerDimCount)
     let scent = observation.scent.flattenedBatch(outerDimCount: outerDimCount)
     let rewardHidden = reward.expandingShape(at: 0).tiled(
@@ -549,7 +553,7 @@ public struct RewardContextualVisionActorCritic: Module {
     let observation = input.observation
     let outerDimCount = observation.vision.rank - 3
     let outerDims = [Int](observation.vision.shape.dimensions[0..<outerDimCount])
-    let reward = rewardCompiler(observation.rewardFunction)
+    let reward = rewardCompiler(observation.rewardFunction as! JellyBeanWorld.SimpleReward)
     let vision = observation.vision.flattenedBatch(outerDimCount: outerDimCount)
     let moved = 2 * observation.moved.flattenedBatch(
       outerDimCount: outerDimCount
@@ -612,7 +616,7 @@ public struct RewardContextualScentActorCritic: Module {
     let observation = input.observation
     let outerDimCount = observation.vision.rank - 3
     let outerDims = [Int](observation.vision.shape.dimensions[0..<outerDimCount])
-    let reward = rewardCompiler(observation.rewardFunction)
+    let reward = rewardCompiler(observation.rewardFunction as! JellyBeanWorld.SimpleReward)
     let scent = observation.scent.flattenedBatch(outerDimCount: outerDimCount)
     let moved = 2 * observation.moved.flattenedBatch(
       outerDimCount: outerDimCount
@@ -677,7 +681,7 @@ public struct RewardContextualVisionAndScentActorCritic: Module {
     let observation = input.observation
     let outerDimCount = observation.vision.rank - 3
     let outerDims = [Int](observation.vision.shape.dimensions[0..<outerDimCount])
-    let reward = rewardCompiler(observation.rewardFunction)
+    let reward = rewardCompiler(observation.rewardFunction as! JellyBeanWorld.SimpleReward)
     let vision = observation.vision.flattenedBatch(outerDimCount: outerDimCount)
     let scent = observation.scent.flattenedBatch(outerDimCount: outerDimCount)
     let visionHidden = gelu(visionLayer(vision))

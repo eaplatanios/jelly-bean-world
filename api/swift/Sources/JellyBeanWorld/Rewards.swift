@@ -27,20 +27,37 @@ public struct AgentTransition {
   }
 }
 
+public protocol Reward {
+  /// Returns a reward value for the provided transition.
+  ///
+  /// - Parameter transition: Agent transition for which to compute a reward.
+  /// - Returns: Reward value for the provided transition.
+  func callAsFunction(for transition: AgentTransition) -> Float
+}
+
+public struct ZeroReward: Reward {
+  public init() {}
+
+  @inlinable
+  public func callAsFunction(for transition: AgentTransition) -> Float {
+    0
+  }
+}
+
 ///  Reward function that scores agent transitions.
-public enum Reward: Equatable {
+public enum SimpleReward: Reward, Equatable {
   case zero
   case action(value: Float)
   case collect(item: Item, value: Float)
   case avoid(item: Item, value: Float)
   case explore(value: Float)
-  indirect case combined(Reward, Reward)
+  indirect case combined([SimpleReward])
 
   /// Adds two reward functions. The resulting reward will be equal to the sum of the rewards
   /// computed by the two functions.
   @inlinable
-  public static func +(lhs: Reward, rhs: Reward) -> Reward {
-    .combined(lhs, rhs)
+  public static func +(lhs: SimpleReward, rhs: SimpleReward) -> SimpleReward {
+    .combined([lhs, rhs])
   }
 
   /// Returns a reward value for the provided transition.
@@ -70,13 +87,13 @@ public enum Reward: Equatable {
       let distance = x * x + y * y
       let previousDistance = previousX * previousX + previousY * previousY
       return distance > previousDistance ? value : 0.0
-    case let .combined(reward1, reward2):
-      return reward1(for: transition) + reward2(for: transition)
+    case let .combined(rewards):
+      return rewards.map { $0(for: transition) }.reduce(0, +)
     }
   }
 }
 
-extension Reward: CustomStringConvertible {
+extension SimpleReward: CustomStringConvertible {
   public var description: String {
     switch self {
     case .zero:
@@ -89,8 +106,8 @@ extension Reward: CustomStringConvertible {
       return "Avoid[\(item.description), \(String(format: "%.2f", value))]"
     case let .explore(value):
       return "Explore[\(String(format: "%.2f", value))]"
-    case let .combined(reward1, reward2):
-      return "\(reward1.description) ∧ \(reward2.description)"
+    case let .combined(rewards):
+      return rewards.map { $0.description }.joined(separator: " ∧ ")
     }
   }
 }
@@ -99,33 +116,33 @@ extension Reward: CustomStringConvertible {
 /// This is useful for representing never-ending learning settings that require adaptation.
 public protocol RewardSchedule {
   /// Returns the reward function to use for the specified time step.
-  func reward(forStep step: UInt64) -> Reward
+  func reward(forStep step: UInt64) -> SimpleReward
 }
 
 /// Fixed reward function schedule that uses the same reward function for all time steps.
 public struct FixedReward: RewardSchedule {
-  public let reward: Reward
+  public let reward: SimpleReward
 
-  public init(_ reward: Reward) {
+  public init(_ reward: SimpleReward) {
     self.reward = reward
   }
 
-  public func reward(forStep step: UInt64) -> Reward {
+  public func reward(forStep step: UInt64) -> SimpleReward {
     reward
   }
 }
 
 public struct CyclicalSchedule: RewardSchedule {
-  public let rewards: [(Reward, UInt64)]
+  public let rewards: [(SimpleReward, UInt64)]
   public let cycleDuration: UInt64
 
-  public init(_ rewards: [(Reward, UInt64)]) {
+  public init(_ rewards: [(SimpleReward, UInt64)]) {
     precondition(!rewards.isEmpty)
     self.rewards = rewards
     self.cycleDuration = rewards.map { $0.1 }.reduce(0, +)
   }
 
-  public func reward(forStep step: UInt64) -> Reward {
+  public func reward(forStep step: UInt64) -> SimpleReward {
     let step = step % cycleDuration
     var cumulativeDuration: UInt64 = 0
     for reward in rewards {
