@@ -116,33 +116,33 @@ extension SimpleReward: CustomStringConvertible {
 /// This is useful for representing never-ending learning settings that require adaptation.
 public protocol RewardSchedule {
   /// Returns the reward function to use for the specified time step.
-  func reward(forStep step: UInt64) -> SimpleReward
+  func reward(forStep step: UInt64) -> Reward
 }
 
 /// Fixed reward function schedule that uses the same reward function for all time steps.
 public struct FixedReward: RewardSchedule {
-  public let reward: SimpleReward
+  public let reward: Reward
 
-  public init(_ reward: SimpleReward) {
+  public init(_ reward: Reward) {
     self.reward = reward
   }
 
-  public func reward(forStep step: UInt64) -> SimpleReward {
+  public func reward(forStep step: UInt64) -> Reward {
     reward
   }
 }
 
 public struct CyclicalSchedule: RewardSchedule {
-  public let rewards: [(SimpleReward, UInt64)]
+  public let rewards: [(Reward, UInt64)]
   public let cycleDuration: UInt64
 
-  public init(_ rewards: [(SimpleReward, UInt64)]) {
+  public init(_ rewards: [(Reward, UInt64)]) {
     precondition(!rewards.isEmpty)
     self.rewards = rewards
     self.cycleDuration = rewards.map { $0.1 }.reduce(0, +)
   }
 
-  public func reward(forStep step: UInt64) -> SimpleReward {
+  public func reward(forStep step: UInt64) -> Reward {
     let step = step % cycleDuration
     var cumulativeDuration: UInt64 = 0
     for reward in rewards {
