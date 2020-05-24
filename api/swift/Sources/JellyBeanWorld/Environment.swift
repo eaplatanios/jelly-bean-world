@@ -56,6 +56,7 @@ public struct Environment: ReinforcementLearning.Environment {
         vision: Tensor<Float>(agentState.vision),
         scent: Tensor<Float>(agentState.scent),
         moved: Tensor<Float>(zeros: []),
+        inventory: agentState.items,
         rewardFunction: rewardFunction)
     })
     self.step = Step(
@@ -108,6 +109,7 @@ public struct Environment: ReinforcementLearning.Environment {
       vision: Tensor<Float>(agentState.vision),
       scent: Tensor<Float>(agentState.scent),
       moved: Tensor<Float>(agentState.position != previousAgentState.position ? 1 : 0),
+      inventory: agentState.items,
       rewardFunction: rewardFunction)
     let reward = Tensor<Float>(rewardFunction(for: AgentTransition(
       previousState: previousAgentState,
@@ -132,6 +134,7 @@ public struct Environment: ReinforcementLearning.Environment {
         vision: Tensor<Float>(agentState.vision),
         scent: Tensor<Float>(agentState.scent),
         moved: Tensor<Float>(zeros: []),
+        inventory: agentState.items,
         rewardFunction: rewardFunction)
     })
     step =  Step(
@@ -172,6 +175,7 @@ extension Environment {
     public var vision: Tensor<Float>
     public var scent: Tensor<Float>
     @noDerivative public var moved: Tensor<Float>
+    @noDerivative public var inventory: [Item: Int]
     @noDerivative public var rewardFunction: JellyBeanWorld.Reward
 
     @inlinable
@@ -179,11 +183,13 @@ extension Environment {
       vision: Tensor<Float>,
       scent: Tensor<Float>,
       moved: Tensor<Float>,
+      inventory: [Item: Int],
       rewardFunction: JellyBeanWorld.Reward
     ) {
       self.vision = vision
       self.scent = scent
       self.moved = moved
+      self.inventory = inventory
       self.rewardFunction = rewardFunction
     }
   }
@@ -240,7 +246,7 @@ extension Environment {
       true // TODO: Check for the range of values.
     }
 
-    // TODO: How do we sample a reward function?
+    // TODO: How do we sample the inventory and the reward function?
     public struct ValueDistribution: DifferentiableDistribution, KeyPathIterable {
       @usableFromInline internal var visionDistribution: Uniform<Float> = Uniform<Float>(
         lowerBound: Tensor<Float>(0),
@@ -275,6 +281,7 @@ extension Environment {
           vision: visionDistribution.mode(),
           scent: scentDistribution.mode(),
           moved: Tensor<Float>(movedDistribution.mode() .> 0),
+          inventory: [:],
           rewardFunction: ZeroReward())
       }
 
@@ -284,6 +291,7 @@ extension Environment {
           vision: visionDistribution.sample(),
           scent: scentDistribution.sample(),
           moved: Tensor<Float>(movedDistribution.sample() .> 0),
+          inventory: [:],
           rewardFunction: ZeroReward())
       }
     }
