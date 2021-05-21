@@ -160,7 +160,7 @@ def case1_reward_fn(prev_items, items):
     reward_array = np.array([0, -1, 1, 0, 0, 0])
     diff = items - prev_items
 
-    return (diff * reward_array).sum()
+    return (diff * reward_array).sum().astype(np.float32)
 
 if modules_loaded:
   # Construct the simulator configuration.
