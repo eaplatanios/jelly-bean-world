@@ -90,22 +90,22 @@ bin:
 	mkdir -p $(BIN_DIR)
 
 greedy_blind_agent: bin $(LIBS) $(GREEDY_BLIND_AGENT_OBJS)
-		$(CPP) -o $(BIN_DIR)/greedy_blind_agent $(CPPFLAGS) $(LDFLAGS) $(GREEDY_BLIND_AGENT_OBJS)
+		$(CPP) -o $(BIN_DIR)/greedy_blind_agent $(GREEDY_BLIND_AGENT_OBJS) $(CPPFLAGS) $(LDFLAGS)
 
 greedy_blind_agent_dbg: bin $(LIBS) $(GREEDY_BLIND_AGENT_DBG_OBJS)
-		$(CPP) -o $(BIN_DIR)/greedy_blind_agent_dbg $(CPPFLAGS_DBG) $(LDFLAGS_DBG) $(GREEDY_BLIND_AGENT_DBG_OBJS)
+		$(CPP) -o $(BIN_DIR)/greedy_blind_agent_dbg $(GREEDY_BLIND_AGENT_DBG_OBJS) $(CPPFLAGS_DBG) $(LDFLAGS_DBG)
 
 greedy_visual_agent: bin $(LIBS) $(GREEDY_VISUAL_AGENT_OBJS)
-		$(CPP) -o $(BIN_DIR)/greedy_visual_agent $(CPPFLAGS) $(LDFLAGS) $(GREEDY_VISUAL_AGENT_OBJS)
+		$(CPP) -o $(BIN_DIR)/greedy_visual_agent $(GREEDY_VISUAL_AGENT_OBJS) $(CPPFLAGS) $(LDFLAGS)
 
 greedy_visual_agent_dbg: bin $(LIBS) $(GREEDY_VISUAL_AGENT_DBG_OBJS)
-		$(CPP) -o $(BIN_DIR)/greedy_visual_agent_dbg $(CPPFLAGS_DBG) $(LDFLAGS_DBG) $(GREEDY_VISUAL_AGENT_DBG_OBJS)
+		$(CPP) -o $(BIN_DIR)/greedy_visual_agent_dbg $(GREEDY_VISUAL_AGENT_DBG_OBJS) $(CPPFLAGS_DBG) $(LDFLAGS_DBG)
 
 reward_upper_bound: bin $(LIBS) $(REWARD_UPPER_BOUND_OBJS)
-		$(CPP) -o $(BIN_DIR)/reward_upper_bound $(CPPFLAGS) $(LDFLAGS) $(REWARD_UPPER_BOUND_OBJS)
+		$(CPP) -o $(BIN_DIR)/reward_upper_bound $(REWARD_UPPER_BOUND_OBJS) $(CPPFLAGS) $(LDFLAGS)
 
 reward_upper_bound_dbg: bin $(LIBS) $(REWARD_UPPER_BOUND_DBG_OBJS)
-		$(CPP) -o $(BIN_DIR)/reward_upper_bound_dbg $(CPPFLAGS_DBG) $(LDFLAGS_DBG) $(REWARD_UPPER_BOUND_DBG_OBJS)
+		$(CPP) -o $(BIN_DIR)/reward_upper_bound_dbg $(REWARD_UPPER_BOUND_DBG_OBJS) $(CPPFLAGS_DBG) $(LDFLAGS_DBG)
 
 clean:
 	    ${RM} -f $(BIN_DIR)/greedy_blind_agent* $(BIN_DIR)/greedy_visual_agent* $(BIN_DIR)/reward_upper_bound* $(LIBS)

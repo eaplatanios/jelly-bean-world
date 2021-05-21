@@ -88,7 +88,12 @@ bool init(diffusion<T>& model, T alpha, T lambda,
 		return false;
 	}
 	unsigned int cache_entry_size = ((radius * (radius + 1)) / 2);
-	for (unsigned int t = 0; t < max_time; t++) {
+	model.cache[0] = (T*) calloc(cache_entry_size, sizeof(T));
+	if (model.cache[0] == NULL) {
+		fprintf(stderr, "init ERROR: Insufficient memory for diffusion.cache[0].\n");
+		free(model.cache); return false;
+	}
+	for (unsigned int t = 1; t < max_time; t++) {
 		model.cache[t] = (T*) malloc(sizeof(T) * cache_entry_size);
 		if (model.cache[t] == NULL) {
 			fprintf(stderr, "init ERROR: Insufficient memory for diffusion.cache[%u].\n", t);
@@ -98,7 +103,6 @@ bool init(diffusion<T>& model, T alpha, T lambda,
 	}
 
 	/* run the simulation in the cache */
-	memset(model.cache[0], 0, cache_entry_size * sizeof(T));
 	model.cache[0][0] = (T) 1.0;
 	for (unsigned int t = 1; t < max_time; t++) {
 		/* decay the value from the previous time step */

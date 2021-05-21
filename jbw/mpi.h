@@ -1256,7 +1256,7 @@ inline bool receive_get_agent_states(
 	status response;
 	uint64_t* agent_ids = nullptr;
 	agent_state** agent_states = nullptr;
-	size_t agent_state_count;
+	size_t agent_state_count = 0;
 	bool success = true;
 	if (!read(agent_state_count, in)) {
 		response = status::SERVER_PARSE_MESSAGE_ERROR;

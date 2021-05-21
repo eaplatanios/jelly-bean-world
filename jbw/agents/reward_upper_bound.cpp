@@ -361,7 +361,7 @@ void compute_shortest_distances(
 		queue.erase(first);
 
 		/* check if we found a jellybean */
-		unsigned int goal_index = goals.index_of({state.x, state.y});
+		unsigned int goal_index = goals.index_of(position(state.x, state.y));
 		if (goal_index < goals.length) {
 			/* we found a jellybean */
 			shortest_distances[goal_index * (uint_fast8_t) direction::COUNT + (uint_fast8_t) state.dir] = state.cost;
@@ -377,7 +377,7 @@ void compute_shortest_distances(
 		move_forward(state.x, state.y, state.dir, max_x, max_y, new_x, new_y);
 		if (new_x != UINT_MAX && new_y != UINT_MAX) {
 			/* check if there is a wall in the new position */
-			if (!walls.contains({new_x, new_y})) {
+			if (!walls.contains(position(new_x, new_y))) {
 				/* there is no wall, so continue considering this movement */
 				unsigned int new_cost = state.cost + 1;
 				if (new_cost < smallest_costs[(new_x * (max_y + 1) + new_y) * (uint_fast8_t) direction::COUNT + (uint_fast8_t) new_dir]) {

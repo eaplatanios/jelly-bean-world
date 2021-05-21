@@ -102,37 +102,37 @@ bin:
 	mkdir -p $(BIN_DIR)
 
 diffusion_test: bin $(LIBS) $(DIFFUSION_TEST_OBJS)
-		$(CPP) -o $(BIN_DIR)/diffusion_test $(CPPFLAGS) $(LDFLAGS) $(DIFFUSION_TEST_OBJS)
+		$(CPP) -o $(BIN_DIR)/diffusion_test $(DIFFUSION_TEST_OBJS) $(CPPFLAGS) $(LDFLAGS)
 
 diffusion_test_dbg: bin $(LIBS) $(DIFFUSION_TEST_DBG_OBJS)
-		$(CPP) -o $(BIN_DIR)/diffusion_test_dbg $(CPPFLAGS_DBG) $(LDFLAGS_DBG) $(DIFFUSION_TEST_DBG_OBJS)
+		$(CPP) -o $(BIN_DIR)/diffusion_test_dbg $(DIFFUSION_TEST_DBG_OBJS) $(CPPFLAGS_DBG) $(LDFLAGS_DBG)
 
 map_test: bin $(LIBS) $(MAP_TEST_OBJS)
-		$(CPP) -o $(BIN_DIR)/map_test $(CPPFLAGS) $(LDFLAGS) $(MAP_TEST_OBJS)
+		$(CPP) -o $(BIN_DIR)/map_test $(MAP_TEST_OBJS) $(CPPFLAGS) $(LDFLAGS)
 
 map_test_dbg: bin $(LIBS) $(MAP_TEST_DBG_OBJS)
-		$(CPP) -o $(BIN_DIR)/map_test_dbg $(CPPFLAGS_DBG) $(LDFLAGS_DBG) $(MAP_TEST_DBG_OBJS)
+		$(CPP) -o $(BIN_DIR)/map_test_dbg $(MAP_TEST_DBG_OBJS) $(CPPFLAGS_DBG) $(LDFLAGS_DBG)
 
 network_test: bin $(LIBS) $(NETWORK_TEST_OBJS)
-		$(CPP) -o $(BIN_DIR)/network_test $(CPPFLAGS) $(LDFLAGS) $(NETWORK_TEST_OBJS)
+		$(CPP) -o $(BIN_DIR)/network_test $(NETWORK_TEST_OBJS) $(CPPFLAGS) $(LDFLAGS)
 
 network_test_dbg: bin $(LIBS) $(NETWORK_TEST_DBG_OBJS)
-		$(CPP) -o $(BIN_DIR)/network_test_dbg $(CPPFLAGS_DBG) $(LDFLAGS_DBG) $(NETWORK_TEST_DBG_OBJS)
+		$(CPP) -o $(BIN_DIR)/network_test_dbg $(NETWORK_TEST_DBG_OBJS) $(CPPFLAGS_DBG) $(LDFLAGS_DBG)
 
 $(BIN_DIR)/%.spv: %.spv
 	cp $< $@
 
 renderer_test: bin $(LIBS) $(RENDERER_TEST_OBJS) $(RENDERER_TEST_SHADERS:%=$(BIN_DIR)/%)
-		$(CPP) -o $(BIN_DIR)/renderer_test $(CPPFLAGS) $(LDFLAGS) $(RENDERER_TEST_OBJS) $(RENDERER_PKG_LIBS)
+		$(CPP) -o $(BIN_DIR)/renderer_test $(RENDERER_TEST_OBJS) $(RENDERER_PKG_LIBS) $(CPPFLAGS) $(LDFLAGS)
 
 renderer_test_dbg: bin $(LIBS) $(RENDERER_TEST_DBG_OBJS) $(RENDERER_TEST_SHADERS:%=$(BIN_DIR)/%)
-		$(CPP) -o $(BIN_DIR)/renderer_test_dbg $(CPPFLAGS_DBG) $(LDFLAGS_DBG) $(RENDERER_TEST_DBG_OBJS) $(RENDERER_PKG_LIBS)
+		$(CPP) -o $(BIN_DIR)/renderer_test_dbg $(RENDERER_TEST_DBG_OBJS) $(RENDERER_PKG_LIBS) $(CPPFLAGS_DBG) $(LDFLAGS_DBG)
 
 simulator_test: bin $(LIBS) $(SIMULATOR_TEST_OBJS)
-		$(CPP) -o $(BIN_DIR)/simulator_test $(CPPFLAGS) $(LDFLAGS) $(SIMULATOR_TEST_OBJS)
+		$(CPP) -o $(BIN_DIR)/simulator_test $(SIMULATOR_TEST_OBJS) $(CPPFLAGS) $(LDFLAGS)
 
 simulator_test_dbg: bin $(LIBS) $(SIMULATOR_TEST_DBG_OBJS)
-		$(CPP) -o $(BIN_DIR)/simulator_test_dbg $(CPPFLAGS_DBG) $(LDFLAGS_DBG) $(SIMULATOR_TEST_DBG_OBJS)
+		$(CPP) -o $(BIN_DIR)/simulator_test_dbg $(SIMULATOR_TEST_DBG_OBJS) $(CPPFLAGS_DBG) $(LDFLAGS_DBG)
 
 clean:
 	    ${RM} -f $(BIN_DIR)/diffusion_test* $(BIN_DIR)/map_test* $(BIN_DIR)/network_test* $(BIN_DIR)/renderer_test* $(BIN_DIR)/simulator_test* $(RENDERER_TEST_SHADERS:%=$(BIN_DIR)/%) $(LIBS)

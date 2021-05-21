@@ -87,7 +87,7 @@ jbw_visualizer: bin $(LIBS) $(JBW_VISUALIZER_OBJS) $(JBW_VISUALIZER_SHADERS:%=$(
 		$(CPP) -o $(BIN_DIR)/jbw_visualizer $(JBW_VISUALIZER_OBJS) $(CPPFLAGS) $(LDFLAGS)
 
 jbw_visualizer_dbg: bin $(LIBS) $(JBW_VISUALIZER_DBG_OBJS) $(JBW_VISUALIZER_SHADERS:%=$(BIN_DIR)/%)
-		$(CPP) -o $(BIN_DIR)/jbw_visualizer_dbg $(CPPFLAGS_DBG) $(LDFLAGS_DBG) $(JBW_VISUALIZER_DBG_OBJS)
+		$(CPP) -o $(BIN_DIR)/jbw_visualizer_dbg $(JBW_VISUALIZER_DBG_OBJS) $(CPPFLAGS_DBG) $(LDFLAGS_DBG)
 
 clean:
 	    ${RM} -f $(BIN_DIR)/jbw_visualizer* $(JBW_VISUALIZER_SHADERS:%=$(BIN_DIR)/%) $(LIBS)
