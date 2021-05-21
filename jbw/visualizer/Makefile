@@ -84,7 +84,7 @@ $(BIN_DIR)/%.spv: %.spv
 	cp $< $@
 
 jbw_visualizer: bin $(LIBS) $(JBW_VISUALIZER_OBJS) $(JBW_VISUALIZER_SHADERS:%=$(BIN_DIR)/%)
-		$(CPP) -o $(BIN_DIR)/jbw_visualizer $(CPPFLAGS) $(LDFLAGS) $(JBW_VISUALIZER_OBJS)
+		$(CPP) -o $(BIN_DIR)/jbw_visualizer $(JBW_VISUALIZER_OBJS) $(CPPFLAGS) $(LDFLAGS)
 
 jbw_visualizer_dbg: bin $(LIBS) $(JBW_VISUALIZER_DBG_OBJS) $(JBW_VISUALIZER_SHADERS:%=$(BIN_DIR)/%)
 		$(CPP) -o $(BIN_DIR)/jbw_visualizer_dbg $(CPPFLAGS_DBG) $(LDFLAGS_DBG) $(JBW_VISUALIZER_DBG_OBJS)
