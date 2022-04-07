@@ -61,23 +61,13 @@ struct py_simulator_data
     py_simulator_data(PyObject* callback) :
         callback(callback), agent_ids(16), semaphore_ids(4)
     {
-        Py_INCREF(callback);
         server.status = server_status::STOPPING;
     }
 
-    ~py_simulator_data() { free_helper(); }
-
     static inline void free(py_simulator_data& data) {
-        data.free_helper();
         core::free(data.agent_ids);
         core::free(data.semaphore_ids);
         core::free(data.server);
-    }
-
-private:
-    inline void free_helper() {
-        if (callback != NULL)
-            Py_DECREF(callback);
     }
 };
 
@@ -107,7 +97,6 @@ inline bool init(py_simulator_data& data, const py_simulator_data& src)
         return false;
     }
     data.callback = src.callback;
-    Py_INCREF(data.callback);
     data.server.status = server_status::STOPPING;
     return true;
 }
@@ -152,10 +141,6 @@ struct py_client_data {
     PyObject* lost_connection_callback;
 
     static inline void free(py_client_data& data) {
-        if (data.step_callback != NULL)
-            Py_DECREF(data.step_callback);
-        if (data.lost_connection_callback != NULL)
-            Py_DECREF(data.lost_connection_callback);
         data.lock.~mutex();
         data.cv.~condition_variable();
     }
@@ -226,29 +211,25 @@ static inline bool build_py_agent(
         PyArrayObject*& py_vision,
         PyArrayObject*& py_items)
 {
-    /* first copy all arrays in 'agent' */
-    int64_t* positions = (int64_t*) malloc(sizeof(int64_t) * 2);
-    if (positions == NULL) {
-        PyErr_NoMemory();
-        return false;
-    }
-    float* scent = (float*) malloc(sizeof(float) * config.scent_dimension);
-    if (scent == NULL) {
-        PyErr_NoMemory(); free(positions);
-        return false;
-    }
-    unsigned int vision_size = (2*config.vision_range + 1) * (2*config.vision_range + 1) * config.color_dimension;
-    float* vision = (float*) malloc(sizeof(float) * vision_size);
-    if (vision == NULL) {
-        PyErr_NoMemory(); free(positions); free(scent);
-        return false;
-    }
-    uint64_t* items = (uint64_t*) malloc(sizeof(uint64_t) * config.item_types.length);
-    if (items == NULL) {
-        PyErr_NoMemory(); free(positions); free(scent); free(vision);
-        return false;
-    }
+    npy_intp pos_dim[] = {2};
+    npy_intp scent_dim[] = {(npy_intp) config.scent_dimension};
+    npy_intp vision_dim[] = {
+            2 * (npy_intp) config.vision_range + 1,
+            2 * (npy_intp) config.vision_range + 1,
+            (npy_intp) config.color_dimension};
+    npy_intp items_dim[] = {(npy_intp) config.item_types.length};
+    py_position = (PyArrayObject*) PyArray_SimpleNew(1, pos_dim, NPY_INT64);
+    py_direction = PyLong_FromSize_t((size_t) agent.current_direction);
+    py_scent = (PyArrayObject*) PyArray_SimpleNew(1, scent_dim, NPY_FLOAT);
+    py_vision = (PyArrayObject*) PyArray_SimpleNew(3, vision_dim, NPY_FLOAT);
+    py_items = (PyArrayObject*) PyArray_SimpleNew(1, items_dim, NPY_UINT64);
 
+    int64_t* positions = (int64_t*) PyArray_DATA(py_position);
+    float* scent = (float*) PyArray_DATA(py_scent);
+    float* vision = (float*) PyArray_DATA(py_vision);
+    float* items = (float*) PyArray_DATA(py_items);
+
+    unsigned int vision_size = (2*config.vision_range + 1) * (2*config.vision_range + 1) * config.color_dimension;
     positions[0] = agent.current_position.x;
     positions[1] = agent.current_position.y;
     for (unsigned int i = 0; i < config.scent_dimension; i++)
@@ -257,23 +238,6 @@ static inline bool build_py_agent(
         vision[i] = agent.current_vision[i];
     for (unsigned int i = 0; i < config.item_types.length; i++)
         items[i] = agent.collected_items[i];
-
-    npy_intp pos_dim[] = {2};
-    npy_intp scent_dim[] = {(npy_intp) config.scent_dimension};
-    npy_intp vision_dim[] = {
-            2 * (npy_intp) config.vision_range + 1,
-            2 * (npy_intp) config.vision_range + 1,
-            (npy_intp) config.color_dimension};
-    npy_intp items_dim[] = {(npy_intp) config.item_types.length};
-    py_position = (PyArrayObject*) PyArray_SimpleNewFromData(1, pos_dim, NPY_INT64, positions);
-    py_direction = PyLong_FromSize_t((size_t) agent.current_direction);
-    py_scent = (PyArrayObject*) PyArray_SimpleNewFromData(1, scent_dim, NPY_FLOAT, scent);
-    py_vision = (PyArrayObject*) PyArray_SimpleNewFromData(3, vision_dim, NPY_FLOAT, vision);
-    py_items = (PyArrayObject*) PyArray_SimpleNewFromData(1, items_dim, NPY_UINT64, items);
-    PyArray_ENABLEFLAGS(py_position, NPY_ARRAY_OWNDATA);
-    PyArray_ENABLEFLAGS(py_scent, NPY_ARRAY_OWNDATA);
-    PyArray_ENABLEFLAGS(py_vision, NPY_ARRAY_OWNDATA);
-    PyArray_ENABLEFLAGS(py_items, NPY_ARRAY_OWNDATA);
     return true;
 }
 
@@ -340,7 +304,7 @@ void on_step(simulator<py_simulator_data>* sim,
 
     /* call python callback */
     PyObject* args = Py_BuildValue("(O)", py_states);
-    PyObject* result = PyEval_CallObject(data.callback, args);
+    PyObject* result = PyObject_CallObject(data.callback, args);
     Py_DECREF(args);
     Py_DECREF(py_states);
     if (result != NULL)
@@ -750,7 +714,7 @@ void on_step(client<py_client_data>& c,
 
     /* invoke python callback */
     PyObject* args = Py_BuildValue("(O)", py_states);
-    PyObject* result = PyEval_CallObject(c.data.step_callback, args);
+    PyObject* result = PyObject_CallObject(c.data.step_callback, args);
     Py_DECREF(args);
     Py_DECREF(py_states);
     if (result != NULL)
@@ -771,7 +735,7 @@ void on_lost_connection(client<py_client_data>& c) {
     PyGILState_STATE gstate;
     gstate = PyGILState_Ensure();
     PyObject* args = Py_BuildValue("()");
-    PyObject* result = PyEval_CallObject(c.data.lost_connection_callback, args);
+    PyObject* result = PyObject_CallObject(c.data.lost_connection_callback, args);
     Py_DECREF(args);
     if (result != NULL)
         Py_DECREF(result);
@@ -1297,8 +1261,6 @@ static PyObject* simulator_connect_client(PyObject *self, PyObject *args)
 
     new_client->data.step_callback = py_step_callback;
     new_client->data.lost_connection_callback = py_lost_connection_callback;
-    Py_INCREF(py_step_callback);
-    Py_INCREF(py_lost_connection_callback);
     import_errors();
     PyObject* py_new_client = PyLong_FromVoidPtr(new_client);
     PyObject* to_return = Py_BuildValue("(KOK)", simulator_time, py_new_client, client_id);
@@ -1381,8 +1343,6 @@ static PyObject* simulator_reconnect_client(PyObject *self, PyObject *args)
 
     new_client->data.step_callback = py_step_callback;
     new_client->data.lost_connection_callback = py_lost_connection_callback;
-    Py_INCREF(py_step_callback);
-    Py_INCREF(py_lost_connection_callback);
     import_errors();
     PyObject* py_new_client = PyLong_FromVoidPtr(new_client);
     PyObject* to_return = Py_BuildValue("(KOOO)", simulator_time, py_new_client, py_states, py_semaphore_ids);

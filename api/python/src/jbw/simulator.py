@@ -209,7 +209,10 @@ class Simulator(object):
     else:
       self._on_step = on_step_callback
     if on_lost_connection_callback == None:
-      on_lost_connection_callback = lambda *args: None
+      self._on_lost_connection_callback = lambda *args: None
+    else:
+      self._on_lost_connection_callback = on_lost_connection_callback
+    self._callback_ref = self._step_callback
 
     if save_filepath != None:
       # make the save directory if it doesn't exist
@@ -240,7 +243,7 @@ class Simulator(object):
         sim_config.color_num_dims, sim_config.vision_range, sim_config.patch_size, sim_config.mcmc_num_iter,
         [(i.name, i.scent, i.color, i.required_item_counts, i.required_item_costs, i.blocks_movement, i.visual_occlusion, i.intensity_fn, i.intensity_fn_args, i.interaction_fns) for i in sim_config.items],
         sim_config.agent_color, sim_config.collision_policy.value, sim_config.agent_field_of_view,
-        sim_config.decay_param, sim_config.diffusion_param, sim_config.deleted_item_lifetime, self._step_callback)
+        sim_config.decay_param, sim_config.diffusion_param, sim_config.deleted_item_lifetime, self._callback_ref)
       if is_server:
         self._server_handle = simulator_c.start_server(
           self._handle, port, conn_queue_capacity, num_workers, default_client_permissions)
@@ -251,11 +254,11 @@ class Simulator(object):
         self._load_agents(load_filepath, load_time)
       if self._client_id == 0:
         (self._time, self._client_handle, self._client_id) = simulator_c.connect_client(
-            server_address, port, self._step_callback, on_lost_connection_callback)
+            server_address, port, self._callback_ref, self._on_lost_connection_callback)
       else:
         # connect to a remote server
         (self._time, self._client_handle, agent_states) = simulator_c.reconnect_client(
-            server_address, port, self._step_callback, on_lost_connection_callback, self._client_id)
+            server_address, port, self._callback_ref, self._on_lost_connection_callback, self._client_id)
         for i in range(len(agent_ids)):
           (position, direction, scent, vision, items, id) = agent_states[i]
           agent = agent_values[i]
@@ -265,7 +268,7 @@ class Simulator(object):
       if load_filepath == None:
         raise ValueError('"load_filepath" must be non-None if "sim_config" and "server_address" are None.')
       self._load_agents(load_filepath, load_time)
-      (self._time, self._handle, agent_states) = simulator_c.load(load_filepath + str(load_time), self._step_callback)
+      (self._time, self._handle, agent_states) = simulator_c.load(load_filepath + str(load_time), self._callback_ref)
       for agent_state in agent_states:
         (position, direction, scent, vision, items, id) = agent_state
         agent = self.agents[id]
