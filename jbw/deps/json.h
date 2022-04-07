@@ -121,9 +121,8 @@ bool emit_escape(Stream& in, array<char>& token, int& next, position& current) {
 }
 
 template<typename Stream, typename Reader>
-bool json_parse(Stream& in, Reader& reader)
+bool json_parse(Stream& in, Reader& reader, position& current)
 {
-	position current = position(1, 1);
 	array<char> token = array<char>(1024);
 	json_state state = JSON_VALUE;
 
@@ -231,7 +230,7 @@ bool json_parse(Stream& in, Reader& reader)
 				}
 			} else if (next == ']') {
 				if (contexts.length == 0 || contexts.last() != JSON_CONTEXT_LIST) {
-					read_error("Unexpected closing brace '}'", current);
+					read_error("Unexpected closing brace ']'", current);
 					return false;
 				}
 				end_list(current, reader);
@@ -298,8 +297,8 @@ bool json_parse(Stream& in, Reader& reader)
 			} else if (next == ']') {
 				emit_keyword(token, current, reader);
 				token.clear();
-				if (contexts.length == 0 || contexts.last() != JSON_CONTEXT_VALUE) {
-					read_error("Unexpected comma ','", current);
+				if (contexts.length == 0 || contexts.last() != JSON_CONTEXT_LIST) {
+					read_error("Unexpected closing brace ']'", current);
 					return false;
 				}
 				end_list(current, reader);
@@ -353,8 +352,8 @@ bool json_parse(Stream& in, Reader& reader)
 			} else if (next == ']') {
 				emit_number(token, current, reader);
 				token.clear();
-				if (contexts.length == 0 || contexts.last() != JSON_CONTEXT_VALUE) {
-					read_error("Unexpected comma ','", current);
+				if (contexts.length == 0 || contexts.last() != JSON_CONTEXT_LIST) {
+					read_error("Unexpected closing brace ']'", current);
 					return false;
 				}
 				end_list(current, reader);
