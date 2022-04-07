@@ -1742,9 +1742,10 @@ private:
 		bool render_visual_field = render_agent_visual_field;
 		bool render_path = render_agent_path;
 		unsigned int render_path_length = 0;
-		if (track_agent_id != 0) {
+		uint64_t tracked_agent = track_agent_id;
+		if (tracked_agent != 0) {
 			agent_state* agent;
-			sim.get_agent_states(&agent, &track_agent_id, 1);
+			sim.get_agent_states(&agent, &tracked_agent, 1);
 			if (agent != nullptr) {
 				agent_position = agent->current_position;
 				agent_direction = agent->current_direction;
@@ -1755,7 +1756,7 @@ private:
 					agent_visual_field = (float*) malloc(visual_field_size);
 					memcpy(agent_visual_field, agent->current_vision, visual_field_size);
 				}
-				float new_target_position[] = {agent->current_position.x + 0.5f, agent->current_position.y + 0.5f};
+				float new_target_position[] = {agent_position.x + 0.5f, agent_position.y + 0.5f};
 #if defined(RECORD)
 				record_collected_items(agent->collected_items, sim.get_config().item_types.length);
 #endif
@@ -1763,10 +1764,14 @@ private:
 
 				if (render_path) {
 					agent_path_lock.lock();
-					add_to_agent_path(agent_position);
-					agent_position_recorded = true;
-					render_path_length = agent_path.length;
-					agent_path_cv.notify_one();
+					/* the tracked agent may have changed between now and when
+					   we sent the get_agent_states request */
+					if (tracked_agent == track_agent_id) {
+						add_to_agent_path(agent_position);
+						agent_position_recorded = true;
+						render_path_length = agent_path.length;
+						agent_path_cv.notify_one();
+					}
 					agent_path_lock.unlock();
 				}
 
@@ -1784,7 +1789,7 @@ private:
 					tracking_animating = true;
 				}
 			} else {
-				fprintf(stderr, "Agent with ID %" PRIu64 " does not exist in the simulation.\n", track_agent_id);
+				fprintf(stderr, "Agent with ID %" PRIu64 " does not exist in the simulation.\n", tracked_agent);
 				track_agent(0);
 			}
 		} else {
@@ -1917,14 +1922,18 @@ private:
 
 				if (response.get_map_render_agent_path) {
 					agent_path_lock.lock();
-					add_to_agent_path(agent_position);
-					agent_position_recorded = true;
-					render_path_length = agent_path.length;
-					agent_path_cv.notify_one();
+					/* the tracked agent may have changed between now and when
+					   we sent the get_agent_states request */
+					if (response.track_agent_id == track_agent_id) {
+						add_to_agent_path(agent_position);
+						agent_position_recorded = true;
+						render_path_length = agent_path.length;
+						agent_path_cv.notify_one();
+					}
 					agent_path_lock.unlock();
 				}
 
-				float new_target_position[] = {response.agent_states[0].current_position.x + 0.5f, response.agent_states[0].current_position.y + 0.5f};
+				float new_target_position[] = {agent_position.x + 0.5f, agent_position.y + 0.5f};
 
 				if (new_target_position[0] != translate_end_position[0] || new_target_position[1] != translate_end_position[1]) {
 					float animation_t = max(0.0f, min(1.0f, (jbw::milliseconds() - translate_animation_start_time) / 300.0f));
