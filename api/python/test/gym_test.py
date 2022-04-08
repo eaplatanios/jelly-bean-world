@@ -18,9 +18,10 @@ import jbw
 import gym
 
 env = gym.make('JBW-render-v0')
+env.reset()
 
 for t in range(10000):
-  env.render()
+  env.render(mode='matplotlib')
   action = env.action_space.sample()
   print(action)
   observation, reward, _, _ = env.step(action)

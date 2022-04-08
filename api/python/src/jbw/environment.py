@@ -66,6 +66,7 @@ else:
       # Use 'JBW-render-v0' to include rendering support.
       # Otherwise, use 'JBW-v0', which should be much faster.
       env = gym.make('JBW-render-v0')
+      env.reset()
 
       # The created environment can then be used as any other 
       # OpenAI gym environment. For example:
@@ -116,10 +117,10 @@ else:
 
         min_float = np.finfo(np.float32).min
         max_float = np.finfo(np.float32).max
-        min_scent = min_float * np.ones(scent_shape)
-        max_scent = max_float * np.ones(scent_shape)
-        min_vision = min_float * np.ones(vision_shape)
-        max_vision = max_float * np.ones(vision_shape)
+        min_scent = min_float * np.ones(scent_shape, dtype=np.float32)
+        max_scent = max_float * np.ones(scent_shape, dtype=np.float32)
+        min_vision = min_float * np.ones(vision_shape, dtype=np.float32)
+        max_vision = max_float * np.ones(vision_shape, dtype=np.float32)
 
         # Observations in this environment consist of a scent 
         # vector, a vision matrix, and a binary value 
@@ -129,12 +130,13 @@ else:
           'scent': spaces.Box(low=min_scent, high=max_scent), 
           'vision': spaces.Box(low=min_vision, high=max_vision),
           'moved': spaces.Discrete(2)})
+        self.observation_space.seed(sim_config.seed)
 
         # There are three possible actions:
         #   1. Move forward,
         #   2. Turn left,
         #   3. Turn right.
-        self.action_space = spaces.Discrete(3)
+        self.action_space = spaces.Discrete(3, seed=sim_config.seed)
 
       def step(self, action):
         """Runs a simulation step.
@@ -187,11 +189,11 @@ else:
         if self._render:
           del self._painter
           self._painter = MapVisualizer(
-            self._sim, self.sim_config, 
+            self._sim, self.sim_config,
             bottom_left=(-70, -70), top_right=(70, 70))
         self.state = {
-          'scent': self._agent.scent(), 
-          'vision': self._agent.vision(), 
+          'scent': self._agent.scent(),
+          'vision': self._agent.vision(),
           'moved': False}
         return self.state
 
@@ -214,7 +216,7 @@ else:
         else:
           logger.warn(
             'Invalid rendering mode "%s". '
-            'Only "matplotlib" is supported.')
+            'Only "matplotlib" is supported.' % mode)
 
       def close(self):
         """Deletes the underlying simulator and deallocates 
@@ -225,6 +227,8 @@ else:
 
       def seed(self, seed=None):
         self.sim_config.seed = seed
+        self.action_space.seed(seed)
+        self.observation_space.seed(seed)
         self.reset()
         return
 
