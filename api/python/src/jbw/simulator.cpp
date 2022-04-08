@@ -227,7 +227,7 @@ static inline bool build_py_agent(
     int64_t* positions = (int64_t*) PyArray_DATA(py_position);
     float* scent = (float*) PyArray_DATA(py_scent);
     float* vision = (float*) PyArray_DATA(py_vision);
-    float* items = (float*) PyArray_DATA(py_items);
+    uint64_t* items = (uint64_t*) PyArray_DATA(py_items);
 
     unsigned int vision_size = (2*config.vision_range + 1) * (2*config.vision_range + 1) * config.color_dimension;
     positions[0] = agent.current_position.x;
