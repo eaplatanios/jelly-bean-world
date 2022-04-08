@@ -1765,7 +1765,7 @@ private:
 				if (render_path) {
 					agent_path_lock.lock();
 					/* the tracked agent may have changed between now and when
-					   we sent the get_agent_states request */
+					   `get_agent_states` was called */
 					if (tracked_agent == track_agent_id) {
 						add_to_agent_path(agent_position);
 						agent_position_recorded = true;
