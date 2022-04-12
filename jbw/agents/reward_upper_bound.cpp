@@ -29,7 +29,7 @@ struct fixed_length_shortest_path_state
 	unsigned int length;
 
 	struct less_than {
-		inline bool operator () (const fixed_length_shortest_path_state left, const fixed_length_shortest_path_state right) {
+		inline bool operator () (const fixed_length_shortest_path_state left, const fixed_length_shortest_path_state right) const {
 			return left.distance < right.distance;
 		}
 	};
@@ -132,7 +132,7 @@ struct optimal_path_state
 	}
 
 	struct less_than {
-		inline bool operator () (const optimal_path_state* left, const optimal_path_state* right) {
+		inline bool operator () (const optimal_path_state* left, const optimal_path_state* right) const {
 			return left->priority < right->priority;
 		}
 	};
@@ -285,7 +285,7 @@ struct shortest_path_state
 	direction dir;
 
 	struct less_than {
-		inline bool operator () (const shortest_path_state left, const shortest_path_state right) {
+		inline bool operator () (const shortest_path_state left, const shortest_path_state right) const {
 			return left.cost < right.cost;
 		}
 	};

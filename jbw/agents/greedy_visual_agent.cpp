@@ -65,7 +65,7 @@ struct shortest_path_state
 	}
 
 	struct less_than {
-		inline bool operator () (const shortest_path_state* left, const shortest_path_state* right) {
+		inline bool operator () (const shortest_path_state* left, const shortest_path_state* right) const {
 			return left->cost < right->cost;
 		}
 	};
