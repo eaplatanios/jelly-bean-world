@@ -45,8 +45,8 @@ class ActionPolicy(Enum):
      action is ignored, then the agent will perform a no-op for that time step."""
 
   ALLOWED = 0
-  DISALLOWED = 0
-  IGNORED = 0
+  DISALLOWED = 1
+  IGNORED = 2
 
 class SimulatorConfig(object):
   """Represents a configuration for a simulator."""
