@@ -17,6 +17,7 @@
 #ifndef ENERGY_FUNCTIONS_H_
 #define ENERGY_FUNCTIONS_H_
 
+#include <math.h>
 #include "position.h"
 
 namespace jbw {
