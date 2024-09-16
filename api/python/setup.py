@@ -58,5 +58,6 @@ setup(
     ext_modules=[simulator_c],
     packages=['jbw'],
     package_dir={'': 'src'},
-    install_requires=['enum34', 'numpy'],
+    setup_requires=['numpy'],
+    install_requires=['enum34'],
     cmdclass={'build_ext': build_ext_subclass})
