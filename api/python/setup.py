@@ -12,9 +12,10 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-from setuptools import setup, Extension, build_ext
-
+from setuptools import setup, Extension
+from setuptools.command.build_ext import build_ext
 import numpy as np
+
 from os import environ
 
 extra_compile_args = {
