@@ -135,6 +135,7 @@ With Pip, simply run:
 ```bash
 pip install 'git+ssh://git@github.com/eaplatanios/jelly-bean-world#subdirectory=api/python'
 ```
+(thanks to [Chris Chow](https://github.com/ckchow) for adding support for this)
 
 ### Installing from Source
 
