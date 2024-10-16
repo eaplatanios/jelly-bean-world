@@ -24,6 +24,8 @@ This file is split in multiple sections:
     as detailed in our [paper](https://arxiv.org/abs/2002.06306).
   - [Using Python:](#using-python) Describes how to setup
     and use our Python API.
+    - [Installing with Pip:](#installing-with-pip) How to install
+      using Pip.
   - [Using C++:](#using-c) Describes how to setup and use
     our C++ API, and how to run the greedy agent as
     detailed in our [paper](https://arxiv.org/abs/2002.06306).
@@ -127,7 +129,14 @@ presented in our [paper](https://arxiv.org/abs/2002.06306).
 
 ## Using Python
 
-### Installation Instructions
+### Installing with Pip
+
+With Pip, simply run:
+```bash
+pip install 'git+ssh://git@github.com/eaplatanios/jelly-bean-world#subdirectory=api/python'
+```
+
+### Installing from Source
 
 Assuming that you have Python installed in your system and
 that you are located in the root directory of this
